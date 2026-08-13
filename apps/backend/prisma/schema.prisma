@@ -1,0 +1,215 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 用户表 ====================
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // bcrypt hashed
+  nickname  String?
+  avatar    String?
+  role      UserRole @default(USER)
+  status    UserStatus @default(ACTIVE)
+  
+  // 关联钱包
+  wallet    Wallet?
+  
+  // 聊天会话
+  chatSessions ChatSession[]
+  
+  // 生图记录
+  imageGenerations ImageGeneration[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+// ==================== 钱包/账本 ====================
+model Wallet {
+  id      String @id @default(cuid())
+  userId  String @unique
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  balance Decimal @default(0) @db.Decimal(10, 2) // 余额（元）
+  
+  transactions WalletTransaction[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id       String @id @default(cuid())
+  walletId String
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  
+  type     TransactionType
+  amount   Decimal @db.Decimal(10, 2)
+  balance  Decimal @db.Decimal(10, 2) // 交易后余额
+  reason   String // 交易原因描述
+  metadata Json? // 额外元数据
+  
+  createdAt DateTime @default(now())
+  
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+enum TransactionType {
+  RECHARGE      // 充值
+  CONSUME       // 消费
+  REFUND        // 退款
+  ADMIN_ADJUST  // 管理员调整
+}
+
+// ==================== 聊天会话 ====================
+model ChatSession {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title  String @default("新对话")
+  
+  messages ChatMessage[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  role      MessageRole
+  content   String      @db.Text
+  
+  // 计费信息
+  tokens    Int?        // 消耗的 token 数
+  cost      Decimal?    @db.Decimal(10, 4) // 本条消息的成本（元）
+  
+  createdAt DateTime @default(now())
+  
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ==================== 生图记录 ====================
+model ImageGeneration {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  prompt       String @db.Text
+  negativePrompt String? @db.Text
+  model        String // 使用的模型名称
+  provider     String // 供应商（openai, stability 等）
+  
+  status       ImageStatus @default(PENDING)
+  
+  // 生成参数
+  width        Int?
+  height       Int?
+  steps        Int?
+  cfgScale     Float?
+  seed         Int?
+  parameters   Json? // 其他参数
+  
+  // 结果
+  imageUrl     String?
+  imageKey     String? // MinIO 存储 key
+  
+  // 计费
+  cost         Decimal? @db.Decimal(10, 4)
+  
+  // 错误信息
+  errorMessage String? @db.Text
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("image_generations")
+}
+
+enum ImageStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+// ==================== 上游供应商配置 ====================
+model Provider {
+  id   String @id @default(cuid())
+  name String @unique // openai, anthropic, stability 等
+  
+  config Json // API key, base URL 等配置
+  
+  isActive Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("providers")
+}
+
+// ==================== 审计日志 ====================
+model AuditLog {
+  id String @id @default(cuid())
+  
+  userId    String?
+  action    String // 操作类型
+  resource  String // 资源类型
+  details   Json? // 操作详情
+  ipAddress String?
+  userAgent String?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
