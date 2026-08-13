@@ -77,6 +77,29 @@ export interface WalletTransactionDto {
   createdAt: string;
 }
 
+export interface GetBalanceResponse {
+  balance: number;
+  walletId: string;
+}
+
+export interface TransactionItem {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  balance: number;
+  reason: string;
+  createdAt: string;
+  metadata?: any;
+}
+
+export interface GetTransactionsResponse {
+  items: TransactionItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 // ==================== 聊天相关 DTO ====================
 export interface ChatSessionDto {
   id: string;

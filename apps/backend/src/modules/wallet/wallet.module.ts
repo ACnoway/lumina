@@ -1,5 +1,13 @@
 import { Module } from '@nestjs/common';
+import { WalletService } from './wallet.service';
+import { WalletController } from './wallet.controller';
+import { PrismaModule } from '../../prisma/prisma.module';
+import { RedisModule } from '../../redis/redis.module';
 
-// TODO: 钱包/账本模块 — 预扣-结算-退回 + 幂等键
-@Module({})
+@Module({
+  imports: [PrismaModule, RedisModule],
+  controllers: [WalletController],
+  providers: [WalletService],
+  exports: [WalletService],
+})
 export class WalletModule {}
