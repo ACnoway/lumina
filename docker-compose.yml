@@ -3,26 +3,26 @@ version: '3.9'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: ailou-postgres
+    container_name: lumina-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ailou}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ailou_password}
-      POSTGRES_DB: ${POSTGRES_DB:-ailou}
+      POSTGRES_USER: ${POSTGRES_USER:-lumina}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lumina_password}
+      POSTGRES_DB: ${POSTGRES_DB:-lumina}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ailou}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-lumina}']
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: ailou-redis
+    container_name: lumina-redis
     restart: unless-stopped
     command: >
       redis-server
@@ -40,12 +40,12 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: ailou-minio
+    container_name: lumina-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ailou_minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ailou_minio_secret}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-lumina_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-lumina_minio_secret}
     ports:
       - '9000:9000'  # API 端口
       - '9001:9001'  # Console 端口
@@ -67,4 +67,4 @@ volumes:
 
 networks:
   default:
-    name: ailou-network
+    name: lumina-network

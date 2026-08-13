@@ -22,7 +22,7 @@ export function middleware(request: NextRequest) {
   // 从 cookie 或 localStorage 检查 token
   // 注意: middleware 运行在服务端，无法访问 localStorage
   // 这里通过检查 cookie 中的 token 来判断
-  const token = request.cookies.get('ailou_token')?.value;
+  const token = request.cookies.get('lumina_token')?.value;
 
   // 如果没有 cookie token，检查 header 中的 Authorization
   // 最终方案: 前端登录时将 token 也写入 cookie

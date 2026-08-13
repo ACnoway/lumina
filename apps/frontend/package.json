@@ -2,7 +2,7 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "Ailou Frontend - Next.js",
+  "description": "Lumina Frontend - Next.js",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
@@ -14,7 +14,7 @@
     "next": "^14.2.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@ailou/shared": "workspace:*"
+    "@lumina/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.11.25",

@@ -17,7 +17,7 @@ importers:
 
   apps/backend:
     dependencies:
-      '@ailou/shared':
+      '@lumina/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@nestjs/common':
@@ -156,7 +156,7 @@ importers:
 
   apps/frontend:
     dependencies:
-      '@ailou/shared':
+      '@lumina/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       next:

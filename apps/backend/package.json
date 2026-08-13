@@ -2,7 +2,7 @@
   "name": "backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Ailou Backend - NestJS API",
+  "description": "Lumina Backend - NestJS API",
   "scripts": {
     "build": "nest build",
     "start": "nest start",
@@ -40,7 +40,7 @@
     "nodemailer": "^6.9.11",
     "rxjs": "^7.8.1",
     "reflect-metadata": "^0.2.1",
-    "@ailou/shared": "workspace:*"
+    "@lumina/shared": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.2",

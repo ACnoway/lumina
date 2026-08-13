@@ -12,7 +12,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { User } from '@prisma/client';
-import { SendCodeDto, LoginDto, LoginResponse, UserInfo } from '@ailou/shared';
+import { SendCodeDto, LoginDto, LoginResponse, UserInfo } from '@lumina/shared';
 
 @Controller('auth')
 export class AuthController {

@@ -23,7 +23,7 @@ async function bootstrap() {
 
   // Swagger 文档配置
   const config = new DocumentBuilder()
-    .setTitle('Ailou API')
+    .setTitle('Lumina API')
     .setDescription('AI聊天生图平台 API 文档')
     .setVersion('0.1.0')
     .addBearerAuth()

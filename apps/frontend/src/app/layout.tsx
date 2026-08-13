@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Ailou - AI 聊天生图平台',
+  title: 'Lumina - AI 聊天生图平台',
   description: '开箱即用的 AI 聊天与 AI 生图',
 };
 

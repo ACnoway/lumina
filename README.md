@@ -1,11 +1,11 @@
-# Ailou - AI 聊天生图平台
+# Lumina - AI 聊天生图平台
 
 > V1：用户端开箱即用的 AI 聊天 + AI 生图，管理端做稳做对。
 
 ## 项目结构
 
 ```
-ailou/
+lumina/
 ├── apps/
 │   ├── backend/          # NestJS 后端 API（端口 3001）
 │   └── frontend/         # Next.js 前端（端口 3000）

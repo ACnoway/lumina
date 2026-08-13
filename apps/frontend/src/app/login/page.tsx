@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { saveAuth } from '@/lib/auth';
-import type { LoginResponse } from '@ailou/shared';
+import type { LoginResponse } from '@lumina/shared';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -88,7 +88,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="w-full max-w-md space-y-6 rounded-2xl bg-white p-8 shadow-lg">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Ailou</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Lumina</h1>
           <p className="mt-1 text-sm text-gray-500">AI 聊天生图平台</p>
         </div>
 

@@ -2,11 +2,11 @@
  * 认证状态管理 - 前端 JWT token 管理
  */
 
-import { LoginResponse, UserInfo, GetCurrentUserResponse } from '@ailou/shared';
+import { LoginResponse, UserInfo, GetCurrentUserResponse } from '@lumina/shared';
 
-const TOKEN_KEY = 'ailou_token';
-const USER_KEY = 'ailou_user';
-const COOKIE_KEY = 'ailou_token';
+const TOKEN_KEY = 'lumina_token';
+const USER_KEY = 'lumina_user';
+const COOKIE_KEY = 'lumina_token';
 
 /**
  * 获取存储的 token

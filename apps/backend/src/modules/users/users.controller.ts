@@ -3,7 +3,7 @@ import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
-import { GetCurrentUserResponse } from '@ailou/shared';
+import { GetCurrentUserResponse } from '@lumina/shared';
 
 @Controller('users')
 export class UsersController {

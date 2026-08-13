@@ -1,8 +1,8 @@
 {
-  "name": "@ailou/shared",
+  "name": "@lumina/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "Ailou 共享类型与常量",
+  "description": "Lumina 共享类型与常量",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

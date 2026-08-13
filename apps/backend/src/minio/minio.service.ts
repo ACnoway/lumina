@@ -15,7 +15,7 @@ export class MinioService implements OnModuleInit {
     const useSSL = this.configService.get<boolean>('MINIO_USE_SSL', false);
     const accessKey = this.configService.get<string>('MINIO_ACCESS_KEY')!;
     const secretKey = this.configService.get<string>('MINIO_SECRET_KEY')!;
-    this.bucketName = this.configService.get<string>('MINIO_BUCKET', 'ailou-images');
+    this.bucketName = this.configService.get<string>('MINIO_BUCKET', 'lumina-images');
 
     this.client = new Minio.Client({
       endPoint: endpoint,
