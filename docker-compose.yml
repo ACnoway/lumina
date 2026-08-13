@@ -1,4 +1,5 @@
-version: '3.9'
+# Production: 全部容器化，仅暴露前端端口
+# 用法：cp .env.example .env && docker-compose up -d --build
 
 services:
   postgres:
@@ -10,8 +11,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lumina_password}
       POSTGRES_DB: ${POSTGRES_DB:-lumina}
       PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,17 +18,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - lumina
 
   redis:
     image: redis:7-alpine
     container_name: lumina-redis
     restart: unless-stopped
-    command: >
-      redis-server
-      --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-}
-    ports:
-      - '6379:6379'
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     healthcheck:
@@ -37,6 +33,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - lumina
 
   minio:
     image: minio/minio:latest
@@ -46,25 +44,72 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-lumina_minio}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-lumina_minio_secret}
-    ports:
-      - '9000:9000'  # API 端口
-      - '9001:9001'  # Console 端口
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    # ports:
+    #   - '9001:9001'  # 如需 MinIO Console，取消注释
+    networks:
+      - lumina
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: lumina-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lumina}:${POSTGRES_PASSWORD:-lumina_password}@postgres:5432/${POSTGRES_DB:-lumina}?schema=public
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: 'false'
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-lumina_minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-lumina_minio_secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-lumina-images}
+      JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-"Lumina <noreply@example.com>"}
+      INITIAL_BALANCE: ${INITIAL_BALANCE:-10.00}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      BACKEND_PORT: 3001
+    # ports:
+    #   - '3001:3001'  # 如需直接访问 API / Swagger，取消注释
+    networks:
+      - lumina
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        BACKEND_URL: http://backend:3001
+    container_name: lumina-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '${FRONTEND_PORT:-3000}:3000'
+    networks:
+      - lumina
 
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
   minio_data:
-    driver: local
 
 networks:
-  default:
+  lumina:
     name: lumina-network

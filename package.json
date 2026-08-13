@@ -12,9 +12,11 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "backend:dev": "pnpm --filter backend dev",
     "frontend:dev": "pnpm --filter frontend dev",
-    "docker:up": "docker-compose up -d",
+    "docker:up": "docker-compose up -d --build",
     "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f"
+    "docker:logs": "docker-compose logs -f",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up -d",
+    "docker:dev:down": "docker-compose -f docker-compose.dev.yml down"
   },
   "devDependencies": {
     "turbo": "^2.0.0",
