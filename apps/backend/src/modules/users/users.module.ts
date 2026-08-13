@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
+import { UsersService } from './users.service';
+import { UsersController } from './users.controller';
+import { PrismaModule } from '../../prisma/prisma.module';
 
-// TODO: 用户 CRUD、资料管理
-@Module({})
+@Module({
+  imports: [PrismaModule],
+  controllers: [UsersController],
+  providers: [UsersService],
+  exports: [UsersService],
+})
 export class UsersModule {}

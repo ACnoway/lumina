@@ -1,56 +1,30 @@
 // ==================== 用户角色 ====================
-export enum UserRole {
-  USER = 'USER',
-  ADMIN = 'ADMIN',
-  SUPER_ADMIN = 'SUPER_ADMIN',
-}
+export type UserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN';
 
 // ==================== 用户状态 ====================
-export enum UserStatus {
-  ACTIVE = 'ACTIVE',
-  SUSPENDED = 'SUSPENDED',
-  DELETED = 'DELETED',
-}
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED';
 
 // ==================== 交易类型 ====================
-export enum TransactionType {
-  RECHARGE = 'RECHARGE',
-  CONSUME = 'CONSUME',
-  REFUND = 'REFUND',
-  ADMIN_ADJUST = 'ADMIN_ADJUST',
-}
+export type TransactionType = 'RECHARGE' | 'CONSUME' | 'REFUND' | 'ADMIN_ADJUST';
 
 // ==================== 消息角色 ====================
-export enum MessageRole {
-  USER = 'USER',
-  ASSISTANT = 'ASSISTANT',
-  SYSTEM = 'SYSTEM',
-}
+export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 
 // ==================== 生图状态 ====================
-export enum ImageStatus {
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  SUCCESS = 'SUCCESS',
-  FAILED = 'FAILED',
-}
+export type ImageStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
 
 // ==================== 错误码 ====================
-export enum ErrorCode {
-  // 通用
-  INTERNAL_ERROR = 'INTERNAL_ERROR',
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
-  NOT_FOUND = 'NOT_FOUND',
-  UNAUTHORIZED = 'UNAUTHORIZED',
-  FORBIDDEN = 'FORBIDDEN',
-  // 钱包
-  INSUFFICIENT_BALANCE = 'INSUFFICIENT_BALANCE',
-  DUPLICATE_REQUEST = 'DUPLICATE_REQUEST',
-  // 供应商
-  PROVIDER_UNAVAILABLE = 'PROVIDER_UNAVAILABLE',
-  PROVIDER_RATE_LIMITED = 'PROVIDER_RATE_LIMITED',
-  CIRCUIT_BREAKER_OPEN = 'CIRCUIT_BREAKER_OPEN',
-}
+export type ErrorCode =
+  | 'INTERNAL_ERROR'
+  | 'VALIDATION_ERROR'
+  | 'NOT_FOUND'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'INSUFFICIENT_BALANCE'
+  | 'DUPLICATE_REQUEST'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_RATE_LIMITED'
+  | 'CIRCUIT_BREAKER_OPEN';
 
 // ==================== API 通用响应 ====================
 export interface ApiResponse<T = unknown> {
@@ -72,6 +46,11 @@ export interface LoginDto {
 export interface LoginResponse {
   accessToken: string;
   user: UserInfo;
+}
+
+export interface GetCurrentUserResponse {
+  user: UserInfo;
+  wallet: WalletInfo;
 }
 
 export interface UserInfo {

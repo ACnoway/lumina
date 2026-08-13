@@ -14,7 +14,7 @@ datasource db {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // bcrypt hashed
+  password  String?  // bcrypt hashed, nullable for email-code login
   nickname  String?
   avatar    String?
   role      UserRole @default(USER)
@@ -75,6 +75,9 @@ model WalletTransaction {
   balance  Decimal @db.Decimal(10, 2) // 交易后余额
   reason   String // 交易原因描述
   metadata Json? // 额外元数据
+  
+  // 幂等键，防止重复交易
+  idempotencyKey String? @unique
   
   createdAt DateTime @default(now())
   
