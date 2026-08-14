@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Res,
   UseGuards,
   Logger,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import {
   ApiBearerAuth,
   ApiQuery,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import { ChatService } from './chat.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -25,6 +27,7 @@ import {
   UpdateSessionDto,
   GetSessionsQueryDto,
   GetMessagesQueryDto,
+  SendMessageDto,
 } from './dto/chat.dto';
 
 @ApiTags('chat')
@@ -116,5 +119,20 @@ export class ChatController {
       query.page || 1,
       query.limit || 50,
     );
+  }
+
+  // ==================== 发送消息（SSE 流式） ====================
+
+  @Post('messages')
+  @ApiOperation({ summary: '发送消息（SSE 流式响应）' })
+  async sendMessage(
+    @CurrentUser() user: User,
+    @Body() dto: SendMessageDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    this.logger.log(
+      `发送消息: userId=${user.id}, sessionId=${dto.sessionId}, model=${dto.model}`,
+    );
+    await this.chatService.sendMessageStream(user.id, dto, res);
   }
 }
