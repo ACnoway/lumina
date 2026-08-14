@@ -1,39 +1,320 @@
-// 聊天页占位 - 会话列表 + 流式输出
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { chatApi } from '@/lib/chat-api';
+import type { ChatSession, ChatMessage, ChatModel } from '@/lib/chat-types';
+import { getStoredUser } from '@/lib/auth';
+import Sidebar from './components/Sidebar';
+import MessageList from './components/MessageList';
+import MessageInput from './components/MessageInput';
+import TopBar from './components/TopBar';
+
+const MODEL_STORAGE_KEY = 'lumina_chat_model';
+
 export default function ChatPage() {
+  // 会话状态
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+
+  // 模型状态
+  const [models, setModels] = useState<ChatModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+
+  // 余额
+  const [balance, setBalance] = useState<number | null>(null);
+
+  // 发送状态
+  const [sending, setSending] = useState(false);
+
+  // 错误提示
+  const [error, setError] = useState('');
+
+  // AbortController 用于取消流式请求
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 初始化：加载会话列表、模型列表、余额
+  useEffect(() => {
+    loadSessions();
+    loadModels();
+    loadBalance();
+  }, []);
+
+  // 切换会话时加载历史消息
+  useEffect(() => {
+    if (currentSessionId) {
+      loadMessages(currentSessionId);
+    } else {
+      setMessages([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId]);
+
+  // 组件卸载时取消进行中的请求
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  async function loadSessions() {
+    try {
+      const res = await chatApi.getSessions(1, 50);
+      setSessions(res.sessions);
+    } catch (err) {
+      setError('加载会话列表失败');
+    }
+  }
+
+  async function loadModels() {
+    try {
+      const list = await chatApi.getChatModels();
+      setModels(list);
+      // 从 localStorage 恢复上次选择的模型
+      const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+      if (saved && list.some((m) => m.name === saved)) {
+        setSelectedModel(saved);
+      } else if (list.length > 0) {
+        setSelectedModel(list[0].name);
+      }
+    } catch {
+      setError('加载模型列表失败');
+    }
+  }
+
+  async function loadBalance() {
+    try {
+      const res = await chatApi.getBalance();
+      setBalance(res.balance);
+    } catch {
+      // 静默失败
+    }
+  }
+
+  async function loadMessages(sessionId: string) {
+    setLoadingMessages(true);
+    setError('');
+    try {
+      const res = await chatApi.getMessages(sessionId, 1, 50);
+      setMessages(res.messages);
+    } catch {
+      setError('加载历史消息失败');
+    } finally {
+      setLoadingMessages(false);
+    }
+  }
+
+  // 创建新会话
+  async function handleNewSession() {
+    // 中止当前流式请求
+    abortRef.current?.abort();
+    setCurrentSessionId(null);
+    setMessages([]);
+  }
+
+  // 切换会话
+  function handleSelectSession(sessionId: string) {
+    if (sessionId === currentSessionId) return;
+    abortRef.current?.abort();
+    setCurrentSessionId(sessionId);
+  }
+
+  // 删除会话
+  async function handleDeleteSession(sessionId: string) {
+    try {
+      await chatApi.deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (sessionId === currentSessionId) {
+        setCurrentSessionId(null);
+        setMessages([]);
+      }
+    } catch {
+      setError('删除会话失败');
+    }
+  }
+
+  // 切换模型
+  function handleModelChange(modelName: string) {
+    setSelectedModel(modelName);
+    localStorage.setItem(MODEL_STORAGE_KEY, modelName);
+  }
+
+  // 发送消息
+  const handleSend = useCallback(
+    async (content: string) => {
+      if (!content.trim() || sending) return;
+
+      if (!selectedModel) {
+        setError('请先选择模型');
+        return;
+      }
+
+      setError('');
+      setSending(true);
+
+      // 如果没有当前会话，先创建一个
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        try {
+          const session = await chatApi.createSession();
+          sessionId = session.id;
+          setCurrentSessionId(sessionId);
+          setSessions((prev) => [session, ...prev]);
+        } catch {
+          setError('创建会话失败');
+          setSending(false);
+          return;
+        }
+      }
+
+      // 乐观更新：立即显示用户消息
+      const tempUserMsg: ChatMessage = {
+        id: `temp-${Date.now()}`,
+        role: 'USER',
+        content,
+        tokens: null,
+        cost: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      // 空的 AI 消息占位（流式填充）
+      const tempAiMsg: ChatMessage = {
+        id: `temp-ai-${Date.now()}`,
+        role: 'ASSISTANT',
+        content: '',
+        tokens: null,
+        cost: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, tempUserMsg, tempAiMsg]);
+
+      // 创建 AbortController
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const stream = chatApi.sendMessageStream(
+          sessionId,
+          content,
+          selectedModel,
+          { signal: controller.signal },
+        );
+
+        let aiContent = '';
+
+        for await (const event of stream) {
+          if (controller.signal.aborted) break;
+
+          switch (event.type) {
+            case 'content':
+              aiContent += event.content;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAiMsg.id ? { ...m, content: aiContent } : m,
+                ),
+              );
+              break;
+
+            case 'done':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAiMsg.id
+                    ? {
+                        ...m,
+                        content: aiContent,
+                        tokens: event.usage.totalTokens,
+                        cost: event.cost,
+                      }
+                    : m,
+                ),
+              );
+              // 刷新余额
+              loadBalance();
+              break;
+
+            case 'error':
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAiMsg.id
+                    ? { ...m, content: `[错误] ${event.message}` }
+                    : m,
+                ),
+              );
+              setError(event.message);
+              break;
+          }
+        }
+
+        // 刷新会话列表（标题可能被自动更新了）
+        loadSessions();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '发送失败';
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAiMsg.id
+              ? { ...m, content: `[错误] ${msg}` }
+              : m,
+          ),
+        );
+        setError(msg);
+      } finally {
+        setSending(false);
+        abortRef.current = null;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentSessionId, selectedModel, sending],
+  );
+
+  const user = getStoredUser();
+
   return (
-    <div className="flex h-screen">
-      {/* 侧边栏：会话列表 */}
-      <aside className="w-64 border-r border-gray-200 bg-white p-4">
-        <h2 className="text-lg font-semibold mb-4">会话</h2>
-        <button className="w-full rounded-lg bg-blue-600 py-2 text-white text-sm font-medium hover:bg-blue-700 mb-4">
-          新建对话
-        </button>
-        <div className="space-y-2">
-          <div className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 cursor-pointer">
-            新对话
+    <div className="flex h-screen overflow-hidden">
+      {/* 侧边栏 */}
+      <div className="hidden md:flex">
+        <Sidebar
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          onNewSession={handleNewSession}
+          onSelectSession={handleSelectSession}
+          onDeleteSession={handleDeleteSession}
+        />
+      </div>
+
+      {/* 主区域 */}
+      <div className="flex flex-1 flex-col">
+        <TopBar
+          models={models}
+          selectedModel={selectedModel}
+          onModelChange={handleModelChange}
+          balance={balance}
+          userEmail={user?.email ?? null}
+        />
+
+        {/* 错误提示 */}
+        {error && (
+          <div className="mx-4 mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            {error}
           </div>
-        </div>
-      </aside>
-      {/* 主区域：聊天消息 */}
-      <main className="flex-1 flex flex-col">
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div className="text-center text-gray-400 mt-20">
-            开始一段新对话
-          </div>
-        </div>
-        <div className="border-t border-gray-200 p-4">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="输入消息..."
-              className="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none"
-            />
-            <button className="rounded-lg bg-blue-600 px-6 py-2 text-white font-medium hover:bg-blue-700">
-              发送
-            </button>
-          </div>
-        </div>
-      </main>
+        )}
+
+        {/* 消息区域 */}
+        <MessageList
+          messages={messages}
+          loading={loadingMessages}
+        />
+
+        {/* 输入区域 */}
+        <MessageInput
+          onSend={handleSend}
+          disabled={sending || !selectedModel}
+          placeholder={
+            !selectedModel ? '请先选择模型' : '输入消息，回车发送，Shift+回车换行'
+          }
+        />
+      </div>
     </div>
   );
 }

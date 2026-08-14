@@ -36,4 +36,5 @@ ENV NODE_ENV=production
 
 EXPOSE 3001
 
-CMD ["node", "apps/backend/dist/main.js"]
+# 启动前先同步数据库表结构（从 schema.prisma 直接创建/更新表）
+CMD ["sh", "-c", "pnpm --filter backend exec prisma db push --skip-generate && node apps/backend/dist/main.js"]
