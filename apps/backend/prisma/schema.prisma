@@ -185,17 +185,79 @@ enum ImageStatus {
 
 // ==================== 上游供应商配置 ====================
 model Provider {
-  id   String @id @default(cuid())
-  name String @unique // openai, anthropic, stability 等
-  
-  config Json // API key, base URL 等配置
-  
-  isActive Boolean @default(true)
-  
+  id               String   @id @default(cuid())
+  name             String   @unique // openai, anthropic, stability 等
+
+  apiFormat        ApiFormat                         // 请求格式
+  supportsStreaming Boolean  @default(true)          // 是否支持流式
+  config           Json                              // apiKey, baseUrl, timeout, rateLimit 等
+  isActive         Boolean  @default(true)
+
+  upstreamModels  UpstreamModel[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@map("providers")
+}
+
+enum ApiFormat {
+  openai_chat           // OpenAI Chat Completions
+  openai_compatible     // OpenAI 兼容格式（代理商等）
+  anthropic_messages    // Anthropic Messages API
+  openai_image          // OpenAI Images API
+  stability_image       // Stability AI 生图
+}
+
+// ==================== 平台模型 ====================
+model PlatformModel {
+  id          String   @id @default(cuid())
+  name        String   @unique              // 平台模型名，如 gpt-4o
+  displayName String                          // 展示名
+  type        ModelType                       // CHAT 或 IMAGE
+  isActive    Boolean  @default(true)
+  pricing     Json                            // 计费标准 { input: number, output: number } 或 { perImage: number }
+  maxTokens   Int?                            // 平台限制的最大 token
+
+  upstreamModels UpstreamModel[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@map("platform_models")
+}
+
+enum ModelType {
+  CHAT
+  IMAGE
+}
+
+// ==================== 上游模型映射 ====================
+model UpstreamModel {
+  id              String   @id @default(cuid())
+  platformModelId String
+  platformModel   PlatformModel @relation(fields: [platformModelId], references: [id], onDelete: Cascade)
+
+  providerId      String
+  provider        Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  upstreamModelId String                        // 上游实际模型名，如 gpt-4o-2024-08-06
+  priority        Int      @default(1)          // 数字越小越优先
+  weight          Int      @default(1)          // 同优先级权重（加权随机）
+  isActive        Boolean  @default(true)
+
+  upstreamPricing Json?                         // 上游成本 { input, output } 或 { perImage }
+  maxTokens       Int?                          // 上游限制（可选覆盖平台值）
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([platformModelId])
+  @@index([providerId])
+  @@index([priority])
+  @@map("upstream_models")
 }
 
 // ==================== 审计日志 ====================

@@ -51,4 +51,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async ttl(key: string): Promise<number> {
     return this.client.ttl(key);
   }
+
+  /**
+   * 原子递增计数器
+   * @param key 计数器 key
+   * @param ttl 首次创建时的过期时间（秒）
+   * @returns 递增后的值
+   */
+  async incr(key: string, ttl?: number): Promise<number> {
+    const value = await this.client.incr(key);
+
+    // 仅在首次创建时设置过期时间
+    if (value === 1 && ttl) {
+      await this.client.expire(key, ttl);
+    }
+
+    return value;
+  }
 }

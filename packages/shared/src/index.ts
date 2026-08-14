@@ -149,3 +149,77 @@ export interface AdminUpdateUserStatusDto {
   userId: string;
   status: UserStatus;
 }
+
+// ==================== 供应商/模型相关类型 ====================
+export type ApiFormat =
+  | 'openai_chat'
+  | 'openai_compatible'
+  | 'anthropic_messages'
+  | 'openai_image'
+  | 'stability_image';
+
+export type ModelType = 'CHAT' | 'IMAGE';
+
+export interface PlatformModelDto {
+  id: string;
+  name: string;
+  displayName: string;
+  type: ModelType;
+  isActive: boolean;
+  pricing: Record<string, any>;
+  maxTokens?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProviderDto {
+  id: string;
+  name: string;
+  apiFormat: ApiFormat;
+  supportsStreaming: boolean;
+  config: Record<string, any>;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpstreamModelDto {
+  id: string;
+  platformModelId: string;
+  providerId: string;
+  upstreamModelId: string;
+  priority: number;
+  weight: number;
+  isActive: boolean;
+  upstreamPricing?: Record<string, any> | null;
+  maxTokens?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProviderDto {
+  name: string;
+  apiFormat: ApiFormat;
+  supportsStreaming?: boolean;
+  config: Record<string, any>;
+  isActive?: boolean;
+}
+
+export interface CreatePlatformModelDto {
+  name: string;
+  displayName: string;
+  type: ModelType;
+  pricing: Record<string, any>;
+  maxTokens?: number;
+  isActive?: boolean;
+}
+
+export interface CreateUpstreamModelDto {
+  providerId: string;
+  upstreamModelId: string;
+  priority?: number;
+  weight?: number;
+  isActive?: boolean;
+  upstreamPricing?: Record<string, any>;
+  maxTokens?: number;
+}
