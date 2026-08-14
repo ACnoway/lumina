@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
+import { ChatService } from './chat.service';
+import { ChatController } from './chat.controller';
+import { PrismaModule } from '../../prisma/prisma.module';
 
-// TODO: 聊天模块 — 会话管理、流式输出
-@Module({})
+@Module({
+  imports: [PrismaModule],
+  controllers: [ChatController],
+  providers: [ChatService],
+  exports: [ChatService],
+})
 export class ChatModule {}

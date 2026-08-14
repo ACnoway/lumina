@@ -122,6 +122,20 @@ export interface CreateChatMessageDto {
   content: string;
 }
 
+export interface GetSessionsResponse {
+  sessions: ChatSessionDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface GetMessagesResponse {
+  messages: ChatMessageDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 // ==================== 生图相关 DTO ====================
 export interface CreateImageDto {
   prompt: string;
