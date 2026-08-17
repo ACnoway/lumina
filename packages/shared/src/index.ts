@@ -137,19 +137,42 @@ export interface GetMessagesResponse {
 }
 
 // ==================== 生图相关 DTO ====================
-export interface CreateImageDto {
+export interface OptimizePromptDto {
   prompt: string;
+}
+
+export interface OptimizePromptResponse {
+  optimizedPrompt: string;
+  cost: number;
+}
+
+export interface CreateImageTaskDto {
+  prompt: string;
+  originalPrompt?: string;
   negativePrompt?: string;
+  model: string;
   aspectRatio?: '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
 }
 
-export interface ImageGenerationDto {
+export interface ImageTaskDto {
   id: string;
   prompt: string;
+  originalPrompt: string | null;
+  negativePrompt: string | null;
+  model: string;
   status: ImageStatus;
   imageUrl: string | null;
   cost: number | null;
+  errorMessage: string | null;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImageHistoryResponse {
+  items: ImageTaskDto[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 // ==================== 管理端 DTO ====================

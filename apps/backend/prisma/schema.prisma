@@ -143,9 +143,10 @@ model ImageGeneration {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   prompt       String @db.Text
+  originalPrompt String? @db.Text  // 用户原始输入（优化前）
   negativePrompt String? @db.Text
-  model        String // 使用的模型名称
-  provider     String // 供应商（openai, stability 等）
+  model        String // 平台模型名
+  provider     String // 实际上游供应商名
   
   status       ImageStatus @default(PENDING)
   
