@@ -12,7 +12,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-lumina}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-lumina}']
       interval: 10s
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
-      - redis_data:/data
+      - ./redis_data:/data
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -45,7 +45,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-lumina_minio}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-lumina_minio_secret}
     volumes:
-      - minio_data:/data
+      - ./minio_data:/data
     # ports:
     #   - '9001:9001'  # 如需 MinIO Console，取消注释
     networks:
@@ -104,11 +104,6 @@ services:
       - '${FRONTEND_PORT:-3000}:3000'
     networks:
       - lumina
-
-volumes:
-  postgres_data:
-  redis_data:
-  minio_data:
 
 networks:
   lumina:

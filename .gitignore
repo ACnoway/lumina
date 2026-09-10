@@ -49,6 +49,9 @@ Thumbs.db
 # Docker
 .docker/
 docker-compose.override.yml
+postgres_data/
+minio_data/
+redis_data/
 
 # Misc
 *.pem
