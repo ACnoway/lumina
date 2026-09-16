@@ -31,15 +31,17 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {
     // 初始化邮件发送器
-    this.transporter = nodemailer.createTransport({
+    const smtpUser = this.config.get<string>('SMTP_USER')?.trim();
+    const smtpPassword = this.config.get<string>('SMTP_PASSWORD');
+    const transportOptions = {
       host: this.config.get<string>('SMTP_HOST'),
       port: this.config.get<number>('SMTP_PORT', 587),
       secure: parseBoolean(this.config.get('SMTP_SECURE', false), false),
-      auth: {
-        user: this.config.get<string>('SMTP_USER'),
-        pass: this.config.get<string>('SMTP_PASSWORD'),
-      },
-    });
+      ...(smtpUser && smtpPassword
+        ? { auth: { user: smtpUser, pass: smtpPassword } }
+        : {}),
+    };
+    this.transporter = nodemailer.createTransport(transportOptions);
   }
 
   /**

@@ -78,7 +78,7 @@ function createUser(): User {
   };
 }
 
-function createService() {
+function createService(withSmtpCredentials = true) {
   const redis = new InMemoryAuthRedis();
   const sendMail = jest.fn().mockResolvedValue({ messageId: 'message-1' });
   const createTransport = nodemailer.createTransport as jest.Mock;
@@ -91,8 +91,8 @@ function createService() {
         SMTP_PORT: 2525,
         // ConfigModule reads process environment values as strings.
         SMTP_SECURE: 'false',
-        SMTP_USER: 'test-user',
-        SMTP_PASSWORD: 'test-password',
+        SMTP_USER: withSmtpCredentials ? 'test-user' : '',
+        SMTP_PASSWORD: withSmtpCredentials ? 'test-password' : '',
         SMTP_FROM: 'Lumina <no-reply@test.local>',
       };
       return values[key] ?? fallback;
@@ -139,6 +139,15 @@ describe('AuthService verification codes', () => {
 
     expect(createTransport).toHaveBeenCalledWith(
       expect.objectContaining({ secure: false }),
+    );
+  });
+
+  it('omits SMTP auth when credentials are empty', () => {
+    const createTransport = nodemailer.createTransport as jest.Mock;
+    createService(false);
+
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.not.objectContaining({ auth: expect.anything() }),
     );
   });
 
