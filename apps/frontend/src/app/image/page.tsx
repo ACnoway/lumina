@@ -494,8 +494,10 @@ export default function ImagePage() {
                   className="group overflow-hidden rounded-xl border border-gray-200 text-left transition hover:border-blue-300 hover:shadow-sm"
                 >
                   {historyTask.imageUrl ? (
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={historyTask.imageUrl} alt={historyTask.prompt} className="h-32 w-full object-cover" />
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={historyTask.imageUrl} alt={historyTask.prompt} className="h-32 w-full object-cover" />
+                    </>
                   ) : (
                     <div className="flex h-32 items-center justify-center bg-gray-50 text-xs text-gray-400">
                       {statusLabel(historyTask.status)}
