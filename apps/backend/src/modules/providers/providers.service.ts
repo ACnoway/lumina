@@ -56,10 +56,13 @@ export class ProvidersService {
   /**
    * 获取启用的平台模型列表（可按类型筛选）
    */
-  async getPlatformModels(type?: ModelType): Promise<PlatformModel[]> {
+  async getPlatformModels(
+    type?: ModelType,
+    includeInactive = false,
+  ): Promise<PlatformModel[]> {
     return this.prisma.platformModel.findMany({
       where: {
-        isActive: true,
+        ...(!includeInactive ? { isActive: true } : {}),
         ...(type ? { type } : {}),
       },
       orderBy: { createdAt: 'desc' },

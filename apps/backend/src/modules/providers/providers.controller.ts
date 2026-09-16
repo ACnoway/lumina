@@ -47,9 +47,15 @@ export class ProvidersController {
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取平台模型列表' })
   @ApiQuery({ name: 'type', required: false, enum: ['CHAT', 'IMAGE'] })
-  async getPlatformModels(@Query('type') type?: ModelType) {
+  async getPlatformModels(
+    @CurrentUser() user: User,
+    @Query('type') type?: ModelType,
+  ) {
     this.logger.log(`获取平台模型列表: type=${type || 'all'}`);
-    return this.providersService.getPlatformModels(type);
+    return this.providersService.getPlatformModels(
+      type,
+      user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN,
+    );
   }
 
   @Post('models')
