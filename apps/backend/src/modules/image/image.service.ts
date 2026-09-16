@@ -29,6 +29,7 @@ const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
 const QUEUE_BLOCK_TIMEOUT_SECONDS = 1;
 const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_IMAGE_ATTEMPTS = 3;
+const MIN_IMAGE_CHARGE = 0.01;
 
 interface ImageTaskParameters {
   aspectRatio?: string;
@@ -228,7 +229,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // 获取定价
     const pricing = (platformModel.pricing as any) || {};
-    const perImagePrice = Number(pricing.perImage) || 0;
+    const perImagePrice = this.normalizeImagePrice(pricing.perImage, data.model);
 
     // 创建任务记录
     const task = await this.prisma.imageGeneration.create({
@@ -413,7 +414,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       Number.isFinite(parameters.perImagePrice) &&
       parameters.perImagePrice >= 0
     ) {
-      return parameters.perImagePrice;
+      return this.normalizeImagePrice(parameters.perImagePrice, modelName);
     }
 
     // 兼容已在本次改造前创建、未保存价格快照的旧 PENDING 任务。
@@ -424,7 +425,25 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     }
 
     const pricing = (platformModel.pricing as Record<string, unknown>) || {};
-    return Number(pricing.perImage) || 0;
+    return this.normalizeImagePrice(pricing.perImage, modelName);
+  }
+
+  /**
+   * 生图不支持 0 元结算；与预扣保持一致，统一使用最低收费。
+   * 这样即使历史任务或旧模型配置缺少 perImage，也不会在上游生成完成后以 0 元结算失败。
+   */
+  private normalizeImagePrice(value: unknown, modelName: string): number {
+    const configuredPrice = Number(value);
+
+    if (!Number.isFinite(configuredPrice) || configuredPrice <= 0) {
+      this.logger.warn(
+        `生图模型未配置有效 perImage: model=${modelName}, ` +
+          `使用最低收费 ${MIN_IMAGE_CHARGE} 元`,
+      );
+      return MIN_IMAGE_CHARGE;
+    }
+
+    return Math.max(configuredPrice, MIN_IMAGE_CHARGE);
   }
 
   private async retryOrFail(
@@ -489,11 +508,11 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     taskParameters: ImageTaskParameters,
   ): Promise<void> {
     const idempotencyKey = `image:${taskId}`;
+    const chargeAmount = this.normalizeImagePrice(perImagePrice, modelName);
 
     // 1. 预扣
     try {
-      const preDeductAmount = Math.max(perImagePrice, 0.01);
-      await this.walletService.preDeduct(userId, preDeductAmount, idempotencyKey);
+      await this.walletService.preDeduct(userId, chargeAmount, idempotencyKey);
     } catch (error) {
       const msg = error instanceof Error ? error.message : '预扣失败';
       await this.retryOrFail(taskId, taskParameters, msg);
@@ -519,6 +538,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // 3. 调用上游生图 API
     let settled = false;
+    let upstreamSucceeded = false;
     try {
       const providerConfig = (resolved.provider.config as Record<string, any>) || {};
       const size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
@@ -535,6 +555,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             prompt,
             size,
           ));
+          upstreamSucceeded = true;
           break;
 
         case 'stability_image':
@@ -545,6 +566,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             negativePrompt,
             size,
           ));
+          upstreamSucceeded = true;
           break;
 
         default:
@@ -563,7 +585,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       // 5. 结算
       await this.walletService.settle(
         userId,
-        perImagePrice,
+        chargeAmount,
         idempotencyKey,
         `生图: ${modelName}`,
         { taskId, model: modelName },
@@ -577,7 +599,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           status: 'SUCCESS',
           imageUrl: presignedUrl,
           imageKey: objectName,
-          cost: perImagePrice,
+          cost: chargeAmount,
           width: size.width,
           height: size.height,
         },
@@ -586,18 +608,20 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       // 记录上游成功
       await resolved.recordResult(true);
 
-      this.logger.log(`生图任务完成: taskId=${taskId}, cost=${perImagePrice}`);
+      this.logger.log(`生图任务完成: taskId=${taskId}, cost=${chargeAmount}`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : '生图失败';
 
       if (!settled) {
         // 退回预扣后才允许重试；相同 idempotency key 保证重试不会重复扣费。
         await this.walletService.refund(userId, idempotencyKey, `生图失败: ${msg}`);
-        await resolved.recordResult(false).catch((recordError) => {
-          const recordMessage =
-            recordError instanceof Error ? recordError.message : String(recordError);
-          this.logger.warn(`记录上游失败结果异常: ${recordMessage}`);
-        });
+        if (!upstreamSucceeded) {
+          await resolved.recordResult(false).catch((recordError) => {
+            const recordMessage =
+              recordError instanceof Error ? recordError.message : String(recordError);
+            this.logger.warn(`记录上游失败结果异常: ${recordMessage}`);
+          });
+        }
         await this.retryOrFail(taskId, taskParameters, msg);
         return;
       }

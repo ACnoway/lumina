@@ -51,6 +51,10 @@ function createService() {
     getPlatformModelByName: jest.fn().mockResolvedValue(imageModel),
     resolveUpstream: jest.fn(),
   };
+  const minio = {
+    upload: jest.fn(),
+    getPresignedUrl: jest.fn().mockResolvedValue('https://minio.test/image.png'),
+  };
   const queue = {
     enqueue: jest.fn().mockResolvedValue(undefined),
     take: jest.fn(),
@@ -62,12 +66,12 @@ function createService() {
     wallet as unknown as WalletService,
     providers as unknown as ProvidersService,
     {} as AdapterFactory,
-    {} as MinioService,
+    minio as unknown as MinioService,
     {} as ConfigService,
     queue as unknown as ImageQueueService,
   );
 
-  return { service, prisma, wallet, providers, queue };
+  return { service, prisma, wallet, providers, minio, queue };
 }
 
 describe('ImageService durable queue integration', () => {
@@ -123,5 +127,84 @@ describe('ImageService durable queue integration', () => {
       }),
     );
     expect(queue.enqueue).toHaveBeenCalledWith('task-1');
+  });
+
+  it('uses the minimum charge consistently when an image price is zero', async () => {
+    const { service, prisma, wallet, providers } = createService();
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult,
+    });
+    prisma.imageGeneration.update.mockResolvedValue({});
+    (service as any).callOpenAIImage = jest.fn().mockResolvedValue({
+      imageBuffer: Buffer.from('image'),
+    });
+
+    await (service as any).processImageTask(
+      'user-1',
+      'task-1',
+      'a blue house',
+      undefined,
+      'image-model',
+      '1:1',
+      0,
+      { retryCount: 0 },
+    );
+
+    expect(wallet.preDeduct).toHaveBeenCalledWith('user-1', 0.01, 'image:task-1');
+    expect(wallet.settle).toHaveBeenCalledWith(
+      'user-1',
+      0.01,
+      'image:task-1',
+      '生图: image-model',
+      { taskId: 'task-1', model: 'image-model' },
+    );
+    expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'SUCCESS', cost: 0.01 }),
+      }),
+    );
+    expect(recordResult).toHaveBeenCalledWith(true);
+    expect(recordResult).not.toHaveBeenCalledWith(false);
+  });
+
+  it('does not mark the provider as failed when settlement fails after upstream success', async () => {
+    const { service, prisma, wallet, providers } = createService();
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult,
+    });
+    wallet.settle.mockRejectedValue(new Error('结算失败'));
+    prisma.imageGeneration.update.mockResolvedValue({});
+    (service as any).callOpenAIImage = jest.fn().mockResolvedValue({
+      imageBuffer: Buffer.from('image'),
+    });
+
+    await (service as any).processImageTask(
+      'user-1',
+      'task-1',
+      'a blue house',
+      undefined,
+      'image-model',
+      '1:1',
+      0.5,
+      { retryCount: 0 },
+    );
+
+    expect(wallet.refund).toHaveBeenCalledWith(
+      'user-1',
+      'image:task-1',
+      '生图失败: 结算失败',
+    );
+    expect(recordResult).not.toHaveBeenCalledWith(false);
+    expect(prisma.imageGeneration.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'PENDING' }),
+      }),
+    );
   });
 });

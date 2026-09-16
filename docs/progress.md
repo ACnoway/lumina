@@ -32,6 +32,10 @@
 2. **验证覆盖不足**：认证、聊天流式、图片生成、管理端权限边界和前端关键流程仍缺少 API/E2E 测试。
 3. **工具链不一致**：本地需使用 pnpm 8.15.0（与 CI 一致），再运行根级 `pnpm lint/test/build`；lint 脚本应先拆分出不带 `--fix` 的检查命令。
 
+### 后续待办
+
+- [ ] 将管理后台的平台模型配置从 JSON 文本改为按模型类型展示的结构化表单，至少覆盖聊天模型的 input/output 价格和生图模型的 perImage 价格，并补充前后端校验。
+
 ## 第一轮 P0 安全与计费修复 ✓
 
 - Provider、Platform Model、Upstream Model 的管理查询与 mutation API 已增加 `ADMIN` / `SUPER_ADMIN` RBAC；普通 `USER` 无法修改配置，也无法读取包含 Provider 配置的管理查询结果。
