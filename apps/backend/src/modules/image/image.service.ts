@@ -4,6 +4,8 @@ import {
   NotFoundException,
   BadRequestException,
   ServiceUnavailableException,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -13,6 +15,7 @@ import { AdapterFactory } from '../chat/adapters/adapter-factory';
 import { MinioService } from '../../minio/minio.service';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
+import { ImageQueueService } from './image-queue.service';
 
 // 比例 → 尺寸映射
 const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
@@ -22,6 +25,16 @@ const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
   '4:3': { width: 1024, height: 768 },
   '3:4': { width: 768, height: 1024 },
 };
+
+const QUEUE_BLOCK_TIMEOUT_SECONDS = 1;
+const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
+const MAX_IMAGE_ATTEMPTS = 3;
+
+interface ImageTaskParameters {
+  aspectRatio?: string;
+  perImagePrice?: number;
+  retryCount?: number;
+}
 
 // 提示词优化的系统指令
 const PROMPT_OPTIMIZER_SYSTEM = `你是一个 AI 生图提示词优化专家。用户会给你一段简短的图片描述，你需要将它扩展成一段详细、富有画面感的英文提示词，包含以下要素：
@@ -41,8 +54,10 @@ const PROMPT_OPTIMIZER_SYSTEM = `你是一个 AI 生图提示词优化专家。�
 5. 如果用户的描述已经足够详细，可以做轻微润色`;
 
 @Injectable()
-export class ImageService {
+export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(ImageService.name);
+  private workerRunning = false;
+  private workerPromise: Promise<void> | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -51,7 +66,18 @@ export class ImageService {
     private readonly adapterFactory: AdapterFactory,
     private readonly minioService: MinioService,
     private readonly configService: ConfigService,
+    private readonly imageQueueService: ImageQueueService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    this.workerRunning = true;
+    this.workerPromise = this.runWorker();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.workerRunning = false;
+    await this.workerPromise;
+  }
 
   // ==================== 提示词优化 ====================
 
@@ -214,28 +240,239 @@ export class ImageService {
         model: data.model,
         provider: '', // 异步处理时填充
         status: 'PENDING',
-        parameters: data.aspectRatio
-          ? { aspectRatio: data.aspectRatio }
-          : undefined,
+        parameters: {
+          aspectRatio: data.aspectRatio || '1:1',
+          perImagePrice,
+          retryCount: 0,
+        },
       },
     });
 
-    // 异步处理（不 await，后台执行）
-    this.processImageTask(
-      userId,
-      task.id,
-      data.prompt,
-      data.negativePrompt,
-      data.model,
-      data.aspectRatio,
-      perImagePrice,
-    ).catch((err) => {
-      this.logger.error(`生图任务异步处理异常: taskId=${task.id}, err=${err.message}`);
-    });
+    try {
+      await this.imageQueueService.enqueue(task.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Redis 队列不可用';
+      await this.failTask(task.id, `任务入队失败: ${message}`);
+      throw new ServiceUnavailableException('生图任务暂时无法排队，请稍后重试');
+    }
 
-    this.logger.log(`创建生图任务: userId=${userId}, taskId=${task.id}, model=${data.model}`);
+    this.logger.log(`生图任务已入队: userId=${userId}, taskId=${task.id}, model=${data.model}`);
 
     return task;
+  }
+
+  private async runWorker(): Promise<void> {
+    try {
+      await this.recoverQueuedTasks();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`恢复生图队列失败: ${message}`);
+    }
+
+    while (this.workerRunning) {
+      let taskId: string | null;
+      try {
+        taskId = await this.imageQueueService.take(QUEUE_BLOCK_TIMEOUT_SECONDS);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`读取生图队列失败: ${message}`);
+        await this.waitForNextPoll();
+        continue;
+      }
+
+      if (!taskId) continue;
+
+      try {
+        await this.processQueuedTask(taskId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`处理生图任务异常: taskId=${taskId}, err=${message}`);
+      } finally {
+        try {
+          await this.imageQueueService.acknowledge(taskId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.error(`确认生图任务失败: taskId=${taskId}, err=${message}`);
+        }
+      }
+    }
+  }
+
+  private async waitForNextPoll(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+  }
+
+  /**
+   * Redis 在 worker 异常退出后仍保留 processing 列表项；以数据库状态为准
+   * 恢复 PENDING 任务，并在 PROCESSING 长时间未更新时按正常重试流程处理。
+   */
+  private async recoverQueuedTasks(): Promise<void> {
+    const staleBefore = new Date(Date.now() - PROCESSING_STALE_AFTER_MS);
+    const [pendingTasks, stalledTasks] = await Promise.all([
+      this.prisma.imageGeneration.findMany({
+        where: { status: 'PENDING' },
+        select: { id: true },
+      }),
+      this.prisma.imageGeneration.findMany({
+        where: {
+          status: 'PROCESSING',
+          updatedAt: { lt: staleBefore },
+        },
+        select: { id: true, parameters: true },
+      }),
+    ]);
+
+    for (const task of stalledTasks) {
+      await this.retryOrFail(
+        task.id,
+        this.getTaskParameters(task.parameters),
+        '任务处理超时，正在恢复',
+        staleBefore,
+      );
+    }
+
+    for (const task of pendingTasks) {
+      await this.imageQueueService.enqueue(task.id);
+    }
+
+    if (pendingTasks.length || stalledTasks.length) {
+      this.logger.log(
+        `恢复生图队列: pending=${pendingTasks.length}, stale=${stalledTasks.length}`,
+      );
+    }
+  }
+
+  /**
+   * 领取任务时仅允许 PENDING → PROCESSING 一次，重复队列消息和多 worker
+   * 都不会触发第二次上游调用或第二次计费。
+   */
+  async processQueuedTask(taskId: string): Promise<void> {
+    const task = await this.prisma.imageGeneration.findUnique({
+      where: { id: taskId },
+    });
+
+    if (!task) return;
+
+    const claim = await this.prisma.imageGeneration.updateMany({
+      where: { id: taskId, status: 'PENDING' },
+      data: { status: 'PROCESSING', errorMessage: null },
+    });
+
+    if (claim.count !== 1) return;
+
+    const parameters = this.getTaskParameters(task.parameters);
+
+    try {
+      const perImagePrice = await this.getTaskPrice(task.model, parameters);
+      await this.processImageTask(
+        task.userId,
+        task.id,
+        task.prompt,
+        task.negativePrompt || undefined,
+        task.model,
+        parameters.aspectRatio,
+        perImagePrice,
+        parameters,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '任务初始化失败';
+      await this.retryOrFail(task.id, parameters, message);
+    }
+  }
+
+  private getTaskParameters(
+    value: Prisma.JsonValue | null,
+  ): ImageTaskParameters {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const parameters = value as Record<string, unknown>;
+    return {
+      aspectRatio:
+        typeof parameters.aspectRatio === 'string'
+          ? parameters.aspectRatio
+          : undefined,
+      perImagePrice:
+        typeof parameters.perImagePrice === 'number'
+          ? parameters.perImagePrice
+          : undefined,
+      retryCount:
+        typeof parameters.retryCount === 'number'
+          ? parameters.retryCount
+          : undefined,
+    };
+  }
+
+  private async getTaskPrice(
+    modelName: string,
+    parameters: ImageTaskParameters,
+  ): Promise<number> {
+    if (
+      typeof parameters.perImagePrice === 'number' &&
+      Number.isFinite(parameters.perImagePrice) &&
+      parameters.perImagePrice >= 0
+    ) {
+      return parameters.perImagePrice;
+    }
+
+    // 兼容已在本次改造前创建、未保存价格快照的旧 PENDING 任务。
+    const platformModel =
+      await this.providersService.getPlatformModelByName(modelName);
+    if (!platformModel || !platformModel.isActive || platformModel.type !== 'IMAGE') {
+      throw new BadRequestException(`生图模型 "${modelName}" 当前不可用`);
+    }
+
+    const pricing = (platformModel.pricing as Record<string, unknown>) || {};
+    return Number(pricing.perImage) || 0;
+  }
+
+  private async retryOrFail(
+    taskId: string,
+    parameters: ImageTaskParameters,
+    errorMessage: string,
+    staleBefore?: Date,
+  ): Promise<void> {
+    const retryCount = (parameters.retryCount || 0) + 1;
+    const where: Prisma.ImageGenerationWhereInput = {
+      id: taskId,
+      status: 'PROCESSING',
+      ...(staleBefore ? { updatedAt: { lt: staleBefore } } : {}),
+    };
+    const nextParameters = { ...parameters, retryCount };
+
+    if (retryCount >= MAX_IMAGE_ATTEMPTS) {
+      await this.prisma.imageGeneration.updateMany({
+        where,
+        data: {
+          status: 'FAILED',
+          errorMessage: `任务已重试 ${MAX_IMAGE_ATTEMPTS} 次：${errorMessage}`,
+          parameters: nextParameters,
+        },
+      });
+      return;
+    }
+
+    const result = await this.prisma.imageGeneration.updateMany({
+      where,
+      data: {
+        status: 'PENDING',
+        errorMessage: `任务失败，将重试（${retryCount}/${MAX_IMAGE_ATTEMPTS - 1}）：${errorMessage}`,
+        parameters: nextParameters,
+      },
+    });
+
+    if (result.count === 1) {
+      try {
+        await this.imageQueueService.enqueue(taskId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`生图重试任务入队失败: taskId=${taskId}, err=${message}`);
+      }
+      this.logger.warn(
+        `生图任务重试: taskId=${taskId}, retry=${retryCount}, err=${errorMessage}`,
+      );
+    }
   }
 
   /**
@@ -249,6 +486,7 @@ export class ImageService {
     modelName: string,
     aspectRatio: string | undefined,
     perImagePrice: number,
+    taskParameters: ImageTaskParameters,
   ): Promise<void> {
     const idempotencyKey = `image:${taskId}`;
 
@@ -258,7 +496,7 @@ export class ImageService {
       await this.walletService.preDeduct(userId, preDeductAmount, idempotencyKey);
     } catch (error) {
       const msg = error instanceof Error ? error.message : '预扣失败';
-      await this.failTask(taskId, msg);
+      await this.retryOrFail(taskId, taskParameters, msg);
       return;
     }
 
@@ -269,7 +507,7 @@ export class ImageService {
     } catch (error) {
       const msg = error instanceof Error ? error.message : '路由失败';
       await this.walletService.refund(userId, idempotencyKey, '生图路由失败');
-      await this.failTask(taskId, msg);
+      await this.retryOrFail(taskId, taskParameters, msg);
       return;
     }
 
@@ -280,6 +518,7 @@ export class ImageService {
     });
 
     // 3. 调用上游生图 API
+    let settled = false;
     try {
       const providerConfig = (resolved.provider.config as Record<string, any>) || {};
       const size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
@@ -329,6 +568,7 @@ export class ImageService {
         `生图: ${modelName}`,
         { taskId, model: modelName },
       );
+      settled = true;
 
       // 6. 更新任务状态为成功
       await this.prisma.imageGeneration.update({
@@ -350,16 +590,27 @@ export class ImageService {
     } catch (error) {
       const msg = error instanceof Error ? error.message : '生图失败';
 
-      // 退回预扣
-      await this.walletService.refund(userId, idempotencyKey, `生图失败: ${msg}`);
+      if (!settled) {
+        // 退回预扣后才允许重试；相同 idempotency key 保证重试不会重复扣费。
+        await this.walletService.refund(userId, idempotencyKey, `生图失败: ${msg}`);
+        await resolved.recordResult(false).catch((recordError) => {
+          const recordMessage =
+            recordError instanceof Error ? recordError.message : String(recordError);
+          this.logger.warn(`记录上游失败结果异常: ${recordMessage}`);
+        });
+        await this.retryOrFail(taskId, taskParameters, msg);
+        return;
+      }
 
-      // 记录上游失败
-      await resolved.recordResult(false);
-
-      // 更新任务状态为失败
-      await this.failTask(taskId, msg);
-
-      this.logger.error(`生图任务失败: taskId=${taskId}, err=${msg}`);
+      // 结算完成后绝不重新入队，避免外部上游调用和账本语义被重复执行。
+      const latestTask = await this.prisma.imageGeneration.findUnique({
+        where: { id: taskId },
+        select: { status: true },
+      });
+      if (latestTask?.status !== 'SUCCESS') {
+        await this.failTask(taskId, `已结算但任务状态保存失败: ${msg}`);
+      }
+      this.logger.error(`生图任务结算后处理异常: taskId=${taskId}, err=${msg}`);
     }
   }
 

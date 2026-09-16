@@ -138,4 +138,27 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     return value;
   }
+
+  async lPush(key: string, value: string): Promise<number> {
+    return this.client.lPush(key, value);
+  }
+
+  /**
+   * 原子地从待处理列表领取一个任务，并放入处理中列表。
+   * 返回 null 表示在 timeout 秒内没有新任务。
+   */
+  async brPopLPush(
+    source: string,
+    destination: string,
+    timeout: number,
+  ): Promise<string | null> {
+    return this.client.brPopLPush(source, destination, timeout);
+  }
+
+  /**
+   * 从列表中移除某任务的所有重复记录。
+   */
+  async lRemAll(key: string, value: string): Promise<number> {
+    return this.client.lRem(key, 0, value);
+  }
 }

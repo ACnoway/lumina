@@ -6,6 +6,8 @@ import { MinioModule } from '../../minio/minio.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { AdaptersModule } from '../chat/adapters/adapters.module';
+import { RedisModule } from '../../redis/redis.module';
+import { ImageQueueService } from './image-queue.service';
 
 @Module({
   imports: [
@@ -14,9 +16,10 @@ import { AdaptersModule } from '../chat/adapters/adapters.module';
     WalletModule,
     ProvidersModule,
     AdaptersModule,
+    RedisModule,
   ],
   controllers: [ImageController],
-  providers: [ImageService],
+  providers: [ImageService, ImageQueueService],
   exports: [ImageService],
 })
 export class ImageModule {}
