@@ -13,6 +13,16 @@ type RequestOptions = {
   headers?: Record<string, string>;
 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 /**
  * 构建请求头，自动附加 Authorization
  */
@@ -45,8 +55,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (res.status === 401) {
       clearAuth();
     }
-    const error = await res.json().catch(() => ({ message: res.statusText })) as { message?: string };
-    throw new Error(error.message || `请求失败: ${res.status}`);
+    const error = await res.json().catch(() => ({ message: res.statusText })) as {
+      message?: string | string[];
+    };
+    const message = Array.isArray(error.message)
+      ? error.message.join('、')
+      : error.message;
+    throw new ApiError(message || `请求失败: ${res.status}`, res.status);
   }
 
   return res.json() as Promise<T>;
