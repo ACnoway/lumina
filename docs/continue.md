@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-16
-> 基线提交：`ffc0685 fix(auth): make verification code delivery reliable`
-> 分支状态：`main` 本地领先 `origin/main` 1 个提交，待推送后远程验收。
+> 基线提交：`cd1d399 feat(admin): add structured model pricing forms`
+> 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成远程验收。
 
 ## 先读这份文档
 
@@ -66,7 +66,7 @@ Set-Location ..\frontend
 已验证：
 
 1. `auth.service.spec.ts` 的 6 个认证单元测试通过，SMTP 完全 mock。
-2. 后端全量 Jest 的 12 个测试套件、35 个测试通过。
+2. 后端全量 Jest 的 14 个测试套件、50 个测试通过。
 3. Nest 生产构建通过。
 4. 未改变现有 `POST /auth/send-code` 与 `POST /auth/login` 的 API 路径或成功响应格式。
 
