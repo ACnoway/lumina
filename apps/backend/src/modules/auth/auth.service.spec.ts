@@ -89,7 +89,8 @@ function createService() {
       const values: Record<string, unknown> = {
         SMTP_HOST: 'smtp.test.local',
         SMTP_PORT: 2525,
-        SMTP_SECURE: false,
+        // ConfigModule reads process environment values as strings.
+        SMTP_SECURE: 'false',
         SMTP_USER: 'test-user',
         SMTP_PASSWORD: 'test-password',
         SMTP_FROM: 'Lumina <no-reply@test.local>',
@@ -130,6 +131,15 @@ describe('AuthService verification codes', () => {
     await expect(store.redis.get('auth:code:user@example.com')).resolves.toMatch(/^\d{6}$/);
     await expect(store.redis.ttl('auth:code:user@example.com')).resolves.toBe(300);
     await expect(store.redis.ttl('auth:code:cooldown:user@example.com')).resolves.toBe(60);
+  });
+
+  it('treats string SMTP_SECURE=false as plain SMTP', () => {
+    const createTransport = nodemailer.createTransport as jest.Mock;
+    createService();
+
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ secure: false }),
+    );
   });
 
   it('clears the code and cooldown when mail delivery fails', async () => {
