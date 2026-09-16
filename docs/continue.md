@@ -1,7 +1,7 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-16
-> 基线提交：`cd1d399 feat(admin): add structured model pricing forms`
+> 基线提交：`8b1581f feat(admin): add structured provider configuration`
 > 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成远程验收。
 
 ## 先读这份文档
@@ -25,6 +25,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
 - 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
+- 管理后台供应商已改为 API Key、Base URL、请求超时和限流输入框；前后端均校验配置格式，列表和审计不暴露 API Key。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
 
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
@@ -42,7 +43,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：14 个套件、50 个测试通过。
+- 后端 Jest：15 个套件、57 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
@@ -85,6 +86,14 @@ Set-Location ..\frontend
 `CHAT` 使用每千 token 的 `input/output`，`IMAGE` 使用每张图片的 `perImage`。
 前端提交前校验非负有限数字；后端 DTO 校验字段集合和类型，service 在创建及更新（含模型类型切换）时再次校验。
 共享类型同步收窄为按类型的计费结构，并新增 9 项校验测试。
+
+## 本次模块：供应商结构化配置表单 ✓
+
+管理后台的供应商新建表单已移除 JSON 文本框，改为四个结构化输入：API Key、Base URL、请求超时（毫秒）和限流（次/分钟）。切换 API 格式时会带出 OpenAI、Anthropic 或 Stability 的默认地址和超时时间，并保留管理员自定义的值。
+
+前端提交前校验 HTTP(S) 地址和正整数；后端 DTO 与 service 对支持字段、API Key、Base URL、超时和限流做校验，同时允许旧配置缺省非必填字段。API Key 使用密码输入框，供应商列表只展示非敏感配置摘要，既有审计逻辑也不会记录密钥。
+
+新增 `provider-config.spec.ts`，覆盖合法配置、空密钥、非法 URL、非整数超时、无效限流、多余字段和 service 直接调用保护，共 7 项测试。
 
 ## 随后的开发顺序
 
