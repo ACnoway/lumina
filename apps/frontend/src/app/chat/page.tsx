@@ -1,17 +1,22 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { chatApi } from '@/lib/chat-api';
-import type { ChatSession, ChatMessage, ChatModel } from '@/lib/chat-types';
-import { getStoredUser } from '@/lib/auth';
-import Sidebar from './components/Sidebar';
-import MessageList from './components/MessageList';
-import MessageInput from './components/MessageInput';
-import TopBar from './components/TopBar';
+import { Suspense, useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import { chatApi } from "@/lib/chat-api";
+import type { ChatSession, ChatMessage, ChatModel } from "@/lib/chat-types";
+import { getStoredUser } from "@/lib/auth";
+import Sidebar from "./components/Sidebar";
+import MessageList from "./components/MessageList";
+import MessageInput from "./components/MessageInput";
+import TopBar from "./components/TopBar";
 
-const MODEL_STORAGE_KEY = 'lumina_chat_model';
+const MODEL_STORAGE_KEY = "lumina_chat_model";
 
-export default function ChatPage() {
+function ChatPageContent() {
+  const searchParams = useSearchParams();
+  const requestedSessionId = searchParams.get("session");
+  const handledSessionParamRef = useRef<string | null>(null);
+
   // 会话状态
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -20,7 +25,7 @@ export default function ChatPage() {
 
   // 模型状态
   const [models, setModels] = useState<ChatModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>("");
 
   // 余额
   const [balance, setBalance] = useState<number | null>(null);
@@ -29,7 +34,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
 
   // 错误提示
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   // AbortController 用于取消流式请求
   const abortRef = useRef<AbortController | null>(null);
@@ -40,6 +45,21 @@ export default function ChatPage() {
     loadModels();
     loadBalance();
   }, []);
+
+  // 历史记录页通过 ?session=<id> 进入时，只在参数首次出现时定位会话，
+  // 之后用户在侧边栏切换会话不会再被旧参数覆盖。
+  useEffect(() => {
+    if (
+      !requestedSessionId ||
+      handledSessionParamRef.current === requestedSessionId
+    ) {
+      return;
+    }
+
+    handledSessionParamRef.current = requestedSessionId;
+    abortRef.current?.abort();
+    setCurrentSessionId(requestedSessionId);
+  }, [requestedSessionId]);
 
   // 切换会话时加载历史消息
   useEffect(() => {
@@ -63,7 +83,7 @@ export default function ChatPage() {
       const res = await chatApi.getSessions(1, 50);
       setSessions(res.sessions);
     } catch (err) {
-      setError('加载会话列表失败');
+      setError("加载会话列表失败");
     }
   }
 
@@ -79,7 +99,7 @@ export default function ChatPage() {
         setSelectedModel(list[0].name);
       }
     } catch {
-      setError('加载模型列表失败');
+      setError("加载模型列表失败");
     }
   }
 
@@ -94,12 +114,12 @@ export default function ChatPage() {
 
   async function loadMessages(sessionId: string) {
     setLoadingMessages(true);
-    setError('');
+    setError("");
     try {
       const res = await chatApi.getMessages(sessionId, 1, 50);
       setMessages(res.messages);
     } catch {
-      setError('加载历史消息失败');
+      setError("加载历史消息失败");
     } finally {
       setLoadingMessages(false);
     }
@@ -130,7 +150,7 @@ export default function ChatPage() {
         setMessages([]);
       }
     } catch {
-      setError('删除会话失败');
+      setError("删除会话失败");
     }
   }
 
@@ -146,11 +166,11 @@ export default function ChatPage() {
       if (!content.trim() || sending) return;
 
       if (!selectedModel) {
-        setError('请先选择模型');
+        setError("请先选择模型");
         return;
       }
 
-      setError('');
+      setError("");
       setSending(true);
 
       // 如果没有当前会话，先创建一个
@@ -162,7 +182,7 @@ export default function ChatPage() {
           setCurrentSessionId(sessionId);
           setSessions((prev) => [session, ...prev]);
         } catch {
-          setError('创建会话失败');
+          setError("创建会话失败");
           setSending(false);
           return;
         }
@@ -171,7 +191,7 @@ export default function ChatPage() {
       // 乐观更新：立即显示用户消息
       const tempUserMsg: ChatMessage = {
         id: `temp-${Date.now()}`,
-        role: 'USER',
+        role: "USER",
         content,
         tokens: null,
         cost: null,
@@ -181,8 +201,8 @@ export default function ChatPage() {
       // 空的 AI 消息占位（流式填充）
       const tempAiMsg: ChatMessage = {
         id: `temp-ai-${Date.now()}`,
-        role: 'ASSISTANT',
-        content: '',
+        role: "ASSISTANT",
+        content: "",
         tokens: null,
         cost: null,
         createdAt: new Date().toISOString(),
@@ -202,13 +222,13 @@ export default function ChatPage() {
           { signal: controller.signal },
         );
 
-        let aiContent = '';
+        let aiContent = "";
 
         for await (const event of stream) {
           if (controller.signal.aborted) break;
 
           switch (event.type) {
-            case 'content':
+            case "content":
               aiContent += event.content;
               setMessages((prev) =>
                 prev.map((m) =>
@@ -217,7 +237,7 @@ export default function ChatPage() {
               );
               break;
 
-            case 'done':
+            case "done":
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === tempAiMsg.id
@@ -234,7 +254,7 @@ export default function ChatPage() {
               loadBalance();
               break;
 
-            case 'error':
+            case "error":
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === tempAiMsg.id
@@ -250,12 +270,10 @@ export default function ChatPage() {
         // 刷新会话列表（标题可能被自动更新了）
         loadSessions();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '发送失败';
+        const msg = err instanceof Error ? err.message : "发送失败";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === tempAiMsg.id
-              ? { ...m, content: `[错误] ${msg}` }
-              : m,
+            m.id === tempAiMsg.id ? { ...m, content: `[错误] ${msg}` } : m,
           ),
         );
         setError(msg);
@@ -301,20 +319,33 @@ export default function ChatPage() {
         )}
 
         {/* 消息区域 */}
-        <MessageList
-          messages={messages}
-          loading={loadingMessages}
-        />
+        <MessageList messages={messages} loading={loadingMessages} />
 
         {/* 输入区域 */}
         <MessageInput
           onSend={handleSend}
           disabled={sending || !selectedModel}
           placeholder={
-            !selectedModel ? '请先选择模型' : '输入消息，回车发送，Shift+回车换行'
+            !selectedModel
+              ? "请先选择模型"
+              : "输入消息，回车发送，Shift+回车换行"
           }
         />
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-gray-50 text-sm text-gray-400">
+          正在加载聊天…
+        </div>
+      }
+    >
+      <ChatPageContent />
+    </Suspense>
   );
 }
