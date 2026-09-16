@@ -44,6 +44,76 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * 原子地设置一个仅在不存在时生效的 key。
+   */
+  async setNX(key: string, value: string, ttl?: number): Promise<boolean> {
+    const result = await this.client.set(key, value, {
+      NX: true,
+      ...(ttl ? { EX: ttl } : {}),
+    });
+
+    return result === 'OK';
+  }
+
+  /**
+   * 仅当 key 仍然属于当前持有者时释放锁，避免误删其他请求的新锁。
+   */
+  async releaseLock(key: string, token: string): Promise<boolean> {
+    const result = await this.client.eval(
+      `
+        if redis.call('get', KEYS[1]) == ARGV[1] then
+          return redis.call('del', KEYS[1])
+        end
+        return 0
+      `,
+      { keys: [key], arguments: [token] },
+    );
+
+    return result === 1;
+  }
+
+  async hGetAll(key: string): Promise<Record<string, string>> {
+    return this.client.hGetAll(key);
+  }
+
+  async hSet(key: string, field: string, value: string): Promise<void> {
+    await this.client.hSet(key, field, value);
+  }
+
+  async hDel(key: string, field: string): Promise<void> {
+    await this.client.hDel(key, field);
+  }
+
+  /**
+   * 原子写入预扣记录及其用户索引。
+   */
+  async setPreDeduct(
+    redisKey: string,
+    indexKey: string,
+    field: string,
+    value: string,
+    ttl: number,
+  ): Promise<void> {
+    await this.client
+      .multi()
+      .set(redisKey, value, { EX: ttl })
+      .hSet(indexKey, field, value)
+      .expire(indexKey, ttl)
+      .exec();
+  }
+
+  /**
+   * 原子删除预扣记录及其用户索引。
+   */
+  async removePreDeduct(
+    redisKey: string,
+    indexKey: string,
+    field: string,
+  ): Promise<void> {
+    await this.client.multi().del(redisKey).hDel(indexKey, field).exec();
+  }
+
   async del(key: string): Promise<void> {
     await this.client.del(key);
   }

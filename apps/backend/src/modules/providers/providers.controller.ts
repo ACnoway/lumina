@@ -13,9 +13,11 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ProvidersService } from './providers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
-import { ModelType } from '@prisma/client';
+import { ModelType, UserRole } from '@prisma/client';
 import {
   CreateProviderDto,
   UpdateProviderDto,
@@ -45,7 +47,8 @@ export class ProvidersController {
   }
 
   @Post('models')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '创建平台模型' })
   async createPlatformModel(
@@ -57,7 +60,8 @@ export class ProvidersController {
   }
 
   @Patch('models/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新平台模型' })
   async updatePlatformModel(
@@ -70,7 +74,8 @@ export class ProvidersController {
   }
 
   @Delete('models/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '删除平台模型' })
   async deletePlatformModel(
@@ -84,7 +89,8 @@ export class ProvidersController {
   // ==================== 供应商 ====================
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取所有供应商' })
   async getProviders(@CurrentUser() user: User) {
@@ -93,7 +99,8 @@ export class ProvidersController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '创建供应商' })
   async createProvider(
@@ -105,7 +112,8 @@ export class ProvidersController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新供应商' })
   async updateProvider(
@@ -118,7 +126,8 @@ export class ProvidersController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '删除供应商' })
   async deleteProvider(
@@ -132,7 +141,8 @@ export class ProvidersController {
   // ==================== 上游映射 ====================
 
   @Get('models/:id/upstreams')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取某平台模型的上游列表' })
   async getUpstreamsForPlatformModel(
@@ -144,7 +154,8 @@ export class ProvidersController {
   }
 
   @Post('models/:id/upstreams')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '为平台模型添加上游映射' })
   async addUpstreamModel(
@@ -160,7 +171,8 @@ export class ProvidersController {
   }
 
   @Patch('upstreams/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新上游映射' })
   async updateUpstreamModel(
@@ -173,7 +185,8 @@ export class ProvidersController {
   }
 
   @Delete('upstreams/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: '删除上游映射' })
   async removeUpstreamModel(
