@@ -82,6 +82,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-"Lumina <noreply@example.com>"}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change_this_password}
       INITIAL_BALANCE: ${INITIAL_BALANCE:-10.00}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       BACKEND_PORT: 3001

@@ -23,7 +23,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 聊天的会话、SSE 流式、钱包和 Provider 调用链已实现；真实上游端到端验证尚未完成。
 - 生图前端、任务查询/历史、Redis 持久化队列、重试及启动恢复已实现。
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
-- 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。
+- 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
 
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
@@ -41,7 +41,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：11 个套件、32 个测试通过。
+- 后端 Jest：12 个套件、35 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
@@ -54,7 +54,7 @@ Set-Location ..\frontend
 
 - 本机没有项目 `.env`，也没有运行 PostgreSQL、Redis、MinIO 或前后端服务。
 - `POST /auth/send-code` 仍需要真实 SMTP；当前只完成 mock SMTP 单元测试，登录不能视为端到端验收完成。
-- 没有管理员账号、Provider 配置和真实上游，聊天、生图和管理端尚未做浏览器/API 端到端验证。
+- 没有 Provider 配置和真实上游，聊天、生图和管理端尚未做浏览器/API 端到端验证；管理员账户初始化代码已有单元测试，真实数据库记录仍需远程确认。
 
 ## 本次模块：认证验证码投递可靠性（A-001）✓
 
@@ -65,11 +65,18 @@ Set-Location ..\frontend
 已验证：
 
 1. `auth.service.spec.ts` 的 6 个认证单元测试通过，SMTP 完全 mock。
-2. 后端全量 Jest 的 11 个测试套件、32 个测试通过。
+2. 后端全量 Jest 的 12 个测试套件、35 个测试通过。
 3. Nest 生产构建通过。
 4. 未改变现有 `POST /auth/send-code` 与 `POST /auth/login` 的 API 路径或成功响应格式。
 
 真实 SMTP、PostgreSQL、Redis 和 API/E2E 验收仍需在远程环境完成。
+
+## 本次修复：管理员账户自动初始化 ✓
+
+服务启动时读取 `ADMIN_EMAIL`，不存在时自动创建 `ADMIN` 账户和钱包；
+`ADMIN_PASSWORD` 以 bcrypt 哈希保存。若配置邮箱已经存在但仍是 `USER`，
+启动时会修复为 `ADMIN`，已有管理员角色不会被降级。Docker Compose 已将
+管理员配置传递给 backend，并新增 3 个初始化单元测试。
 
 ## 随后的开发顺序
 

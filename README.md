@@ -22,7 +22,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + MinIO
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；真实环境端到端验证待补
+- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
 
