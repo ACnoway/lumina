@@ -240,7 +240,7 @@ lumina/
 │       │       ├── login/page.tsx         # 登录页（已实现）
 │       │       ├── chat/                  # 已接入会话、SSE、模型和余额的聊天页
 │       │       ├── image/page.tsx         # 已接入生图 API 的页面，外部服务待验证
-│       │       ├── history/page.tsx       # 静态占位，未实现实际数据
+│       │       ├── history/page.tsx       # 聊天会话与生图历史，已接入真实 API
 │       │       └── admin/page.tsx         # 管理员工作台：用户、配置、审计
 │       ├── next.config.ts                 # rewrites /api/* → backend:3001
 │       └── package.json                   # next 14, react 18, tailwind 3
