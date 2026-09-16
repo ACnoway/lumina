@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-16
-> 基线提交：`8b1581f feat(admin): add structured provider configuration`
-> 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成远程验收。
+> 基线提交：`26c8832 test: read chat stream body once`
+> 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成 API/E2E 冒烟验收。
 
 ## 先读这份文档
 
@@ -26,6 +26,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
 - 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
 - 管理后台供应商已改为 API Key、Base URL、请求超时和限流输入框；前后端均校验配置格式，列表和审计不暴露 API Key。
+- 已建立独立 API/E2E Compose 环境，包含 PostgreSQL、Redis、MinIO、MailHog、mock Provider、backend 和 frontend；最小认证、聊天、生图和管理配置旅程已在远程通过。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
 
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
@@ -54,9 +55,9 @@ Set-Location ..\frontend
 
 ## 当前外部环境阻塞
 
-- 本机没有项目 `.env`，也没有运行 PostgreSQL、Redis、MinIO 或前后端服务。
-- `POST /auth/send-code` 仍需要真实 SMTP；当前只完成 mock SMTP 单元测试，登录不能视为端到端验收完成。
-- 没有 Provider 配置和真实上游，聊天、生图和管理端尚未做浏览器/API 端到端验证；管理员账户初始化代码已有单元测试，真实数据库记录仍需远程确认。
+- 本机没有项目 `.env`，也没有运行 PostgreSQL、Redis、MinIO 或前后端服务；本地完整 E2E 仍需 Docker。
+- mock SMTP、PostgreSQL、Redis、MinIO 和 mock Provider 的 API 最小旅程已在 `lch:/root/lumina` 通过；真实 SMTP/Provider 与浏览器流程仍未验证。
+- 管理端已验证角色边界、供应商/模型/上游创建、配置脱敏和审计；用户状态启停、余额调整审计和真实数据库长期运行仍需补验。
 
 ## 本次模块：认证验证码投递可靠性（A-001）✓
 
@@ -97,10 +98,9 @@ Set-Location ..\frontend
 
 ## 随后的开发顺序
 
-1. 建立 PostgreSQL、Redis、MinIO、SMTP mock Provider 的可复现测试环境，补认证、聊天 SSE、生图和管理端的 API/E2E 最小旅程。
-2. 在真实环境验收当前管理端的角色边界、余额调整审计、模型/Provider/上游映射的创建与启停。
-3. 处理 `docs/known-issues.md` 中的 Provider 固定窗口限流（P-001）和生图恢复后可能重复请求上游（I-001）。
-4. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
+1. 在远程真实环境补验管理端用户状态启停、余额调整及其审计链路。
+2. 处理 `docs/known-issues.md` 中的 Provider 固定窗口限流（P-001）和生图恢复后可能重复请求上游（I-001）。
+3. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
 
 ## 关键约束
 
