@@ -22,7 +22,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + MinIO
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：前端 `/admin` 路由，权限隔离
+- **管理端**：`/admin` 预留路由（管理 UI、完整 RBAC 与审计尚未实现）
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
 
@@ -119,8 +119,8 @@ apps/backend/src/
     ├── providers/         # 上游供应商（路由/熔断/限流）
     ├── chat/              # 聊天会话、流式输出
     ├── image/             # 生图任务、异步处理
-    ├── admin/             # 管理端接口
-    └── audit/             # 审计日志
+    ├── admin/             # 预留模块，尚未实现接口
+    └── audit/             # 预留模块，尚未实现审计逻辑
 ```
 
 ## 前端页面结构
@@ -159,11 +159,11 @@ pnpm --filter backend prisma:migrate   # 运行数据库迁移
 ## 开发顺序
 
 1. ~~项目脚手架~~ ✓
-2. ~~用户模块 + 邮箱验证码登录~~ ✓
+2. 用户模块 + 邮箱验证码登录（代码已实现；需配置真实 SMTP 并完成端到端验证）
 3. 钱包/账本模块（预扣-结算-退回 + 幂等键）
 4. 平台模型 + 上游供应商模块
 5. 聊天页面 + 聊天 API + 流式输出
 6. 生图页面 + 生图任务 + 扣费联调
-7. 历史记录
-8. 管理端 UI
+7. 历史记录（独立页面未完成）
+8. 管理端 UI（未完成）
 9. 验证清单逐条验证

@@ -5,6 +5,40 @@
 
 ---
 
+## 认证模块（Auth）
+
+### A-001 · 邮箱验证码发送依赖 SMTP，失败时接口返回 400（当前阻塞）
+
+- **发现时间**：2026-09-16（现状核对）
+- **文件**：`apps/backend/src/modules/auth/auth.service.ts` → `sendCode()`
+- **现象**：浏览器调用 `POST /api/auth/send-code` 收到 HTTP 400。前端通过 Next.js rewrite 转发到 `POST /auth/send-code`，路由本身存在；服务在 `transporter.sendMail()` 失败时显式抛出 `BadRequestException('邮件发送失败，请稍后重试')`。
+- **当前环境证据**：仓库没有本地 `.env`，本机也没有启动后端、Redis、PostgreSQL 或 MinIO。`.env.example` 和 Docker Compose 的默认 SMTP 主机为 `smtp.example.com`，仅是示例配置，无法投递真实邮件。因此当前登录不能标记为可用；本次未连接真实 SMTP，不能断言具体供应商错误。
+- **额外缺陷**：验证码在调用 `sendMail()` 前就被写入 Redis。邮件发送失败后，key 没有清理，后续 60 秒内再次请求可能返回“验证码已发送”；提示语把剩余 TTL 当成分钟显示，初次重试可能错误提示约“5 分钟后重试”。
+- **影响**：未配置或配置错误的 SMTP 会导致所有新用户和已注册用户无法登录；第一次投递失败后，短时间内无法立即重试。
+- **建议方案**：启动时校验 SMTP 必填配置，部署前使用 `transporter.verify()` 做健康检查；仅在成功投递后保存验证码，或在失败 catch 中删除 key；将限频窗口和提示语统一为准确的 60 秒；增加成功、SMTP 失败、重试限频三个集成测试。
+- **优先级**：P0
+- **状态**：未修复，待配置真实 SMTP 并完成端到端验证。
+
+### A-002 · 认证、聊天和生图缺少端到端测试（当前阻塞）
+
+- **发现时间**：2026-09-16（现状核对）
+- **问题**：现有 10 个单元测试只覆盖钱包并发/幂等、Provider RBAC 和 MinIO 环境变量解析；没有认证邮件、JWT 登录、聊天 SSE、图片任务、MinIO 上传或真实数据库/Redis 的 API/E2E 测试。
+- **影响**：模块可构建不代表配置、网络、第三方服务和真实请求链路可用，A-001 即为当前实例。
+- **建议方案**：在 Docker Compose 测试环境中加入 SMTP 测试服务（如 MailHog）、PostgreSQL、Redis、MinIO 和 mock Provider，覆盖登录到聊天/生图的最小用户旅程；真实供应商再单独做受控冒烟测试。
+- **优先级**：P0
+- **状态**：未修复。
+
+### A-003 · 根级验证受 pnpm 版本不一致阻塞
+
+- **发现时间**：2026-09-16（现状核对）
+- **问题**：项目声明 `packageManager: pnpm@8.15.0`，但当前环境为 pnpm 11.19.0。执行根级 `pnpm lint`、`pnpm test`、`pnpm build` 时，pnpm 在依赖目录检查阶段要求清理不兼容的 node_modules，并在非交互会话中中止。
+- **影响**：无法以仓库定义的根脚本完成当前基线验证；CI 与本地的工具链结果也可能不一致。
+- **建议方案**：统一开发机和 CI 使用 pnpm 8.15.0，先以干净安装执行 `pnpm install --frozen-lockfile`；同时把 lint 拆分为只检查的 `lint` 和显式修复的 `lint:fix`，避免验证命令改写源文件。
+- **优先级**：P1
+- **状态**：未修复。
+
+---
+
 ## 钱包模块（Wallet）
 
 ### W-001 · preDeduct 并发安全非原子操作（已修复）
