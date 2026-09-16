@@ -11,6 +11,13 @@
 - 远程环境验证：`pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test`（2 suites / 7 tests）、`pnpm build` 全部通过；lint 保留仓库既有的 31 个 `any` 警告。
 - 同步修复 Turbo 2.x 的 `pipeline` 配置兼容性，以及 frontend/backend 的非交互 lint 配置。
 
+## CI ✓
+
+- 新增 `.github/workflows/ci.yml`，固定 pnpm `8.15.0` 和 Node.js `20`。
+- clean checkout 后依次执行依赖安装、Prisma Client 生成、`pnpm lint`、`pnpm test`、`pnpm build`。
+- 当前测试只包含不依赖 PostgreSQL、Redis、MinIO 或真实 AI API 的单元测试，因此 workflow 暂不启动外部服务。
+- 上述命令链已在 `lch:/root/lumina` 验证通过；GitHub Actions 首次运行结果待平台触发后确认。
+
 ## 开发顺序总览
 
 1. ~~项目脚手架~~ ✓
