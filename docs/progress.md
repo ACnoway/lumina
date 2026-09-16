@@ -2,6 +2,15 @@
 
 > 按 README 开发顺序逐步推进，每步完成即 commit + push。
 
+## 第一轮 P0 安全与计费修复 ✓
+
+- Provider、Platform Model、Upstream Model 的管理查询与 mutation API 已增加 `ADMIN` / `SUPER_ADMIN` RBAC；普通 `USER` 无法修改配置，也无法读取包含 Provider 配置的管理查询结果。
+- Wallet 预扣已使用用户级 Redis 分布式锁，并通过带 TTL 的预扣索引统计同一用户的全部活动 reservation；预扣记录和索引使用 Redis transaction 原子写入/删除。
+- Wallet 结算已将幂等检查放入锁内，并使用数据库条件扣减作为余额非负和并发更新的最终保护；充值、管理员调整也纳入同一用户锁。
+- 新增 RBAC 测试与 Wallet 并发/幂等测试：100 个相同 key 并发、100 个不同 key 并发、并发 settle、refund retry。
+- 远程环境验证：`pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test`（2 suites / 7 tests）、`pnpm build` 全部通过；lint 保留仓库既有的 31 个 `any` 警告。
+- 同步修复 Turbo 2.x 的 `pipeline` 配置兼容性，以及 frontend/backend 的非交互 lint 配置。
+
 ## 开发顺序总览
 
 1. ~~项目脚手架~~ ✓
