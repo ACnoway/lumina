@@ -29,6 +29,32 @@ const API_FORMATS: Array<{ value: ApiFormat; label: string }> = [
   { value: "stability_image", label: "Stability Image" },
 ];
 
+const PROVIDER_DEFAULTS: Record<
+  ApiFormat,
+  { baseUrl: string; timeout: string }
+> = {
+  openai_chat: {
+    baseUrl: "https://api.openai.com/v1",
+    timeout: "30000",
+  },
+  openai_compatible: {
+    baseUrl: "https://api.openai.com/v1",
+    timeout: "30000",
+  },
+  anthropic_messages: {
+    baseUrl: "https://api.anthropic.com/v1",
+    timeout: "30000",
+  },
+  openai_image: {
+    baseUrl: "https://api.openai.com/v1",
+    timeout: "60000",
+  },
+  stability_image: {
+    baseUrl: "https://api.stability.ai",
+    timeout: "120000",
+  },
+};
+
 type Tab = "overview" | "users" | "config" | "audit";
 type AccessState = "checking" | "allowed" | "forbidden" | "expired";
 
@@ -57,6 +83,21 @@ function formatModelPricing(model: PlatformModelDto): string {
     return `输入 ¥${formatPrice(model.pricing.input)} / 千 token · 输出 ¥${formatPrice(model.pricing.output)} / 千 token`;
   }
   return `¥${formatPrice(model.pricing.perImage)} / 张`;
+}
+
+function formatProviderConfig(provider: ProviderDto): string {
+  const config = provider.config;
+  const baseUrl =
+    typeof config.baseUrl === "string" && config.baseUrl.trim()
+      ? config.baseUrl
+      : "默认地址";
+  const timeout = Number.isSafeInteger(config.timeout)
+    ? `${config.timeout}ms`
+    : "默认超时";
+  const rateLimit = Number.isSafeInteger(config.rateLimit)
+    ? `${config.rateLimit} 次/分钟`
+    : "默认限流";
+  return `${baseUrl} · 超时 ${timeout} · ${rateLimit}`;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -90,6 +131,30 @@ function parseNonNegativePrice(value: string, label: string): number {
     throw new Error(`${label}必须是大于等于 0 的有限数字`);
   }
   return parsed;
+}
+
+function parsePositiveInteger(value: string, label: string): number {
+  if (!value.trim()) {
+    throw new Error(`${label}不能为空`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${label}必须是大于 0 的整数`);
+  }
+  return parsed;
+}
+
+function parseHttpUrl(value: string, label: string): string {
+  const trimmed = value.trim();
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error();
+    }
+  } catch {
+    throw new Error(`${label}必须是有效的 HTTP(S) 地址`);
+  }
+  return trimmed;
 }
 
 function statusLabel(status: UserStatus): string {
@@ -229,7 +294,12 @@ export default function AdminPage() {
     name: "",
     apiFormat: "openai_chat" as ApiFormat,
     supportsStreaming: true,
-    config: '{\n  "apiKey": "",\n  "baseUrl": "",\n  "timeout": 30000\n}',
+    config: {
+      apiKey: "",
+      baseUrl: PROVIDER_DEFAULTS.openai_chat.baseUrl,
+      timeout: PROVIDER_DEFAULTS.openai_chat.timeout,
+      rateLimit: "60",
+    },
     isActive: true,
   });
   const [upstreamForm, setUpstreamForm] = useState({
@@ -506,11 +576,28 @@ export default function AdminPage() {
     setMutatingResource("provider-form");
     try {
       if (!providerForm.name.trim()) throw new Error("请填写供应商名称");
+      if (!providerForm.config.apiKey.trim()) {
+        throw new Error("请填写供应商 API Key");
+      }
+      const baseUrl = parseHttpUrl(providerForm.config.baseUrl, "Base URL");
+      const timeout = parsePositiveInteger(
+        providerForm.config.timeout,
+        "请求超时",
+      );
+      const rateLimit = parsePositiveInteger(
+        providerForm.config.rateLimit,
+        "限流",
+      );
       await adminApi.createProvider({
         name: providerForm.name.trim(),
         apiFormat: providerForm.apiFormat,
         supportsStreaming: providerForm.supportsStreaming,
-        config: parseObject(providerForm.config, "供应商配置"),
+        config: {
+          apiKey: providerForm.config.apiKey.trim(),
+          baseUrl,
+          timeout,
+          rateLimit,
+        },
         isActive: providerForm.isActive,
       });
       setNotice("供应商已创建");
@@ -1322,12 +1409,33 @@ export default function AdminPage() {
                       />
                       <select
                         value={providerForm.apiFormat}
-                        onChange={(event) =>
-                          setProviderForm((current) => ({
-                            ...current,
-                            apiFormat: event.target.value as ApiFormat,
-                          }))
-                        }
+                        onChange={(event) => {
+                          const nextFormat = event.target.value as ApiFormat;
+                          setProviderForm((current) => {
+                            const previousDefaults = PROVIDER_DEFAULTS[
+                              current.apiFormat
+                            ];
+                            const nextDefaults = PROVIDER_DEFAULTS[nextFormat];
+                            return {
+                              ...current,
+                              apiFormat: nextFormat,
+                              config: {
+                                ...current.config,
+                                baseUrl:
+                                  !current.config.baseUrl.trim() ||
+                                  current.config.baseUrl ===
+                                    previousDefaults.baseUrl
+                                    ? nextDefaults.baseUrl
+                                    : current.config.baseUrl,
+                                timeout:
+                                  !current.config.timeout.trim() ||
+                                  current.config.timeout === previousDefaults.timeout
+                                    ? nextDefaults.timeout
+                                    : current.config.timeout,
+                              },
+                            };
+                          });
+                        }}
                         className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
                       >
                         {API_FORMATS.map((format) => (
@@ -1337,19 +1445,97 @@ export default function AdminPage() {
                         ))}
                       </select>
                     </div>
-                    <textarea
-                      value={providerForm.config}
-                      onChange={(event) =>
-                        setProviderForm((current) => ({
-                          ...current,
-                          config: event.target.value,
-                        }))
-                      }
-                      rows={6}
-                      spellCheck={false}
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs"
-                      aria-label="供应商配置 JSON"
-                    />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1 text-xs text-gray-500">
+                        <span className="block font-medium text-gray-700">
+                          API Key
+                        </span>
+                        <input
+                          value={providerForm.config.apiKey}
+                          onChange={(event) =>
+                            setProviderForm((current) => ({
+                              ...current,
+                              config: {
+                                ...current.config,
+                                apiKey: event.target.value,
+                              },
+                            }))
+                          }
+                          type="password"
+                          autoComplete="new-password"
+                          required
+                          placeholder="sk-…"
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-gray-500">
+                        <span className="block font-medium text-gray-700">
+                          Base URL
+                        </span>
+                        <input
+                          value={providerForm.config.baseUrl}
+                          onChange={(event) =>
+                            setProviderForm((current) => ({
+                              ...current,
+                              config: {
+                                ...current.config,
+                                baseUrl: event.target.value,
+                              },
+                            }))
+                          }
+                          type="url"
+                          required
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-gray-500">
+                        <span className="block font-medium text-gray-700">
+                          请求超时（毫秒）
+                        </span>
+                        <input
+                          value={providerForm.config.timeout}
+                          onChange={(event) =>
+                            setProviderForm((current) => ({
+                              ...current,
+                              config: {
+                                ...current.config,
+                                timeout: event.target.value,
+                              },
+                            }))
+                          }
+                          type="number"
+                          min="1"
+                          step="1"
+                          required
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-gray-500">
+                        <span className="block font-medium text-gray-700">
+                          限流（次 / 分钟）
+                        </span>
+                        <input
+                          value={providerForm.config.rateLimit}
+                          onChange={(event) =>
+                            setProviderForm((current) => ({
+                              ...current,
+                              config: {
+                                ...current.config,
+                                rateLimit: event.target.value,
+                              },
+                            }))
+                          }
+                          type="number"
+                          min="1"
+                          step="1"
+                          required
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      API Key 只用于调用上游，不会显示在供应商列表或审计日志中。
+                    </p>
                     <div className="flex gap-4 text-sm text-gray-600">
                       <label className="flex items-center gap-2">
                         <input
@@ -1411,6 +1597,9 @@ export default function AdminPage() {
                               {provider.supportsStreaming
                                 ? "支持流式"
                                 : "非流式"}
+                            </p>
+                            <p className="mt-2 max-w-[28rem] truncate text-xs text-gray-500">
+                              {formatProviderConfig(provider)}
                             </p>
                           </div>
                           <Toggle

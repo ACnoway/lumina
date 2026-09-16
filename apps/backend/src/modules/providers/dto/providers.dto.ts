@@ -14,8 +14,20 @@ import {
 } from 'class-validator';
 import { ApiFormat, ModelType } from '@lumina/shared';
 import { getPlatformModelPricingError } from '../platform-model-pricing';
+import { getProviderConfigError } from '../provider-config';
 
 // ==================== 供应商 DTO ====================
+@ValidatorConstraint({ name: 'providerConfig', async: false })
+export class ProviderConfigConstraint implements ValidatorConstraintInterface {
+  validate(config: unknown): boolean {
+    return getProviderConfigError(config) === null;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return getProviderConfigError(args.value) || '供应商配置不合法';
+  }
+}
+
 export class CreateProviderDto {
   @ApiProperty({ description: '供应商名称', example: 'openai' })
   @IsString({ message: '名称必须是字符串' })
@@ -37,10 +49,16 @@ export class CreateProviderDto {
   supportsStreaming?: boolean;
 
   @ApiProperty({
-    description: '配置信息（apiKey, baseUrl, timeout, rateLimit 等）',
-    example: { apiKey: 'sk-xxx', baseUrl: 'https://api.openai.com/v1', timeout: 30000 },
+    description: '配置信息（apiKey, baseUrl, timeout, rateLimit）',
+    example: {
+      apiKey: 'sk-xxx',
+      baseUrl: 'https://api.openai.com/v1',
+      timeout: 30000,
+      rateLimit: 60,
+    },
   })
   @IsObject({ message: 'config 必须是对象' })
+  @Validate(ProviderConfigConstraint)
   config!: Record<string, any>;
 
   @ApiProperty({ description: '是否启用', default: true, required: false })

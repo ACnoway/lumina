@@ -16,6 +16,7 @@ import {
   ApiFormat,
 } from '@prisma/client';
 import { assertValidPlatformModelPricing } from './platform-model-pricing';
+import { assertValidProviderConfig } from './provider-config';
 
 /**
  * 路由结果
@@ -197,6 +198,8 @@ export class ProvidersService {
     config: Record<string, any>;
     isActive?: boolean;
   }): Promise<Provider> {
+    assertValidProviderConfig(data.config);
+
     const exists = await this.prisma.provider.findUnique({
       where: { name: data.name },
     });
@@ -232,6 +235,10 @@ export class ProvidersService {
     const provider = await this.prisma.provider.findUnique({ where: { id } });
     if (!provider) {
       throw new NotFoundException('供应商不存在');
+    }
+
+    if (data.config !== undefined) {
+      assertValidProviderConfig(data.config);
     }
 
     if (data.name && data.name !== provider.name) {
