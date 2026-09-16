@@ -3,7 +3,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-RUN npm install -g pnpm@8
+# Prisma's Alpine engines dynamically link against OpenSSL.  Without this
+# package Prisma cannot detect the available libssl version and falls back to
+# an incompatible OpenSSL 1.1 engine at runtime.
+RUN apk add --no-cache openssl \
+  && npm install -g pnpm@8
 
 # Copy entire workspace (respect .dockerignore)
 COPY . .
@@ -25,7 +29,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-RUN npm install -g pnpm@8
+# Keep the runtime libssl present as well: the Prisma query/schema engines are
+# executed after this stage has been built.
+RUN apk add --no-cache openssl \
+  && npm install -g pnpm@8
 
 COPY --from=builder /app ./
 
