@@ -99,6 +99,9 @@ export class MinioService implements OnModuleInit {
           accessKey,
           secretKey,
           pathStyle: true,
+          // MinIO 默认使用 us-east-1，固定区域可避免 SDK 为预签名地址
+          // 先通过公开域名发起 getBucketRegion 请求。
+          region: 'us-east-1',
         })
       : this.client;
 

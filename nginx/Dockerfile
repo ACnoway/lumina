@@ -48,6 +48,16 @@ server {
         proxy_read_timeout 600s;
     }
 
+    # MinIO SDK 的区域探测请求不带尾斜杠，单独转发到 MinIO。
+    location = /lumina-images {
+        proxy_pass http://minio:9000/lumina-images;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # 使用 bucket 作为路径前缀，且不改写 URI，保证 S3 预签名路径一致。
     location /lumina-images/ {
         proxy_pass http://minio:9000;

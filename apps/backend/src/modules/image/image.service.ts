@@ -275,8 +275,8 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       try {
         taskId = await this.imageQueueService.take(QUEUE_BLOCK_TIMEOUT_SECONDS);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`读取生图队列失败: ${message}`);
+        const message = this.describeError(error);
+        this.logger.error(`读取生图队列失败: ${message}`, this.getErrorStack(error));
         await this.waitForNextPoll();
         continue;
       }
@@ -286,8 +286,11 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       try {
         await this.processQueuedTask(taskId);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`处理生图任务异常: taskId=${taskId}, err=${message}`);
+        const message = this.describeError(error);
+        this.logger.error(
+          `处理生图任务异常: taskId=${taskId}, err=${message}`,
+          this.getErrorStack(error),
+        );
       } finally {
         try {
           await this.imageQueueService.acknowledge(taskId);
@@ -376,7 +379,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         parameters,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '任务初始化失败';
+      const message = this.describeError(error, '任务初始化失败');
       await this.retryOrFail(task.id, parameters, message);
     }
   }
@@ -514,7 +517,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     try {
       await this.walletService.preDeduct(userId, chargeAmount, idempotencyKey);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '预扣失败';
+      const msg = this.describeError(error, '预扣失败');
       await this.retryOrFail(taskId, taskParameters, msg);
       return;
     }
@@ -524,7 +527,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     try {
       resolved = await this.providersService.resolveUpstream(modelName);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '路由失败';
+      const msg = this.describeError(error, '路由失败');
       await this.walletService.refund(userId, idempotencyKey, '生图路由失败');
       await this.retryOrFail(taskId, taskParameters, msg);
       return;
@@ -539,6 +542,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     // 3. 调用上游生图 API
     let settled = false;
     let upstreamSucceeded = false;
+    let processingStage = '上游生图 API';
     try {
       const providerConfig = (resolved.provider.config as Record<string, any>) || {};
       const size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
@@ -576,13 +580,16 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       }
 
       // 4. 上传到 MinIO
+      processingStage = 'MinIO 上传';
       const objectName = `images/${taskId}.png`;
       await this.minioService.upload(objectName, imageBuffer, imageBuffer.length);
 
       // 获取预签名 URL
+      processingStage = 'MinIO 生成预签名 URL';
       const presignedUrl = await this.minioService.getPresignedUrl(objectName);
 
       // 5. 结算
+      processingStage = '钱包结算';
       await this.walletService.settle(
         userId,
         chargeAmount,
@@ -593,6 +600,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       settled = true;
 
       // 6. 更新任务状态为成功
+      processingStage = '保存任务结果';
       await this.prisma.imageGeneration.update({
         where: { id: taskId },
         data: {
@@ -606,20 +614,27 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       });
 
       // 记录上游成功
+      processingStage = '记录上游结果';
       await resolved.recordResult(true);
 
       this.logger.log(`生图任务完成: taskId=${taskId}, cost=${chargeAmount}`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : '生图失败';
+      const details = this.describeError(error);
+      const msg = `阶段=${processingStage}; ${details}`;
+      this.logger.error(
+        `生图任务处理失败: taskId=${taskId}, ${msg}`,
+        this.getErrorStack(error),
+      );
 
       if (!settled) {
         // 退回预扣后才允许重试；相同 idempotency key 保证重试不会重复扣费。
         await this.walletService.refund(userId, idempotencyKey, `生图失败: ${msg}`);
         if (!upstreamSucceeded) {
           await resolved.recordResult(false).catch((recordError) => {
-            const recordMessage =
-              recordError instanceof Error ? recordError.message : String(recordError);
-            this.logger.warn(`记录上游失败结果异常: ${recordMessage}`);
+            const recordMessage = this.describeError(recordError);
+            this.logger.warn(
+              `记录上游失败结果异常: ${recordMessage}`,
+            );
           });
         }
         await this.retryOrFail(taskId, taskParameters, msg);
@@ -634,8 +649,41 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       if (latestTask?.status !== 'SUCCESS') {
         await this.failTask(taskId, `已结算但任务状态保存失败: ${msg}`);
       }
-      this.logger.error(`生图任务结算后处理异常: taskId=${taskId}, err=${msg}`);
+      this.logger.error(
+        `生图任务结算后处理异常: taskId=${taskId}, ${msg}`,
+        this.getErrorStack(error),
+      );
     }
+  }
+
+  private describeError(error: unknown, fallback = '未知错误'): string {
+    if (error instanceof Error) {
+      const name = error.name || 'Error';
+      const message = error.message?.trim() || '未提供错误消息';
+      const code =
+        'code' in error && typeof error.code === 'string'
+          ? `, code=${error.code}`
+          : '';
+      return `${name}: ${message}${code}`;
+    }
+
+    if (typeof error === 'string') {
+      return error.trim() || fallback;
+    }
+
+    if (error && typeof error === 'object') {
+      try {
+        return JSON.stringify(error) || fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    return fallback;
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
   }
 
   /**

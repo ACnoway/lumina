@@ -198,7 +198,7 @@ describe('ImageService durable queue integration', () => {
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',
       'image:task-1',
-      '生图失败: 结算失败',
+      '生图失败: 阶段=钱包结算; Error: 结算失败',
     );
     expect(recordResult).not.toHaveBeenCalledWith(false);
     expect(prisma.imageGeneration.updateMany).toHaveBeenLastCalledWith(
@@ -206,5 +206,44 @@ describe('ImageService durable queue integration', () => {
         data: expect.objectContaining({ status: 'PENDING' }),
       }),
     );
+  });
+
+  it('keeps the processing stage when MinIO returns an empty error message', async () => {
+    const { service, prisma, wallet, providers, minio } = createService();
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult,
+    });
+    prisma.imageGeneration.update.mockResolvedValue({});
+    (service as any).callOpenAIImage = jest.fn().mockResolvedValue({
+      imageBuffer: Buffer.from('image'),
+    });
+    minio.getPresignedUrl.mockRejectedValue(
+      Object.assign(new Error(), { name: 'S3Error', code: 'NotFound' }),
+    );
+
+    await (service as any).processImageTask(
+      'user-1',
+      'task-1',
+      'a blue house',
+      undefined,
+      'image-model',
+      '1:1',
+      0.5,
+      { retryCount: 0 },
+    );
+
+    const retryData = prisma.imageGeneration.updateMany.mock.calls.at(-1)?.[0].data;
+    expect(retryData.errorMessage).toContain(
+      '阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
+    );
+    expect(wallet.refund).toHaveBeenCalledWith(
+      'user-1',
+      'image:task-1',
+      '生图失败: 阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
+    );
+    expect(recordResult).not.toHaveBeenCalledWith(false);
   });
 });
