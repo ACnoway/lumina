@@ -12,7 +12,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestJson(path, options = {}, expectedStatuses = [200]) {
+async function requestJson(path, options = {}, expectedStatuses) {
+  const allowedStatuses =
+    expectedStatuses || (options.method === 'POST' ? [200, 201] : [200]);
   const headers = new Headers(options.headers || {});
   if (options.body !== undefined && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
@@ -32,8 +34,8 @@ async function requestJson(path, options = {}, expectedStatuses = [200]) {
   }
 
   assert(
-    expectedStatuses.includes(response.status),
-    `${options.method || 'GET'} ${path} expected ${expectedStatuses.join(', ')}, got ${response.status}: ${text}`,
+    allowedStatuses.includes(response.status),
+    `${options.method || 'GET'} ${path} expected ${allowedStatuses.join(', ')}, got ${response.status}: ${text}`,
   );
 
   return { response, data, text };
@@ -103,7 +105,7 @@ function authHeaders(token) {
   return { authorization: `Bearer ${token}` };
 }
 
-async function requestAuth(token, path, options = {}, expectedStatuses = [200]) {
+async function requestAuth(token, path, options = {}, expectedStatuses) {
   return requestJson(
     path,
     { ...options, headers: { ...authHeaders(token), ...(options.headers || {}) } },
