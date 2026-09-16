@@ -425,6 +425,8 @@ export default function ImagePage() {
 
           {task?.status === 'SUCCESS' && task.imageUrl ? (
             <div className="overflow-hidden rounded-xl bg-gray-100">
+              {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={task.imageUrl} alt={task.prompt} className="h-auto w-full object-contain" />
             </div>
           ) : task && (task.status === 'PENDING' || task.status === 'PROCESSING') ? (
@@ -492,6 +494,7 @@ export default function ImagePage() {
                   className="group overflow-hidden rounded-xl border border-gray-200 text-left transition hover:border-blue-300 hover:shadow-sm"
                 >
                   {historyTask.imageUrl ? (
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={historyTask.imageUrl} alt={historyTask.prompt} className="h-32 w-full object-cover" />
                   ) : (
                     <div className="flex h-32 items-center justify-center bg-gray-50 text-xs text-gray-400">
