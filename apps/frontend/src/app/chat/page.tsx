@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { chatApi } from "@/lib/chat-api";
 import type { ChatSession, ChatMessage, ChatModel } from "@/lib/chat-types";
 import { getStoredUser } from "@/lib/auth";
+import AppHeader from "@/components/AppHeader";
 import Sidebar from "./components/Sidebar";
 import MessageList from "./components/MessageList";
 import MessageInput from "./components/MessageInput";
@@ -289,50 +290,49 @@ function ChatPageContent() {
   const user = getStoredUser();
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* 侧边栏 */}
-      <div className="hidden md:flex">
-        <Sidebar
-          sessions={sessions}
-          currentSessionId={currentSessionId}
-          onNewSession={handleNewSession}
-          onSelectSession={handleSelectSession}
-          onDeleteSession={handleDeleteSession}
-        />
+    <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
+      <AppHeader title="AI 聊天" active="chat" />
+
+      <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="hidden lg:block">
+          <Sidebar
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            onNewSession={handleNewSession}
+            onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
+          />
+        </div>
+
+        <section className="flex min-h-[calc(100vh-148px)] min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <TopBar
+            models={models}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            balance={balance}
+            userEmail={user?.email ?? null}
+          />
+
+          {error && (
+            <div className="mx-5 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+              {error}
+            </div>
+          )}
+
+          <MessageList messages={messages} loading={loadingMessages} />
+
+          <MessageInput
+            onSend={handleSend}
+            disabled={sending || !selectedModel}
+            placeholder={
+              !selectedModel
+                ? "请先选择模型"
+                : "输入消息，回车发送，Shift+回车换行"
+            }
+          />
+        </section>
       </div>
-
-      {/* 主区域 */}
-      <div className="flex flex-1 flex-col">
-        <TopBar
-          models={models}
-          selectedModel={selectedModel}
-          onModelChange={handleModelChange}
-          balance={balance}
-          userEmail={user?.email ?? null}
-        />
-
-        {/* 错误提示 */}
-        {error && (
-          <div className="mx-4 mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-            {error}
-          </div>
-        )}
-
-        {/* 消息区域 */}
-        <MessageList messages={messages} loading={loadingMessages} />
-
-        {/* 输入区域 */}
-        <MessageInput
-          onSend={handleSend}
-          disabled={sending || !selectedModel}
-          placeholder={
-            !selectedModel
-              ? "请先选择模型"
-              : "输入消息，回车发送，Shift+回车换行"
-          }
-        />
-      </div>
-    </div>
+    </main>
   );
 }
 
@@ -340,7 +340,7 @@ export default function ChatPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-gray-50 text-sm text-gray-400">
+        <div className="flex min-h-screen items-center justify-center bg-[#f7f7f5] text-sm text-gray-400">
           正在加载聊天…
         </div>
       }

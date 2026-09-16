@@ -18,21 +18,27 @@ export default function Sidebar({
   onDeleteSession,
 }: SidebarProps) {
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-gray-200 bg-white">
-      {/* 新建按钮 */}
-      <div className="p-4">
+    <aside className="flex min-h-[calc(100vh-148px)] w-full flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="flex items-center justify-between px-2 pb-3 pt-1">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">Workspace</p>
+          <h2 className="mt-1 text-sm font-semibold text-gray-800">对话记录</h2>
+        </div>
+        <span className="text-xl text-blue-600">✦</span>
+      </div>
+
+      <div className="px-1 pb-3">
         <button
           onClick={onNewSession}
-          className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2"
         >
-          + 新建对话
+          <span className="mr-1.5 text-base">+</span>新建对话
         </button>
       </div>
 
-      {/* 会话列表 */}
-      <div className="flex-1 overflow-y-auto px-2 pb-4">
+      <div className="flex-1 overflow-y-auto px-1 pb-2">
         {sessions.length === 0 ? (
-          <div className="px-3 py-8 text-center text-sm text-gray-400">
+          <div className="rounded-xl border border-dashed border-gray-200 px-3 py-8 text-center text-sm text-gray-400">
             暂无会话
           </div>
         ) : (
@@ -41,10 +47,10 @@ export default function Sidebar({
               <li key={session.id}>
                 <div
                   onClick={() => onSelectSession(session.id)}
-                  className={`group flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                  className={`group flex cursor-pointer items-center justify-between rounded-xl border px-3 py-2.5 text-sm transition-colors ${
                     session.id === currentSessionId
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-600 hover:bg-gray-100'
+                      ? 'border-blue-100 bg-blue-50 text-blue-700'
+                      : 'border-transparent text-gray-600 hover:border-gray-100 hover:bg-gray-50'
                   }`}
                 >
                   <span className="flex-1 truncate">
@@ -55,7 +61,7 @@ export default function Sidebar({
                       e.stopPropagation();
                       onDeleteSession(session.id);
                     }}
-                    className="ml-2 hidden text-gray-400 hover:text-red-500 group-hover:block"
+                    className="ml-2 hidden rounded-md px-1 text-gray-400 hover:bg-red-50 hover:text-red-500 group-hover:block"
                     title="删除会话"
                   >
                     ×

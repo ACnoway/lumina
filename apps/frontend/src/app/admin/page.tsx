@@ -17,6 +17,7 @@ import type {
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
+import AppHeader from "@/components/AppHeader";
 
 const PAGE_SIZE = 20;
 const ADMIN_ROLES: UserRole[] = ["ADMIN", "SUPER_ADMIN"];
@@ -620,35 +621,20 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Lumina
-            </p>
-            <h1 className="mt-1 text-xl font-semibold">管理后台</h1>
-          </div>
-          <div className="flex items-center gap-4 text-sm">
-            <nav className="flex gap-3 text-gray-500" aria-label="主导航">
-              <Link className="hover:text-blue-600" href="/chat">
-                聊天
-              </Link>
-              <Link className="hover:text-blue-600" href="/image">
-                AI 生图
-              </Link>
-              <Link className="hover:text-blue-600" href="/history">
-                历史
-              </Link>
-            </nav>
+      <AppHeader
+        title="管理后台"
+        maxWidth="7xl"
+        trailing={(
+          <>
             <span className="hidden rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 sm:inline">
               {actor?.role}
             </span>
             <span className="max-w-40 truncate text-xs text-gray-400">
               {actor?.email}
             </span>
-          </div>
-        </div>
-      </header>
+          </>
+        )}
+      />
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         <div className="mb-6 flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">

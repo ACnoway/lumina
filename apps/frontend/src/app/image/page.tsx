@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ImageStatus, ImageTaskDto, PlatformModelDto } from '@lumina/shared';
 import { ApiError } from '@/lib/api-client';
 import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
+import AppHeader from '@/components/AppHeader';
 
 const MODEL_STORAGE_KEY = 'lumina_image_model';
 const ACTIVE_TASK_STORAGE_KEY = 'lumina_image_active_task';
@@ -256,24 +257,7 @@ export default function ImagePage() {
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Lumina Studio
-            </p>
-            <h1 className="mt-1 text-xl font-semibold">AI 生图</h1>
-          </div>
-          <nav className="flex items-center gap-4 text-sm text-gray-500">
-            <Link className="hover:text-blue-600" href="/chat">
-              聊天
-            </Link>
-            <Link className="hover:text-blue-600" href="/history">
-              历史记录
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader title="AI 生图" active="image" />
 
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">

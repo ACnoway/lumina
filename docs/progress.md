@@ -254,7 +254,7 @@ lumina/
 │       │   ├── middleware.ts              # 路由保护
 │       │   └── app/
 │       │       ├── layout.tsx             # 根布局
-│       │       ├── page.tsx               # 首页 → redirect /chat
+│       │       ├── page.tsx               # 公开首页：AI 生图与 AI 聊天入口
 │       │       ├── login/page.tsx         # 登录页（已实现）
 │       │       ├── chat/                  # 已接入会话、SSE、模型和余额的聊天页
 │       │       ├── image/page.tsx         # 已接入生图 API 的页面，外部服务待验证

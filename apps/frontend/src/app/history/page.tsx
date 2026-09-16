@@ -10,6 +10,7 @@ import type {
 import { ApiError } from "@/lib/api-client";
 import { chatApi } from "@/lib/chat-api";
 import { imageApi, type ImageTaskResponse } from "@/lib/image-api";
+import AppHeader from "@/components/AppHeader";
 
 const PAGE_SIZE = 12;
 
@@ -245,27 +246,7 @@ export default function HistoryPage() {
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Lumina
-            </p>
-            <h1 className="mt-1 text-xl font-semibold">历史记录</h1>
-          </div>
-          <nav
-            className="flex items-center gap-4 text-sm text-gray-500"
-            aria-label="主导航"
-          >
-            <Link className="hover:text-blue-600" href="/chat">
-              聊天
-            </Link>
-            <Link className="hover:text-blue-600" href="/image">
-              AI 生图
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader title="历史记录" active="history" />
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">

@@ -18,7 +18,7 @@ export default function MessageList({ messages, loading }: MessageListProps) {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center bg-[#fdfdfc]">
         <div className="text-sm text-gray-400">加载中...</div>
       </div>
     );
@@ -26,17 +26,18 @@ export default function MessageList({ messages, loading }: MessageListProps) {
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="text-center text-gray-400">
-          <p className="text-lg">开始一段新对话</p>
-          <p className="mt-1 text-sm">输入消息，按回车发送</p>
+      <div className="flex flex-1 items-center justify-center bg-[#fdfdfc] px-5 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-blue-600">✦</div>
+          <p className="font-medium text-gray-600">开始一段新对话</p>
+          <p className="mt-2 text-sm text-gray-400">输入消息，按回车发送，Shift+回车换行</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6">
+    <div className="flex-1 overflow-y-auto bg-[#fdfdfc] px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-3xl space-y-4">
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
@@ -56,7 +57,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-2.5 text-white">
+        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-3 text-white shadow-sm">
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
         </div>
       </div>
@@ -69,8 +70,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       <div
         className={`max-w-[80%] rounded-2xl rounded-bl-md px-4 py-2.5 ${
           isError
-            ? 'bg-red-50 text-red-600'
-            : 'bg-gray-100 text-gray-800'
+            ? 'border border-red-100 bg-red-50 text-red-600'
+            : 'border border-gray-100 bg-white text-gray-800 shadow-sm'
         }`}
       >
         {isPending ? (

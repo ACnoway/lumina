@@ -136,7 +136,7 @@ apps/backend/src/
 ```
 apps/frontend/src/app/
 ├── layout.tsx             # 根布局
-├── page.tsx               # 首页（重定向到 /chat）
+├── page.tsx               # 公开首页（展示 AI 生图与 AI 聊天入口）
 ├── login/                 # 登录页
 ├── chat/                  # 聊天页
 ├── image/                 # 生图页
