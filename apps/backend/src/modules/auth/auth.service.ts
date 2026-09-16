@@ -1,15 +1,13 @@
-import {
-  Injectable,
-  Logger,
-  UnauthorizedException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { RedisService } from '../../redis/redis.service';
 import { UsersService } from '../users/users.service';
 import { User } from '@prisma/client';
+
+const VERIFICATION_CODE_TTL_SECONDS = 300;
+const SEND_COOLDOWN_TTL_SECONDS = 60;
 
 @Injectable()
 export class AuthService {
@@ -41,36 +39,72 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private getCodeKey(email: string): string {
+    return `auth:code:${email}`;
+  }
+
+  private getCooldownKey(email: string): string {
+    return `auth:code:cooldown:${email}`;
+  }
+
+  private async clearSendState(email: string, clearCode: boolean): Promise<void> {
+    const keys = [this.getCooldownKey(email)];
+    if (clearCode) {
+      keys.push(this.getCodeKey(email));
+    }
+
+    const results = await Promise.allSettled(keys.map((key) => this.redis.del(key)));
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.warn(`Failed to clear auth state ${keys[index]}: ${String(result.reason)}`);
+      }
+    });
+  }
+
+  private async reserveSendCooldown(cooldownKey: string): Promise<number | null> {
+    const acquired = await this.redis.setNX(cooldownKey, '1', SEND_COOLDOWN_TTL_SECONDS);
+    if (acquired) {
+      return null;
+    }
+
+    // TTL 过期与读取之间可能发生竞态，重新尝试一次，避免把已结束的
+    // 冷却窗口错误地报告给用户。
+    let ttl = await this.redis.ttl(cooldownKey);
+    if (ttl <= 0) {
+      if (await this.redis.setNX(cooldownKey, '1', SEND_COOLDOWN_TTL_SECONDS)) {
+        return null;
+      }
+      ttl = await this.redis.ttl(cooldownKey);
+    }
+
+    return Math.max(1, ttl);
+  }
+
   /**
    * 发送验证码
    */
   async sendCode(email: string): Promise<void> {
-    // 检查是否在60秒内已发送过验证码
-    const codeKey = `auth:code:${email}`;
-    const existingCode = await this.redis.get(codeKey);
-    
-    if (existingCode) {
-      const ttl = await this.redis.ttl(codeKey);
-      if (ttl > 240) { // 5分钟 TTL，如果剩余超过4分钟说明刚发送过
-        throw new BadRequestException(
-          `验证码已发送，请在 ${Math.ceil((300 - (300 - ttl)) / 60)} 分钟后重试`,
-        );
-      }
+    const normalizedEmail = this.normalizeEmail(email);
+    const codeKey = this.getCodeKey(normalizedEmail);
+    const cooldownKey = this.getCooldownKey(normalizedEmail);
+
+    // 使用独立的短期 key 原子限频，避免并发请求重复投递邮件。
+    const retryAfterSeconds = await this.reserveSendCooldown(cooldownKey);
+    if (retryAfterSeconds !== null) {
+      throw new BadRequestException(`验证码已发送，请在 ${retryAfterSeconds} 秒后重试`);
     }
 
-    // 生成验证码
     const code = this.generateCode();
 
-    // 存入 Redis，TTL 5分钟
-    await this.redis.set(codeKey, code, 300);
-
-    this.logger.log(`Send verification code to ${email}: ${code}`);
-
-    // 发送邮件
     try {
       await this.transporter.sendMail({
         from: this.config.get<string>('SMTP_FROM'),
-        to: email,
+        to: normalizedEmail,
         subject: '【AI聊天生图平台】登录验证码',
         html: `
           <div style="font-family: Arial, sans-serif; padding: 20px;">
@@ -87,9 +121,12 @@ export class AuthService {
         `,
       });
 
-      this.logger.log(`Verification code sent to ${email}`);
+      // 只有邮件投递成功后才保留验证码，避免失败请求留下可登录状态。
+      await this.redis.set(codeKey, code, VERIFICATION_CODE_TTL_SECONDS);
+      this.logger.log(`Verification code sent to ${normalizedEmail}`);
     } catch (error) {
-      this.logger.error(`Failed to send email to ${email}:`, error);
+      await this.clearSendState(normalizedEmail, true);
+      this.logger.error(`Failed to send verification code to ${normalizedEmail}: ${String(error)}`);
       throw new BadRequestException('邮件发送失败，请稍后重试');
     }
   }
@@ -97,11 +134,9 @@ export class AuthService {
   /**
    * 验证码登录/注册
    */
-  async login(
-    email: string,
-    code: string,
-  ): Promise<{ accessToken: string; user: User }> {
-    const codeKey = `auth:code:${email}`;
+  async login(email: string, code: string): Promise<{ accessToken: string; user: User }> {
+    const normalizedEmail = this.normalizeEmail(email);
+    const codeKey = this.getCodeKey(normalizedEmail);
     const storedCode = await this.redis.get(codeKey);
 
     // 验证码校验
@@ -117,15 +152,17 @@ export class AuthService {
     await this.redis.del(codeKey);
 
     // 查找或创建用户
-    let user = await this.usersService.findByEmail(email);
+    let user = await this.usersService.findByEmail(normalizedEmail);
 
     if (!user) {
-      this.logger.log(`New user registration: ${email}`);
+      this.logger.log(`New user registration: ${normalizedEmail}`);
       // 新用户，自动注册
-      const userWithWallet = await this.usersService.create({ email });
+      const userWithWallet = await this.usersService.create({
+        email: normalizedEmail,
+      });
       user = userWithWallet;
     } else {
-      this.logger.log(`Existing user login: ${email}`);
+      this.logger.log(`Existing user login: ${normalizedEmail}`);
     }
 
     // 签发 JWT
