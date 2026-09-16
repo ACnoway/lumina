@@ -10,6 +10,7 @@ import type {
   GetTransactionsResponse,
   ModelType,
   PlatformModelDto,
+  PlatformModelPricing,
   ProviderDto,
   UpstreamModelDto,
   UserStatus,
@@ -43,7 +44,7 @@ export interface PlatformModelPayload {
   name: string;
   displayName: string;
   type: ModelType;
-  pricing: Record<string, unknown>;
+  pricing: PlatformModelPricing;
   maxTokens?: number;
   isActive: boolean;
 }

@@ -250,17 +250,36 @@ export type ApiFormat =
 
 export type ModelType = 'CHAT' | 'IMAGE';
 
-export interface PlatformModelDto {
+export interface ChatModelPricing {
+  input: number;
+  output: number;
+}
+
+export interface ImageModelPricing {
+  perImage: number;
+}
+
+export type PlatformModelPricing = ChatModelPricing | ImageModelPricing;
+
+interface PlatformModelDtoBase {
   id: string;
   name: string;
   displayName: string;
-  type: ModelType;
   isActive: boolean;
-  pricing: Record<string, any>;
   maxTokens?: number | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type PlatformModelDto =
+  | (PlatformModelDtoBase & {
+      type: 'CHAT';
+      pricing: ChatModelPricing;
+    })
+  | (PlatformModelDtoBase & {
+      type: 'IMAGE';
+      pricing: ImageModelPricing;
+    });
 
 export interface ProviderDto {
   id: string;

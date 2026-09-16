@@ -24,6 +24,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 生图前端、任务查询/历史、Redis 持久化队列、重试及启动恢复已实现。
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
+- 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
 
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
@@ -41,7 +42,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：12 个套件、35 个测试通过。
+- 后端 Jest：14 个套件、50 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
@@ -77,6 +78,13 @@ Set-Location ..\frontend
 `ADMIN_PASSWORD` 以 bcrypt 哈希保存。若配置邮箱已经存在但仍是 `USER`，
 启动时会修复为 `ADMIN`，已有管理员角色不会被降级。Docker Compose 已将
 管理员配置传递给 backend，并新增 3 个初始化单元测试。
+
+## 本次模块：平台模型结构化计费表单 ✓
+
+管理后台的平台模型新建表单已移除计费 JSON 文本框，改为按模型类型显示价格输入：
+`CHAT` 使用每千 token 的 `input/output`，`IMAGE` 使用每张图片的 `perImage`。
+前端提交前校验非负有限数字；后端 DTO 校验字段集合和类型，service 在创建及更新（含模型类型切换）时再次校验。
+共享类型同步收窄为按类型的计费结构，并新增 9 项校验测试。
 
 ## 随后的开发顺序
 

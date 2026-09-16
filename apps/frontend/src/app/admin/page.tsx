@@ -46,6 +46,19 @@ function formatMoney(value: number): string {
   return `¥${value.toFixed(2)}`;
 }
 
+function formatPrice(value: number): string {
+  return Number.isFinite(value)
+    ? value.toFixed(4).replace(/\.?(0+)$/, "")
+    : "—";
+}
+
+function formatModelPricing(model: PlatformModelDto): string {
+  if (model.type === "CHAT") {
+    return `输入 ¥${formatPrice(model.pricing.input)} / 千 token · 输出 ¥${formatPrice(model.pricing.output)} / 千 token`;
+  }
+  return `¥${formatPrice(model.pricing.perImage)} / 张`;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return "登录已过期，请重新登录";
@@ -66,6 +79,17 @@ function parseObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label}必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseNonNegativePrice(value: string, label: string): number {
+  if (!value.trim()) {
+    throw new Error(`${label}不能为空`);
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label}必须是大于等于 0 的有限数字`);
+  }
+  return parsed;
 }
 
 function statusLabel(status: UserStatus): string {
@@ -193,7 +217,11 @@ export default function AdminPage() {
     name: "",
     displayName: "",
     type: "CHAT" as ModelType,
-    pricing: '{\n  "input": 0.001,\n  "output": 0.002\n}',
+    pricing: {
+      input: "0.001",
+      output: "0.002",
+      perImage: "0.50",
+    },
     maxTokens: "",
     isActive: true,
   });
@@ -426,9 +454,10 @@ export default function AdminPage() {
     event.preventDefault();
     setMutatingResource("model-form");
     try {
-      const maxTokens = modelForm.maxTokens
-        ? Number(modelForm.maxTokens)
-        : undefined;
+      const maxTokens =
+        modelForm.type === "CHAT" && modelForm.maxTokens
+          ? Number(modelForm.maxTokens)
+          : undefined;
       if (!modelForm.name.trim() || !modelForm.displayName.trim()) {
         throw new Error("请填写模型名称和展示名称");
       }
@@ -438,17 +467,32 @@ export default function AdminPage() {
       ) {
         throw new Error("最大 Token 必须是大于 0 的整数");
       }
+      const pricing =
+        modelForm.type === "CHAT"
+          ? {
+              input: parseNonNegativePrice(modelForm.pricing.input, "输入价格"),
+              output: parseNonNegativePrice(
+                modelForm.pricing.output,
+                "输出价格",
+              ),
+            }
+          : {
+              perImage: parseNonNegativePrice(
+                modelForm.pricing.perImage,
+                "生图价格",
+              ),
+            };
       await adminApi.createModel({
         name: modelForm.name.trim(),
         displayName: modelForm.displayName.trim(),
         type: modelForm.type,
-        pricing: parseObject(modelForm.pricing, "模型计费规则"),
+        pricing,
         maxTokens,
         isActive: modelForm.isActive,
       });
       setNotice("平台模型已创建");
       setShowModelForm(false);
-      setModelForm({ ...modelForm, name: "", displayName: "" });
+      setModelForm((current) => ({ ...current, name: "", displayName: "" }));
       await loadConfig();
     } catch (formError) {
       setError(getErrorMessage(formError, "创建模型失败"));
@@ -1085,33 +1129,97 @@ export default function AdminPage() {
                         <option value="CHAT">聊天模型</option>
                         <option value="IMAGE">生图模型</option>
                       </select>
-                      <input
-                        value={modelForm.maxTokens}
-                        onChange={(event) =>
-                          setModelForm((current) => ({
-                            ...current,
-                            maxTokens: event.target.value,
-                          }))
-                        }
-                        type="number"
-                        min="1"
-                        placeholder="最大 Token（可选）"
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                      />
+                      {modelForm.type === "CHAT" && (
+                        <input
+                          value={modelForm.maxTokens}
+                          onChange={(event) =>
+                            setModelForm((current) => ({
+                              ...current,
+                              maxTokens: event.target.value,
+                            }))
+                          }
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="最大 Token（可选）"
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      )}
                     </div>
-                    <textarea
-                      value={modelForm.pricing}
-                      onChange={(event) =>
-                        setModelForm((current) => ({
-                          ...current,
-                          pricing: event.target.value,
-                        }))
-                      }
-                      rows={5}
-                      spellCheck={false}
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs"
-                      aria-label="模型计费 JSON"
-                    />
+                    {modelForm.type === "CHAT" ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1 text-xs text-gray-500">
+                          <span className="block font-medium text-gray-700">
+                            输入价格（元 / 千 token）
+                          </span>
+                          <input
+                            value={modelForm.pricing.input}
+                            onChange={(event) =>
+                              setModelForm((current) => ({
+                                ...current,
+                                pricing: {
+                                  ...current.pricing,
+                                  input: event.target.value,
+                                },
+                              }))
+                            }
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            required
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs text-gray-500">
+                          <span className="block font-medium text-gray-700">
+                            输出价格（元 / 千 token）
+                          </span>
+                          <input
+                            value={modelForm.pricing.output}
+                            onChange={(event) =>
+                              setModelForm((current) => ({
+                                ...current,
+                                pricing: {
+                                  ...current.pricing,
+                                  output: event.target.value,
+                                },
+                              }))
+                            }
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            required
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <label className="block space-y-1 text-xs text-gray-500">
+                        <span className="block font-medium text-gray-700">
+                          生图价格（元 / 张）
+                        </span>
+                        <input
+                          value={modelForm.pricing.perImage}
+                          onChange={(event) =>
+                            setModelForm((current) => ({
+                              ...current,
+                              pricing: {
+                                ...current.pricing,
+                                perImage: event.target.value,
+                              },
+                            }))
+                          }
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          required
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    )}
+                    <p className="text-xs text-gray-400">
+                      价格必须是非负数字；保存后会作为该平台模型的计费快照来源。
+                    </p>
                     <label className="flex items-center gap-2 text-sm text-gray-600">
                       <input
                         type="checkbox"
@@ -1155,6 +1263,9 @@ export default function AdminPage() {
                             </p>
                             <p className="mt-1 text-xs text-gray-400">
                               {model.name} · {model.type}
+                            </p>
+                            <p className="mt-2 text-xs text-gray-500">
+                              {formatModelPricing(model)}
                             </p>
                           </div>
                           <Toggle

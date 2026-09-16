@@ -7,8 +7,13 @@ import {
   Min,
   IsIn,
   IsObject,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+  Validate,
 } from 'class-validator';
 import { ApiFormat, ModelType } from '@lumina/shared';
+import { getPlatformModelPricingError } from '../platform-model-pricing';
 
 // ==================== 供应商 DTO ====================
 export class CreateProviderDto {
@@ -47,6 +52,22 @@ export class CreateProviderDto {
 export class UpdateProviderDto extends PartialType(CreateProviderDto) {}
 
 // ==================== 平台模型 DTO ====================
+@ValidatorConstraint({ name: 'platformModelPricing', async: false })
+export class PlatformModelPricingConstraint implements ValidatorConstraintInterface {
+  validate(pricing: unknown, args: ValidationArguments): boolean {
+    const type = (args.object as { type?: unknown }).type;
+
+    // Update requests may change pricing without repeating the existing type. The
+    // service validates the merged persisted model in that case.
+    return type === undefined || getPlatformModelPricingError(type, pricing) === null;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const type = (args.object as { type?: unknown }).type;
+    return getPlatformModelPricingError(type, args.value) || '模型计费配置不合法';
+  }
+}
+
 export class CreatePlatformModelDto {
   @ApiProperty({ description: '平台模型名', example: 'gpt-4o' })
   @IsString({ message: '名称必须是字符串' })
@@ -61,10 +82,12 @@ export class CreatePlatformModelDto {
   type!: ModelType;
 
   @ApiProperty({
-    description: '计费标准',
+    description:
+      '计费标准：CHAT 使用 { input, output }（每千 token），IMAGE 使用 { perImage }（每张图片）',
     example: { input: 0.001, output: 0.002 },
   })
   @IsObject({ message: 'pricing 必须是对象' })
+  @Validate(PlatformModelPricingConstraint)
   pricing!: Record<string, any>;
 
   @ApiProperty({ description: '平台限制的最大 token', required: false })

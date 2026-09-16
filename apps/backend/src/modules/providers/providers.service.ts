@@ -15,6 +15,7 @@ import {
   ModelType,
   ApiFormat,
 } from '@prisma/client';
+import { assertValidPlatformModelPricing } from './platform-model-pricing';
 
 /**
  * 路由结果
@@ -96,6 +97,8 @@ export class ProvidersService {
     maxTokens?: number;
     isActive?: boolean;
   }): Promise<PlatformModel> {
+    assertValidPlatformModelPricing(data.type, data.pricing);
+
     const exists = await this.prisma.platformModel.findUnique({
       where: { name: data.name },
     });
@@ -134,6 +137,10 @@ export class ProvidersService {
     if (!model) {
       throw new NotFoundException('平台模型不存在');
     }
+
+    const nextType = data.type ?? model.type;
+    const nextPricing = data.pricing ?? model.pricing;
+    assertValidPlatformModelPricing(nextType, nextPricing);
 
     if (data.name && data.name !== model.name) {
       const exists = await this.prisma.platformModel.findUnique({
