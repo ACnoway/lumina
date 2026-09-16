@@ -1,0 +1,116 @@
+name: lumina-e2e
+
+# 可复现的 API/E2E 环境。它使用独立的命名卷和宿主端口，不复用开发或生产环境数据。
+# 启动：docker compose -f docker-compose.e2e.yml -p lumina-e2e up -d --build
+# 冒烟：pnpm e2e:smoke
+# 清理：docker compose -f docker-compose.e2e.yml -p lumina-e2e down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lumina_e2e
+      POSTGRES_PASSWORD: lumina_e2e_password
+      POSTGRES_DB: lumina_e2e
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - lumina_e2e_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lumina_e2e -d lumina_e2e']
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - lumina_e2e_redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: on-failure
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: lumina_e2e_minio
+      MINIO_ROOT_PASSWORD: lumina_e2e_minio_secret
+    ports:
+      - '9000:9000'
+    volumes:
+      - lumina_e2e_minio:/data
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - '8025:8025'
+
+  mock-provider:
+    build:
+      context: ./tests/mock-provider
+    expose:
+      - '8080'
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      mailhog:
+        condition: service_started
+      mock-provider:
+        condition: service_started
+    restart: on-failure
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://lumina_e2e:lumina_e2e_password@postgres:5432/lumina_e2e?schema=public
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: 'false'
+      MINIO_ACCESS_KEY: lumina_e2e_minio
+      MINIO_SECRET_KEY: lumina_e2e_minio_secret
+      MINIO_BUCKET: lumina-images
+      MINIO_PUBLIC_URL: http://localhost:9000
+      JWT_SECRET: lumina-e2e-jwt-secret
+      JWT_EXPIRES_IN: 1h
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_USER: ''
+      SMTP_PASSWORD: ''
+      SMTP_FROM: 'Lumina E2E <e2e@example.com>'
+      ADMIN_EMAIL: e2e-admin@example.com
+      ADMIN_PASSWORD: e2e-admin-password
+      INITIAL_BALANCE: '10.00'
+      CORS_ORIGIN: http://localhost:3000
+      PROVIDER_DEFAULT_RATE_LIMIT: '1000'
+      BACKEND_PORT: 3001
+    ports:
+      - '3001:3001'
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        BACKEND_URL: http://backend:3001
+    depends_on:
+      - backend
+    ports:
+      - '3000:3000'
+
+volumes:
+  lumina_e2e_postgres:
+  lumina_e2e_redis:
+  lumina_e2e_minio:

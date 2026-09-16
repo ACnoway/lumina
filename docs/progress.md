@@ -26,10 +26,18 @@
 | 管理后台与审计 | 代码、单元测试和前端构建已验证 | `/admin` 已接入概览、用户/账本/余额调整、模型/供应商/上游映射、审计日志；平台模型表单按 `CHAT/IMAGE` 展示对应计费字段，供应商配置也改为 API Key、Base URL、超时和限流输入框，后端 DTO/service 会拒绝错误配置；服务启动会按 `ADMIN_EMAIL` 幂等创建或修复管理员账户，真实数据仍需在 PostgreSQL、Redis 和 SMTP 环境做端到端验证。 |
 | CI | 已配置，当前提交未在本机按 CI 工具链复跑 | 工作流固定 Node 20 / pnpm 8.15.0；需要在干净环境或 GitHub Actions 上确认当前提交。 |
 
+### API/E2E 测试环境（已实现，远程验收待执行）
+
+- 新增 `docker-compose.e2e.yml`，使用独立命名卷启动 PostgreSQL、Redis、MinIO、MailHog、mock Provider、backend 和 frontend，不复用开发/生产数据。
+- 新增无额外依赖的 mock Provider，支持 OpenAI 兼容聊天非流式/流式接口和图片 base64 接口；MailHog 提供可读取验证码的 SMTP 测试服务。
+- 新增 `tests/e2e/smoke.mjs`，覆盖验证码登录、管理员初始化、普通用户 RBAC、供应商/模型/上游配置、聊天 SSE、生图队列与 MinIO、历史和审计日志。
+- 管理端供应商及上游映射响应已移除 `config.apiKey`，保留非敏感配置摘要；内部 Provider 路由仍使用完整配置。
+- 本地已通过 15 个后端测试套件/57 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker，完整 API/E2E 需在远程环境执行。
+
 ### 当前交付阻塞项
 
 1. **运行环境未就绪**：需要 PostgreSQL、Redis、MinIO、有效 `JWT_SECRET`、SMTP 及至少一个可用 AI Provider/模型后，才能做端到端验收。
-2. **验证覆盖不足**：认证、聊天流式、图片生成、管理端权限边界和前端关键流程仍缺少 API/E2E 测试。
+2. **验证覆盖不足**：API/E2E 测试环境和最小冒烟脚本已补齐，但仍需在 `lch:/root/lumina` 启动并执行一次；真实供应商和浏览器关键流程仍未验证。
 3. **工具链不一致**：本地需使用 pnpm 8.15.0（与 CI 一致），再运行根级 `pnpm lint/test/build`；lint 脚本应先拆分出不带 `--fix` 的检查命令。
 
 ### 后续待办

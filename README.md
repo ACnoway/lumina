@@ -162,6 +162,11 @@ pnpm lint                   # 代码检查
 # 后端
 pnpm --filter backend prisma:studio    # Prisma 数据库可视化管理
 pnpm --filter backend prisma:migrate   # 运行数据库迁移
+
+# API/E2E 冒烟（需要 Docker；使用独立命名卷，不复用开发数据）
+pnpm e2e:up
+pnpm e2e:smoke
+pnpm e2e:down
 ```
 
 ## 开发顺序

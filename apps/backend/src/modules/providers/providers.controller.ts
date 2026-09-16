@@ -17,7 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '@prisma/client';
+import { Provider, User } from '@prisma/client';
 import { ModelType, UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { AuditService } from '../audit/audit.service';
@@ -140,7 +140,8 @@ export class ProvidersController {
   @ApiOperation({ summary: '获取所有供应商' })
   async getProviders(@CurrentUser() user: User) {
     this.logger.log(`获取供应商列表: userId=${user.id}`);
-    return this.providersService.getProviders();
+    const providers = await this.providersService.getProviders();
+    return providers.map((provider) => this.providerResponse(provider));
   }
 
   @Post()
@@ -163,7 +164,7 @@ export class ProvidersController {
       provider.id,
       { after: this.providerAuditDetails(provider) },
     );
-    return provider;
+    return this.providerResponse(provider);
   }
 
   @Patch(':id')
@@ -190,7 +191,7 @@ export class ProvidersController {
         after: this.providerAuditDetails(provider),
       },
     );
-    return provider;
+    return this.providerResponse(provider);
   }
 
   @Delete(':id')
@@ -213,7 +214,7 @@ export class ProvidersController {
       provider.id,
       { before: this.providerAuditDetails(provider) },
     );
-    return provider;
+    return this.providerResponse(provider);
   }
 
   // ==================== 上游映射 ====================
@@ -228,7 +229,11 @@ export class ProvidersController {
     @Param('id') id: string,
   ) {
     this.logger.log(`获取上游列表: userId=${user.id}, platformModelId=${id}`);
-    return this.providersService.getUpstreamsForPlatformModel(id);
+    const upstreams = await this.providersService.getUpstreamsForPlatformModel(id);
+    return upstreams.map((upstream) => ({
+      ...upstream,
+      provider: this.providerResponse(upstream.provider),
+    }));
   }
 
   @Post('models/:id/upstreams')
@@ -353,6 +358,20 @@ export class ProvidersController {
       apiFormat: provider.apiFormat,
       supportsStreaming: provider.supportsStreaming,
       isActive: provider.isActive,
+    };
+  }
+
+  /**
+   * 管理端可以看到供应商的连接摘要，但不能通过管理查询读取 API Key。
+   * 上游路由仍直接使用 ProvidersService 返回的完整 Provider，不经过此响应层。
+   */
+  private providerResponse(provider: Provider) {
+    const { apiKey: _apiKey, ...safeConfig } =
+      (provider.config as Record<string, unknown>) || {};
+
+    return {
+      ...provider,
+      config: safeConfig,
     };
   }
 
