@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { AuditService } from '../audit/audit.service';
 import { WalletService } from './wallet.service';
 
 class InMemoryRedis {
@@ -130,13 +131,18 @@ function createTestStore() {
   return { prisma, redis: new InMemoryRedis(), wallet, transactions };
 }
 
+function createWalletService(store: ReturnType<typeof createTestStore>) {
+  return new WalletService(
+    store.prisma as unknown as PrismaService,
+    store.redis as unknown as RedisService,
+    { record: jest.fn() } as unknown as AuditService,
+  );
+}
+
 describe('WalletService reservations', () => {
   it('only creates one reservation for 100 concurrent calls with the same key', async () => {
     const store = createTestStore();
-    const service = new WalletService(
-      store.prisma as unknown as PrismaService,
-      store.redis as unknown as RedisService,
-    );
+    const service = createWalletService(store);
 
     const results = await Promise.all(
       Array.from({ length: 100 }, () =>
@@ -151,10 +157,7 @@ describe('WalletService reservations', () => {
 
   it('never reserves more than the wallet balance across different concurrent keys', async () => {
     const store = createTestStore();
-    const service = new WalletService(
-      store.prisma as unknown as PrismaService,
-      store.redis as unknown as RedisService,
-    );
+    const service = createWalletService(store);
 
     const results = await Promise.allSettled(
       Array.from({ length: 100 }, (_, index) =>
@@ -176,10 +179,7 @@ describe('WalletService reservations', () => {
 
   it('does not charge twice when settle is retried concurrently', async () => {
     const store = createTestStore();
-    const service = new WalletService(
-      store.prisma as unknown as PrismaService,
-      store.redis as unknown as RedisService,
-    );
+    const service = createWalletService(store);
 
     await service.preDeduct('user-1', 2, 'settle-request');
     const results = await Promise.all([
@@ -194,10 +194,7 @@ describe('WalletService reservations', () => {
 
   it('makes refund retries idempotent without changing the balance', async () => {
     const store = createTestStore();
-    const service = new WalletService(
-      store.prisma as unknown as PrismaService,
-      store.redis as unknown as RedisService,
-    );
+    const service = createWalletService(store);
 
     await service.preDeduct('user-1', 2, 'refund-request');
     const first = await service.refund('user-1', 'refund-request', 'test');
@@ -207,5 +204,37 @@ describe('WalletService reservations', () => {
     expect(second.success).toBe(true);
     expect(store.wallet.balance.toNumber()).toBe(10);
     expect(store.redis.setPreDeductCalls).toBe(1);
+  });
+
+  it('writes an administrator balance adjustment audit record in the wallet transaction', async () => {
+    const store = createTestStore();
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new WalletService(
+      store.prisma as unknown as PrismaService,
+      store.redis as unknown as RedisService,
+      audit as unknown as AuditService,
+    );
+
+    await service.adminAdjust('user-1', 3, '补偿', {
+      actorId: 'admin-1',
+      ipAddress: '127.0.0.1',
+    });
+
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'wallet.balance.adjusted',
+        resource: 'wallet',
+        details: expect.objectContaining({
+          targetId: 'user-1',
+          amount: 3,
+          reason: '补偿',
+          before: { balance: 10 },
+          after: { balance: 13 },
+        }),
+        ipAddress: '127.0.0.1',
+      }),
+      expect.anything(),
+    );
   });
 });

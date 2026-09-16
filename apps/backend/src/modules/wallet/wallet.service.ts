@@ -8,6 +8,7 @@ import {
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { AuditService } from '../audit/audit.service';
 import { Decimal } from '@prisma/client/runtime/library';
 import { Wallet, WalletTransaction } from '@prisma/client';
 
@@ -36,6 +37,12 @@ interface PreDeductData {
   createdAt: number;
 }
 
+interface AdminAdjustmentAuditContext {
+  actorId: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 @Injectable()
 export class WalletService {
   private readonly logger = new Logger(WalletService.name);
@@ -50,6 +57,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -401,6 +409,7 @@ export class WalletService {
     userId: string,
     amount: number,
     reason: string,
+    auditContext?: AdminAdjustmentAuditContext,
   ): Promise<WalletTransaction> {
     if (!Number.isFinite(amount) || amount === 0) {
       throw new BadRequestException('调整金额不能为0');
@@ -438,6 +447,28 @@ export class WalletService {
             idempotencyKey: `admin_adjust:${userId}:${Date.now()}`,
           },
         });
+
+        if (auditContext) {
+          await this.auditService.record(
+            {
+              actorId: auditContext.actorId,
+              action: 'wallet.balance.adjusted',
+              resource: 'wallet',
+              details: {
+                targetId: userId,
+                walletId: wallet.id,
+                transactionId: transaction.id,
+                amount,
+                reason,
+                before: { balance: currentBalance },
+                after: { balance: Number(newBalance.toString()) },
+              },
+              ipAddress: auditContext.ipAddress,
+              userAgent: auditContext.userAgent,
+            },
+            tx,
+          );
+        }
 
         return transaction;
       });

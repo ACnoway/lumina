@@ -7,7 +7,7 @@
 ### 本次核对结果
 
 - 已完整核对 `apps/backend`、`apps/frontend`、共享类型、Prisma schema、Docker Compose 和现有文档。
-- 使用现有本地依赖直接运行后端 Jest：**3 个测试套件、10 个测试全部通过**（钱包并发/幂等、Provider RBAC、MinIO 环境变量解析）。
+- 使用现有本地依赖直接运行后端 Jest：**9 个测试套件、25 个测试全部通过**（钱包并发/幂等与管理员调额审计、Provider RBAC/审计脱敏、管理端 RBAC、审计日志、MinIO 和生图队列）。
 - 共享类型编译、Nest 后端构建、Next 前端生产构建均通过；前端已生成 `/login`、`/chat`、`/image`、`/history` 和 `/admin` 路由。
 - 本机未启动前端、后端、PostgreSQL、Redis 或 MinIO，且仓库没有本地 `.env`；因此未执行认证、聊天、生图的端到端验证。
 - 根脚本固定 `pnpm@8.15.0`，当前环境为 pnpm 11。直接执行 `pnpm lint`、`pnpm test`、`pnpm build` 会在依赖目录检查阶段中止，尚未进入相应任务。当前 `lint` 脚本还携带 `--fix`，不应把它当作纯只读检查执行。
@@ -23,14 +23,14 @@
 | 聊天后端与前端 | 代码已实现、构建通过 | 聊天 UI、SSE 解析、会话 CRUD 调用均存在；没有聊天 API/流式/计费端到端测试。 |
 | 生图后端与前端 | 代码与单元测试已验证 | 前端已接入模型、优化、创建任务、轮询和历史；后端已使用 Redis 持久化队列、重试与启动恢复。未接 MinIO/供应商或真实 Redis 做端到端验证。 |
 | 历史记录独立页 | 代码已实现、前端构建通过 | `/history` 已接入用户自己的聊天会话与生图历史，支持各自分页、加载、空状态和错误重试；未接本地后端/数据库做端到端验证。 |
-| 管理后台与审计 | 未完成 | `/admin` 是静态占位，`AdminModule` 和 `AuditModule` 都为空模块；Provider 管理 API 不等同于完整管理后台。 |
+| 管理后台与审计 | 后端代码与单元测试已验证；前端未完成 | 管理员可查询概览、用户、用户账本、审计日志，并可更新用户状态和调整余额；供应商/模型/上游映射 mutation 也会写入审计日志。`/admin` 前端仍是静态占位，未接真实数据库做 API 端到端验证。 |
 | CI | 已配置，当前提交未在本机按 CI 工具链复跑 | 工作流固定 Node 20 / pnpm 8.15.0；需要在干净环境或 GitHub Actions 上确认当前提交。 |
 
 ### 当前交付阻塞项
 
 1. **A-001 邮箱验证码发送失败**：`POST /auth/send-code` 在 SMTP 发送失败时主动返回 400。当前没有真实 SMTP 配置时，登录功能不可用；详见 `docs/known-issues.md`。
 2. **运行环境未就绪**：需要 PostgreSQL、Redis、MinIO、有效 `JWT_SECRET`、SMTP 及至少一个可用 AI Provider/模型后，才能做端到端验收。
-3. **验证覆盖不足**：认证、聊天流式、图片生成、权限边界和前端关键流程没有 API/E2E 测试。
+3. **验证覆盖不足**：认证、聊天流式、图片生成、管理端权限边界和前端关键流程没有 API/E2E 测试。
 4. **工具链不一致**：本地需使用 pnpm 8.15.0（与 CI 一致），再运行根级 `pnpm lint/test/build`；lint 脚本应先拆分出不带 `--fix` 的检查命令。
 
 ## 第一轮 P0 安全与计费修复 ✓
@@ -76,6 +76,15 @@
 - 新增队列及生图服务单元测试，验证入队、原子领取/确认、重复领取拦截和失败重试；后端全部 5 个测试套件、16 个测试及生产构建通过。
 - 本机没有运行 Redis、PostgreSQL、MinIO 或真实上游，因此尚未完成跨进程重启和真实 Provider 的端到端验证。
 
+## 步骤 9-1：管理端后端与审计 ✓
+
+- 新增 `AdminModule`：管理员（`ADMIN` / `SUPER_ADMIN`）可查询运行概览、用户分页/搜索/状态筛选、用户详情与账本，并可更新用户状态、调整余额。
+- 管理员状态修改和余额调整与其审计记录在同一 Prisma transaction 中提交；余额调整继续复用钱包用户级锁与“余额不得为负”的保护。
+- 新增审计日志写入、分页与按 actor/action/resource 筛选，API 为 `GET /admin/audit-logs`；日志包含操作者、动作、资源、目标 ID、变更元数据、IP、User-Agent 和时间。
+- 既有 Provider、Platform Model 与 Upstream Model 的新增、更新和删除都会写入同一审计日志，且不会把 Provider 的 API Key/config 写进审计详情。
+- 共享包已补充管理端和审计接口类型；后端 Jest 9 suites / 25 tests、共享类型编译与 Nest 生产构建通过。
+- `/admin` 前端尚未接入这些 API，且本机没有 PostgreSQL/Redis 环境，未做真实管理员 API 的端到端验证。
+
 ## 开发顺序总览
 
 1. ~~项目脚手架~~ ✓
@@ -90,7 +99,7 @@
 6. 生图页面 + 生图任务 + 扣费联调（代码已完成；真实 Provider、MinIO 和计费端到端验证待补）
 7. ~~历史记录独立页面~~ ✓（代码已完成；真实后端端到端验证待补）
 8. ~~生图持久化队列~~ ✓（代码与单元测试已完成；真实 Redis/重启验证待补）
-9. 管理端 UI（未完成）
+9. 管理端后端 + 审计（已完成；管理端 UI 未完成）
 10. 验证清单逐条验证
 
 ## 已完成步骤详情
@@ -207,8 +216,8 @@ lumina/
 │   │   │       │       ├── adapter-factory.ts
 │   │   │       │       └── adapters.module.ts
 │   │   │       ├── image/                 # 生图任务 + 提示词优化 + 扣费
-│   │   │       ├── admin/                 # 空模块，未实现
-│   │   │       └── audit/                 # 空模块，未实现
+│   │   │       ├── admin/                 # 用户、钱包与运行概览管理 API
+│   │   │       └── audit/                 # 管理员操作审计写入与查询 API
 │   │   └── package.json                   # +axios, +express
 │   └── frontend/
 │       ├── src/
@@ -270,6 +279,16 @@ lumina/
 - `GET /image/tasks/:id` — 查询生图任务状态
 - `GET /image/history?page=1&limit=12` — 生图历史记录
 - `GET /providers/models?type=IMAGE` — 获取可用生图模型
+
+### Admin（ADMIN / SUPER_ADMIN）
+
+- `GET /admin/overview` — 运行概览
+- `GET /admin/users?page=1&limit=20&search=&status=` — 用户分页、搜索与状态筛选
+- `GET /admin/users/:id` — 用户详情
+- `GET /admin/users/:id/transactions?page=1&limit=20` — 用户账本
+- `PATCH /admin/users/:id/status` — 更新用户状态
+- `POST /admin/wallet/adjustments` — 调整用户余额
+- `GET /admin/audit-logs?page=1&limit=20&userId=&action=&resource=` — 审计日志
 
 ## SSE 事件格式
 

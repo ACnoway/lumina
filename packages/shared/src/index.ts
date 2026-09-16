@@ -187,6 +187,59 @@ export interface AdminUpdateUserStatusDto {
   status: UserStatus;
 }
 
+export interface AdminUserDto extends UserInfo {
+  wallet: WalletInfo | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUsersResponse {
+  items: AdminUserDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface AdminOverviewResponse {
+  users: {
+    total: number;
+    active: number;
+    suspended: number;
+  };
+  wallets: {
+    totalBalance: number;
+  };
+  models: {
+    total: number;
+    active: number;
+  };
+  providers: {
+    total: number;
+    active: number;
+  };
+  generatedAt: string;
+}
+
+export interface AuditLogDto {
+  id: string;
+  userId: string | null;
+  action: string;
+  resource: string;
+  details: Record<string, unknown> | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogsResponse {
+  items: AuditLogDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 // ==================== 供应商/模型相关类型 ====================
 export type ApiFormat =
   | 'openai_chat'

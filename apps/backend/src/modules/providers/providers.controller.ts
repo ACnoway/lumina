@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
   Logger,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
 import { ModelType, UserRole } from '@prisma/client';
+import { Request } from 'express';
+import { AuditService } from '../audit/audit.service';
 import {
   CreateProviderDto,
   UpdateProviderDto,
@@ -32,7 +35,10 @@ import {
 export class ProvidersController {
   private readonly logger = new Logger(ProvidersController.name);
 
-  constructor(private readonly providersService: ProvidersService) {}
+  constructor(
+    private readonly providersService: ProvidersService,
+    private readonly auditService: AuditService,
+  ) {}
 
   // ==================== 平台模型 ====================
 
@@ -54,9 +60,19 @@ export class ProvidersController {
   async createPlatformModel(
     @CurrentUser() user: User,
     @Body() dto: CreatePlatformModelDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`创建平台模型: userId=${user.id}, name=${dto.name}`);
-    return this.providersService.createPlatformModel(dto);
+    const model = await this.providersService.createPlatformModel(dto);
+    await this.auditMutation(
+      user,
+      request,
+      'platform_model.created',
+      'platform_model',
+      model.id,
+      { after: this.platformModelAuditDetails(model) },
+    );
+    return model;
   }
 
   @Patch('models/:id')
@@ -68,9 +84,22 @@ export class ProvidersController {
     @CurrentUser() user: User,
     @Param('id') id: string,
     @Body() dto: UpdatePlatformModelDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`更新平台模型: userId=${user.id}, id=${id}`);
-    return this.providersService.updatePlatformModel(id, dto);
+    const model = await this.providersService.updatePlatformModel(id, dto);
+    await this.auditMutation(
+      user,
+      request,
+      'platform_model.updated',
+      'platform_model',
+      model.id,
+      {
+        updatedFields: Object.keys(dto),
+        after: this.platformModelAuditDetails(model),
+      },
+    );
+    return model;
   }
 
   @Delete('models/:id')
@@ -81,9 +110,19 @@ export class ProvidersController {
   async deletePlatformModel(
     @CurrentUser() user: User,
     @Param('id') id: string,
+    @Req() request: Request,
   ) {
     this.logger.log(`删除平台模型: userId=${user.id}, id=${id}`);
-    return this.providersService.deletePlatformModel(id);
+    const model = await this.providersService.deletePlatformModel(id);
+    await this.auditMutation(
+      user,
+      request,
+      'platform_model.deleted',
+      'platform_model',
+      model.id,
+      { before: this.platformModelAuditDetails(model) },
+    );
+    return model;
   }
 
   // ==================== 供应商 ====================
@@ -106,9 +145,19 @@ export class ProvidersController {
   async createProvider(
     @CurrentUser() user: User,
     @Body() dto: CreateProviderDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`创建供应商: userId=${user.id}, name=${dto.name}`);
-    return this.providersService.createProvider(dto);
+    const provider = await this.providersService.createProvider(dto);
+    await this.auditMutation(
+      user,
+      request,
+      'provider.created',
+      'provider',
+      provider.id,
+      { after: this.providerAuditDetails(provider) },
+    );
+    return provider;
   }
 
   @Patch(':id')
@@ -120,9 +169,22 @@ export class ProvidersController {
     @CurrentUser() user: User,
     @Param('id') id: string,
     @Body() dto: UpdateProviderDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`更新供应商: userId=${user.id}, id=${id}`);
-    return this.providersService.updateProvider(id, dto);
+    const provider = await this.providersService.updateProvider(id, dto);
+    await this.auditMutation(
+      user,
+      request,
+      'provider.updated',
+      'provider',
+      provider.id,
+      {
+        updatedFields: Object.keys(dto),
+        after: this.providerAuditDetails(provider),
+      },
+    );
+    return provider;
   }
 
   @Delete(':id')
@@ -133,9 +195,19 @@ export class ProvidersController {
   async deleteProvider(
     @CurrentUser() user: User,
     @Param('id') id: string,
+    @Req() request: Request,
   ) {
     this.logger.log(`删除供应商: userId=${user.id}, id=${id}`);
-    return this.providersService.deleteProvider(id);
+    const provider = await this.providersService.deleteProvider(id);
+    await this.auditMutation(
+      user,
+      request,
+      'provider.deleted',
+      'provider',
+      provider.id,
+      { before: this.providerAuditDetails(provider) },
+    );
+    return provider;
   }
 
   // ==================== 上游映射 ====================
@@ -162,12 +234,22 @@ export class ProvidersController {
     @CurrentUser() user: User,
     @Param('id') id: string,
     @Body() dto: CreateUpstreamModelDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`添加上游映射: userId=${user.id}, platformModelId=${id}`);
-    return this.providersService.addUpstreamModel({
+    const upstream = await this.providersService.addUpstreamModel({
       ...dto,
       platformModelId: id,
     });
+    await this.auditMutation(
+      user,
+      request,
+      'upstream_model.created',
+      'upstream_model',
+      upstream.id,
+      { after: this.upstreamAuditDetails(upstream) },
+    );
+    return upstream;
   }
 
   @Patch('upstreams/:id')
@@ -179,9 +261,22 @@ export class ProvidersController {
     @CurrentUser() user: User,
     @Param('id') id: string,
     @Body() dto: UpdateUpstreamModelDto,
+    @Req() request: Request,
   ) {
     this.logger.log(`更新上游映射: userId=${user.id}, id=${id}`);
-    return this.providersService.updateUpstreamModel(id, dto);
+    const upstream = await this.providersService.updateUpstreamModel(id, dto);
+    await this.auditMutation(
+      user,
+      request,
+      'upstream_model.updated',
+      'upstream_model',
+      upstream.id,
+      {
+        updatedFields: Object.keys(dto),
+        after: this.upstreamAuditDetails(upstream),
+      },
+    );
+    return upstream;
   }
 
   @Delete('upstreams/:id')
@@ -192,8 +287,86 @@ export class ProvidersController {
   async removeUpstreamModel(
     @CurrentUser() user: User,
     @Param('id') id: string,
+    @Req() request: Request,
   ) {
     this.logger.log(`删除上游映射: userId=${user.id}, id=${id}`);
-    return this.providersService.removeUpstreamModel(id);
+    const upstream = await this.providersService.removeUpstreamModel(id);
+    await this.auditMutation(
+      user,
+      request,
+      'upstream_model.deleted',
+      'upstream_model',
+      upstream.id,
+      { before: this.upstreamAuditDetails(upstream) },
+    );
+    return upstream;
+  }
+
+  private async auditMutation(
+    user: User,
+    request: Request,
+    action: string,
+    resource: string,
+    targetId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    await this.auditService.record({
+      actorId: user.id,
+      action,
+      resource,
+      details: { targetId, ...metadata },
+      ipAddress: request.ip || undefined,
+      userAgent: request.get('user-agent') || undefined,
+    });
+  }
+
+  private platformModelAuditDetails(model: {
+    id: string;
+    name: string;
+    type: ModelType;
+    isActive: boolean;
+  }): Record<string, unknown> {
+    return {
+      id: model.id,
+      name: model.name,
+      type: model.type,
+      isActive: model.isActive,
+    };
+  }
+
+  private providerAuditDetails(provider: {
+    id: string;
+    name: string;
+    apiFormat: string;
+    supportsStreaming: boolean;
+    isActive: boolean;
+  }): Record<string, unknown> {
+    return {
+      id: provider.id,
+      name: provider.name,
+      apiFormat: provider.apiFormat,
+      supportsStreaming: provider.supportsStreaming,
+      isActive: provider.isActive,
+    };
+  }
+
+  private upstreamAuditDetails(upstream: {
+    id: string;
+    platformModelId: string;
+    providerId: string;
+    upstreamModelId: string;
+    priority: number;
+    weight: number;
+    isActive: boolean;
+  }): Record<string, unknown> {
+    return {
+      id: upstream.id,
+      platformModelId: upstream.platformModelId,
+      providerId: upstream.providerId,
+      upstreamModelId: upstream.upstreamModelId,
+      priority: upstream.priority,
+      weight: upstream.weight,
+      isActive: upstream.isActive,
+    };
   }
 }

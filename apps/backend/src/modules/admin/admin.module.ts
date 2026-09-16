@@ -1,5 +1,14 @@
 import { Module } from '@nestjs/common';
+import { PrismaModule } from '../../prisma/prisma.module';
+import { AuditModule } from '../audit/audit.module';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { WalletModule } from '../wallet/wallet.module';
+import { AdminController } from './admin.controller';
+import { AdminService } from './admin.service';
 
-// TODO: 管理端模块 — 用户与额度管理、模型/供应商配置、用量看板
-@Module({})
+@Module({
+  imports: [PrismaModule, WalletModule, AuditModule],
+  controllers: [AdminController],
+  providers: [AdminService, RolesGuard],
+})
 export class AdminModule {}
