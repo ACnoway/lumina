@@ -2,6 +2,34 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
 
+export function parseMinioPort(value: unknown): number {
+  const port = typeof value === 'number' ? value : Number(value);
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('MINIO_PORT must be an integer between 1 and 65535');
+  }
+
+  return port;
+}
+
+export function parseMinioUseSsl(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === '') {
+      return false;
+    }
+  }
+
+  throw new Error('MINIO_USE_SSL must be true or false');
+}
+
 @Injectable()
 export class MinioService implements OnModuleInit {
   private client!: Minio.Client;
@@ -11,8 +39,8 @@ export class MinioService implements OnModuleInit {
 
   async onModuleInit() {
     const endpoint = this.configService.get<string>('MINIO_ENDPOINT', 'localhost');
-    const port = this.configService.get<number>('MINIO_PORT', 9000);
-    const useSSL = this.configService.get<boolean>('MINIO_USE_SSL', false);
+    const port = parseMinioPort(this.configService.get('MINIO_PORT', 9000));
+    const useSSL = parseMinioUseSsl(this.configService.get('MINIO_USE_SSL', false));
     const accessKey = this.configService.get<string>('MINIO_ACCESS_KEY')!;
     const secretKey = this.configService.get<string>('MINIO_SECRET_KEY')!;
     this.bucketName = this.configService.get<string>('MINIO_BUCKET', 'lumina-images');
