@@ -241,8 +241,8 @@ async function main() {
       maxTokens: 40,
     }),
   });
-  assert(streamResponse.ok, `chat stream returned ${streamResponse.status}: ${await streamResponse.text()}`);
   const streamText = await streamResponse.text();
+  assert(streamResponse.ok, `chat stream returned ${streamResponse.status}: ${streamText}`);
   const streamEvents = [...streamText.matchAll(/^data:\s*(\{.*\})$/gm)].map((match) => JSON.parse(match[1]));
   const streamedContent = streamEvents
     .filter((event) => event.type === 'content')
