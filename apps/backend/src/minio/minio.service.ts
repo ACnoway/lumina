@@ -2,6 +2,12 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
 
+export interface ParsedMinioPublicUrl {
+  endPoint: string;
+  port: number;
+  useSSL: boolean;
+}
+
 export function parseMinioPort(value: unknown): number {
   const port = typeof value === 'number' ? value : Number(value);
 
@@ -30,9 +36,41 @@ export function parseMinioUseSsl(value: unknown): boolean {
   throw new Error('MINIO_USE_SSL must be true or false');
 }
 
+/**
+ * 解析用于生成预签名 URL 的公开入口。
+ * 公开地址必须是根路径，图片 URL 会使用 /<bucket>/<object> 的 path-style 格式。
+ */
+export function parseMinioPublicUrl(value: unknown): ParsedMinioPublicUrl {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('MINIO_PUBLIC_URL must be a non-empty HTTP(S) URL');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('MINIO_PUBLIC_URL must be a valid HTTP(S) URL');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('MINIO_PUBLIC_URL must use http or https');
+  }
+
+  if (url.pathname !== '/' || url.search || url.hash || url.username || url.password) {
+    throw new Error('MINIO_PUBLIC_URL must contain only scheme, host and optional port');
+  }
+
+  return {
+    endPoint: url.hostname,
+    port: parseMinioPort(url.port || (url.protocol === 'https:' ? 443 : 80)),
+    useSSL: url.protocol === 'https:',
+  };
+}
+
 @Injectable()
 export class MinioService implements OnModuleInit {
   private client!: Minio.Client;
+  private publicClient!: Minio.Client;
   private bucketName!: string;
 
   constructor(private configService: ConfigService) {}
@@ -51,7 +89,18 @@ export class MinioService implements OnModuleInit {
       useSSL,
       accessKey,
       secretKey,
+      pathStyle: true,
     });
+
+    const publicUrl = this.configService.get<string>('MINIO_PUBLIC_URL')?.trim();
+    this.publicClient = publicUrl
+      ? new Minio.Client({
+          ...parseMinioPublicUrl(publicUrl),
+          accessKey,
+          secretKey,
+          pathStyle: true,
+        })
+      : this.client;
 
     // 确保 bucket 存在
     const exists = await this.client.bucketExists(this.bucketName);
@@ -81,7 +130,7 @@ export class MinioService implements OnModuleInit {
    * 获取预签名 URL（用于前端直接访问）
    */
   async getPresignedUrl(objectName: string, expiry: number = 7 * 24 * 3600): Promise<string> {
-    return this.client.presignedGetObject(this.bucketName, objectName, expiry);
+    return this.publicClient.presignedGetObject(this.bucketName, objectName, expiry);
   }
 
   /**

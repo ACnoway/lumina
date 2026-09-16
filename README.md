@@ -11,7 +11,9 @@ lumina/
 │   └── frontend/         # Next.js 前端（端口 3000）
 ├── packages/
 │   └── shared/           # 共享类型、常量、DTO
-├── docker-compose.yml       # 生产部署：全部容器化，仅暴露前端端口
+├── nginx/
+│   └── default.conf      # 单域名入口路由
+├── docker-compose.yml       # Docker 部署：全部容器化，仅暴露 Nginx 入口端口
 ├── docker-compose.dev.yml   # 本地开发：仅基础设施，暴露所有端口
 ├── turbo.json            # Turborepo 任务编排
 ├── pnpm-workspace.yaml   # pnpm workspace
@@ -30,7 +32,7 @@ lumina/
 
 ### 方式一：Docker 部署（推荐）
 
-全部服务容器化，数据库/Redis/MinIO 走内网，仅暴露前端端口。
+全部服务容器化，数据库/Redis/MinIO/前后端走内网，仅通过 Nginx 暴露一个统一入口端口。
 
 ```bash
 # 1. 配置环境变量
@@ -51,9 +53,10 @@ docker exec lumina-backend pnpm --filter backend prisma:migrate
 ```
 
 **端口暴露说明：**
-- 默认只暴露前端 `3000` 端口
-- 后端 API、PostgreSQL、Redis、MinIO 都在内部网络，不对外暴露
-- 如需调试，取消 `docker-compose.yml` 中对应 `ports` 的注释
+- 默认只暴露 Nginx 的 `3000` 端口
+- `/api/` 转发到后端，`/lumina-images/` 转发到 MinIO，其他路径转发到前端
+- 后端 API、PostgreSQL、Redis、MinIO、前端都不单独对外暴露
+- Docker Compose 本地部署可使用默认的 `http://localhost:3000`；使用自有域名时将 `MINIO_PUBLIC_URL` 填为该统一入口，例如 `https://example.com`
 
 ### 方式二：本地开发
 
@@ -92,14 +95,19 @@ pnpm frontend:dev   # 前端 http://localhost:3000
 ## Docker 网络架构
 
 ```
-外部访问 ──→ [frontend:3000] ──→ [backend:3001] ──→ [postgres:5432]
-                    │                    │           [redis:6379]
-                    │                    └────────→ [minio:9000]
-                    └─ /api/* 代理 ──────┘
+外部访问 ──→ [nginx:80]
+              ├─ /              ──→ [frontend:3000]
+              ├─ /api/*         ──→ [backend:3001]
+              ├─ /lumina-images ──→ [minio:9000]
+              └─ /health        ──→ [backend:3001]
+
+[backend:3001] ──→ [postgres:5432]
+                  [redis:6379]
+                  [minio:9000]
 ```
 
 - `lumina-network` 内部网络
-- 前端通过 Next.js rewrites 将 `/api/*` 代理到 `backend:3001`
+- Docker 部署由 Nginx 按路径将统一域名分发到前端、后端和 MinIO；本地开发仍可使用 Next.js rewrites
 - 后端通过内网连接 PostgreSQL、Redis、MinIO
 
 ## 后端模块结构
