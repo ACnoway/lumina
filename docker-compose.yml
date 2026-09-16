@@ -105,7 +105,9 @@ services:
       - lumina
 
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
     container_name: lumina-nginx
     restart: unless-stopped
     depends_on:
@@ -114,8 +116,6 @@ services:
       - minio
     ports:
       - '${FRONTEND_PORT:-3000}:80'
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - lumina
 

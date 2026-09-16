@@ -12,7 +12,7 @@ lumina/
 ├── packages/
 │   └── shared/           # 共享类型、常量、DTO
 ├── nginx/
-│   └── default.conf      # 单域名入口路由
+│   └── Dockerfile        # 内嵌单域名入口路由的 Nginx 镜像
 ├── docker-compose.yml       # Docker 部署：全部容器化，仅暴露 Nginx 入口端口
 ├── docker-compose.dev.yml   # 本地开发：仅基础设施，暴露所有端口
 ├── turbo.json            # Turborepo 任务编排

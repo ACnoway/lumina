@@ -1,3 +1,9 @@
+# syntax=docker/dockerfile:1
+
+FROM nginx:1.27-alpine
+
+# 配置直接编译进镜像，Compose 部署时无需挂载宿主机配置文件。
+COPY <<'EOF' /etc/nginx/conf.d/default.conf
 server {
     listen 80;
     server_name _;
@@ -63,3 +69,4 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+EOF
