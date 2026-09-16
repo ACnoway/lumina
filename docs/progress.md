@@ -18,6 +18,16 @@
 - 当前测试只包含不依赖 PostgreSQL、Redis、MinIO 或真实 AI API 的单元测试，因此 workflow 暂不启动外部服务。
 - 上述命令链已在 `lch:/root/lumina` 验证通过；GitHub Actions 首次运行结果待平台触发后确认。
 
+## 步骤 6：生图前端页面 ✓
+
+- commits: `d7bf2ea`, `851d9d6`, `971bf78`
+- 新增 `image-api.ts`，接入模型列表、提示词优化、生图任务创建、任务查询和历史记录 API。
+- 生图页已支持模型选择、比例选择、负面提示词、提示词优化、提交生成、任务轮询、刷新恢复和历史记录选择。
+- 生图结果使用后端返回的动态签名 MinIO URL 直接展示，并提供失败、余额不足、上游不可用等用户可理解的错误提示。
+- `ApiError` 统一保留 HTTP 状态码并展开后端校验错误，便于前端按错误类型反馈。
+- 远程验证：`pnpm lint`、`pnpm test`（2 suites / 7 tests）、`pnpm build` 全部通过；Next.js 生产构建已包含 `/image` 路由。
+- 当前未执行真实 Provider、MinIO 和 AI 上游的端到端生图验证，需在具备对应外部服务配置后补充。
+
 ## 开发顺序总览
 
 1. ~~项目脚手架~~ ✓
@@ -29,7 +39,7 @@
    - 5-2 ~~上游调用适配器（OpenAI/Anthropic 双格式 + SSE 流式）~~ ✓
    - 5-3 ~~消息发送 + 流式 SSE + 钱包/供应商联调~~ ✓
    - 5-4 前端聊天页 UI（待开发）
-6. 生图页面 + 生图任务 + 扣费联调
+6. ~~生图页面 + 生图任务 + 扣费联调~~（前端页面已完成；真实上游端到端验证待补）
 7. 历史记录
 8. 管理端 UI
 9. 验证清单逐条验证
@@ -140,7 +150,7 @@ lumina/
 │   │   │       │       ├── anthropic.adapter.ts
 │   │   │       │       ├── adapter-factory.ts
 │   │   │       │       └── adapters.module.ts
-│   │   │       ├── image/                 # TODO
+│   │   │       ├── image/                 # 生图任务 + 提示词优化 + 扣费
 │   │   │       ├── admin/                 # TODO
 │   │   │       └── audit/                 # TODO
 │   │   └── package.json                   # +axios, +express
@@ -155,7 +165,7 @@ lumina/
 │       │       ├── page.tsx               # 首页 → redirect /chat
 │       │       ├── login/page.tsx         # 登录页（已实现）
 │       │       ├── chat/page.tsx          # 聊天页（占位，待实现）
-│       │       ├── image/page.tsx         # 生图页（占位）
+│       │       ├── image/page.tsx         # 生图页
 │       │       ├── history/page.tsx       # 历史记录（占位）
 │       │       └── admin/page.tsx         # 管理后台（占位）
 │       ├── next.config.ts                 # rewrites /api/* → backend:3001
@@ -197,6 +207,13 @@ lumina/
 - `DELETE /chat/sessions/:id` — 删除会话
 - `GET /chat/sessions/:id/messages?page=1&limit=50` — 历史消息
 - `POST /chat/messages` — 发送消息（SSE 流式响应）
+
+### Image
+- `POST /image/optimize-prompt` — 优化生图提示词
+- `POST /image/generate` — 创建生图任务
+- `GET /image/tasks/:id` — 查询生图任务状态
+- `GET /image/history?page=1&limit=12` — 生图历史记录
+- `GET /providers/models?type=IMAGE` — 获取可用生图模型
 
 ## SSE 事件格式
 
