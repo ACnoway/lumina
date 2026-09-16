@@ -19,10 +19,22 @@ interface SessionsResponse {
 }
 
 interface MessagesResponse {
-  messages: ChatMessage[];
+  messages: ChatMessageWire[];
   total: number;
   page: number;
   limit: number;
+}
+
+/** Prisma Decimal 等后端数值类型在 JSON 中可能以字符串形式返回。 */
+type ChatMessageWire = Omit<ChatMessage, 'cost'> & {
+  cost: number | string | null;
+};
+
+function normalizeChatMessage(message: ChatMessageWire): ChatMessage {
+  return {
+    ...message,
+    cost: message.cost === null ? null : Number(message.cost),
+  };
 }
 
 export const chatApi = {
@@ -47,10 +59,18 @@ export const chatApi = {
   },
 
   /** 获取会话历史消息 */
-  getMessages(sessionId: string, page = 1, limit = 50): Promise<MessagesResponse> {
-    return apiClient.get(
+  async getMessages(
+    sessionId: string,
+    page = 1,
+    limit = 50,
+  ): Promise<Omit<MessagesResponse, 'messages'> & { messages: ChatMessage[] }> {
+    const response = await apiClient.get<MessagesResponse>(
       `/chat/sessions/${sessionId}/messages?page=${page}&limit=${limit}`,
     );
+    return {
+      ...response,
+      messages: response.messages.map(normalizeChatMessage),
+    };
   },
 
   /** 获取可用聊天模型列表 */

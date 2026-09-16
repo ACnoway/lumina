@@ -140,7 +140,17 @@ export class ChatService {
       this.prisma.chatMessage.count({ where }),
     ]);
 
-    return { messages, total, page, limit };
+    // Prisma Decimal 在 JSON 序列化时会变成字符串，接口契约要求 cost 为 number。
+    // 在后端边界统一转换，避免前端对历史消息调用 toFixed 时发生类型错误。
+    return {
+      messages: messages.map((message) => ({
+        ...message,
+        cost: message.cost === null ? null : Number(message.cost.toString()),
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   // ==================== 发送消息（流式） ====================
