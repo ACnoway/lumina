@@ -8,6 +8,7 @@
     "build": "turbo run build",
     "start": "turbo run start",
     "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
     "test": "turbo run test",
     "clean": "turbo run clean && rm -rf node_modules",
     "backend:dev": "pnpm --filter backend dev",
