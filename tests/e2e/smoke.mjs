@@ -151,6 +151,62 @@ async function main() {
   const userBalance = await requestAuth(userToken, '/wallet/balance');
   assert(Number(userBalance.data.balance) === 10, 'new user initial balance mismatch');
   await requestAuth(userToken, '/providers', {}, [403]);
+  await requestAuth(userToken, '/admin/users', {}, [403]);
+
+  const userId = userLogin.data.user.id;
+  const adminUsers = await requestAuth(
+    adminToken,
+    `/admin/users?search=${encodeURIComponent(userEmail)}&limit=10`,
+  );
+  assert(
+    adminUsers.data.items.some((item) => item.id === userId && item.email === userEmail),
+    'admin user search did not return the new user',
+  );
+
+  const adminUserBefore = await requestAuth(adminToken, `/admin/users/${userId}`);
+  assert(adminUserBefore.data.status === 'ACTIVE', 'new user admin status mismatch');
+  assert(Number(adminUserBefore.data.wallet?.balance) === 10, 'admin user wallet balance mismatch');
+
+  const suspendedUser = await requestAuth(adminToken, `/admin/users/${userId}/status`, {
+    method: 'PATCH',
+    body: { status: 'SUSPENDED' },
+  });
+  assert(suspendedUser.data.status === 'SUSPENDED', 'admin user suspension did not take effect');
+  await requestAuth(userToken, '/wallet/balance', {}, [401]);
+
+  const reactivatedUser = await requestAuth(adminToken, `/admin/users/${userId}/status`, {
+    method: 'PATCH',
+    body: { status: 'ACTIVE' },
+  });
+  assert(reactivatedUser.data.status === 'ACTIVE', 'admin user reactivation did not take effect');
+  const reactivatedBalance = await requestAuth(userToken, '/wallet/balance');
+  assert(Number(reactivatedBalance.data.balance) === 10, 'reactivated user wallet access mismatch');
+
+  const adjustmentReason = 'E2E balance adjustment';
+  const balanceAdjustment = await requestAuth(adminToken, '/admin/wallet/adjustments', {
+    method: 'POST',
+    body: { userId, amount: 2.5, reason: adjustmentReason },
+  });
+  assert(balanceAdjustment.data.type === 'ADMIN_ADJUST', 'admin wallet adjustment type mismatch');
+  assert(Number(balanceAdjustment.data.amount) === 2.5, 'admin wallet adjustment amount mismatch');
+  assert(Number(balanceAdjustment.data.balance) === 12.5, 'admin wallet adjustment balance mismatch');
+  assert(balanceAdjustment.data.reason === adjustmentReason, 'admin wallet adjustment reason mismatch');
+
+  const adminUserAfter = await requestAuth(adminToken, `/admin/users/${userId}`);
+  assert(Number(adminUserAfter.data.wallet?.balance) === 12.5, 'admin user balance was not persisted');
+  const adminTransactions = await requestAuth(
+    adminToken,
+    `/admin/users/${userId}/transactions?limit=10`,
+  );
+  assert(
+    adminTransactions.data.items.some(
+      (item) =>
+        item.type === 'ADMIN_ADJUST' &&
+        item.reason === adjustmentReason &&
+        Number(item.balance) === 12.5,
+    ),
+    'admin user ledger did not contain the balance adjustment',
+  );
 
   const provider = await requestAuth(adminToken, '/providers', {
     method: 'POST',
@@ -274,8 +330,29 @@ async function main() {
   assert(actions.includes('provider.created'), 'provider creation was not audited');
   assert(actions.includes('platform_model.created'), 'model creation was not audited');
   assert(actions.includes('upstream_model.created'), 'upstream creation was not audited');
+  const statusAudits = auditLogs.data.items.filter(
+    (item) => item.action === 'user.status.updated' && item.details?.targetId === userId,
+  );
+  assert(
+    statusAudits.some(
+      (item) =>
+        item.details?.before?.status === 'ACTIVE' && item.details?.after?.status === 'SUSPENDED',
+    ),
+    'user suspension audit did not preserve before/after status',
+  );
+  const balanceAudit = auditLogs.data.items.find(
+    (item) =>
+      item.action === 'wallet.balance.adjusted' &&
+      item.details?.targetId === userId &&
+      item.details?.reason === adjustmentReason,
+  );
+  assert(balanceAudit, 'wallet balance adjustment was not audited');
+  assert(Number(balanceAudit.details.before?.balance) === 10, 'wallet audit before balance mismatch');
+  assert(Number(balanceAudit.details.after?.balance) === 12.5, 'wallet audit after balance mismatch');
 
-  console.log('Lumina E2E smoke passed: auth, RBAC, admin config, chat SSE, image queue, MinIO, history, audit');
+  console.log(
+    'Lumina E2E smoke passed: auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, MinIO, history, audit',
+  );
 }
 
 main().catch((error) => {
