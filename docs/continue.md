@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`3a61940 fix: replace provider rate limit with sliding window`
-> 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成 API/E2E 冒烟验收。
+> 基线提交：`1001ed1 fix: make image retries upstream-idempotent`
+> 分支状态：`main` 与 `origin/main` 一致，`1001ed1` 已在 `lch:/root/lumina` 完成 API/E2E 冒烟验收。
 
 ## 先读这份文档
 
@@ -113,7 +113,7 @@ Provider 限流已从按分钟编号的 `INCR + EXPIRE` 固定窗口改为 Redis
 
 生图任务继续使用 `image:<taskId>` 作为钱包幂等键，并将同一个稳定键透传到 OpenAI Images、OpenAI-compatible 和 Stability Image 的 `Idempotency-Key` 请求头。这样任务在上游已完成、但本地状态尚未落库而被恢复时，支持该约定的上游可以复用原请求结果，不会因为 Lumina 重试而创建新的生成请求。
 
-新增图片服务单测，覆盖任务键从处理链路传入两类请求封装并出现在 HTTP 请求头；E2E mock Provider 也会按键缓存图片响应。真实供应商是否执行幂等仍取决于其 API 契约，后续可在配置真实 Provider 后做受控验证。
+新增图片服务单测，覆盖任务键从处理链路传入两类请求封装并出现在 HTTP 请求头；E2E mock Provider 也会按键缓存图片响应。提交 `1001ed1` 已在 `lch:/root/lumina` 的隔离 Compose 环境通过完整 smoke，真实供应商是否执行幂等仍取决于其 API 契约，后续可在配置真实 Provider 后做受控验证。
 
 ## 随后的开发顺序
 
