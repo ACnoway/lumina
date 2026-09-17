@@ -6,7 +6,7 @@
 
 ### 本次核对结果
 
-- 已完整核对 `apps/backend`、`apps/frontend`、共享类型、Prisma schema、Docker Compose 和现有文档。
+- 已完整核对 `apps/backend`、`apps/frontend`、共享类型、Prisma schema、Docker Compose 和现有文档；生产数据库已切换到版本化 baseline migration。
 - 使用现有本地依赖直接运行后端 Jest：**17 个测试套件、64 个测试全部通过**（认证验证码投递、管理员账户初始化、钱包并发/幂等与管理员调额审计、Provider RBAC/审计脱敏、Provider 滑动窗口限流与配置校验、管理员模型可见性、平台模型计费结构校验、管理端 RBAC、审计日志、MinIO 和生图队列及上游幂等请求头）。
 - 共享类型编译、Nest 后端构建、Next 前端生产构建均通过；前端已生成 `/login`、`/chat`、`/image`、`/history` 和 `/admin` 路由。
 - 本机未启动前端、后端、PostgreSQL、Redis、MinIO 或 SMTP；认证验证码现已通过 mock SMTP 单元测试，但仍未执行真实认证、聊天、生图的端到端验证。
@@ -16,7 +16,7 @@
 
 | 范围 | 当前状态 | 证据与限制 |
 | --- | --- | --- |
-| 项目脚手架、Docker Compose、Prisma schema | 已实现 | 可构建；本机未启动容器和数据库迁移。 |
+| 项目脚手架、Docker Compose、Prisma schema | 已实现并接入版本化迁移 | baseline migration 已在远程旧库和独立空库验证；本机未启动容器。 |
 | 邮箱验证码登录、JWT、用户初始化钱包 | 代码与 mock SMTP 单元测试已验证 | 验证码仅在投递成功后写入 Redis；失败会清理验证码和 60 秒冷却状态；真实 SMTP 与数据库/Redis 联调仍待补。 |
 | 钱包与账本 | 代码与单元测试已验证 | 预扣、结算、退回和 RBAC 相关安全改动有单元测试；未接真实 PostgreSQL/Redis 联调。 |
 | Provider、模型路由、限流/熔断 | 代码、单元测试和远程 mock Provider E2E 已验证 | Provider 限流已使用 Redis ZSET + Lua 滑动窗口；远程 smoke 已验证限额为 1 时同窗口第二次聊天请求被拒绝。真实供应商路由仍待验证。 |
@@ -45,6 +45,14 @@
 
 - [x] 将管理后台的平台模型配置从 JSON 文本改为按模型类型展示的结构化表单，至少覆盖聊天模型的 input/output 价格和生图模型的 perImage 价格，并补充前后端校验。
 - [x] 将管理后台的供应商配置从 JSON 文本改为结构化输入框，覆盖 API Key、Base URL、请求超时和每分钟限流，并补充前后端校验。
+- [x] 为生产数据库建立由当前 Prisma schema 生成的 baseline migration，并将容器启动从 `db push` 切换为带旧库兼容校验的 `migrate deploy`。
+
+### 生产数据库 baseline migration（D-001）✓
+
+- 新增 `apps/backend/prisma/migrations/20260917000000_baseline/migration.sql`，覆盖当前全部枚举、表、索引和外键；SQL 已与 `prisma migrate diff --from-empty --to-schema-datamodel ... --script` 输出比对。
+- backend 镜像通过 `apps/backend/docker-entrypoint.sh` 在启动前执行 `prisma migrate deploy`。新数据库直接应用 baseline；历史 `db push` 数据库只有在只读 schema diff 返回无差异时才执行 `migrate resolve --applied`。
+- 旧库 schema 有差异、迁移命令异常或 baseline 接管失败时，容器不启动，等待人工迁移处理；不会再由启动命令静默修改生产结构。
+- 本地 schema 校验、17 个 backend 测试套件/64 个测试、Nest 构建通过；远程验证覆盖既有生产库接管、独立空库 baseline、完整 E2E smoke、生产健康检查和迁移状态检查。
 
 ### 管理后台平台模型计费表单 ✓
 

@@ -44,8 +44,11 @@ pnpm docker:up
 # 或
 docker-compose up -d --build
 
-# 3. 初始化数据库（首次）
-docker exec lumina-backend pnpm --filter backend prisma:migrate
+# 3. 数据库迁移
+# backend 启动时自动执行版本化迁移（prisma migrate deploy）
+# 首次部署会执行 baseline；旧版 db push 初始化且 schema 同构的数据库会自动标记 baseline
+# 如需查看状态：
+docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 # 4. 访问
 # 前端: http://localhost:3000
@@ -57,6 +60,7 @@ docker exec lumina-backend pnpm --filter backend prisma:migrate
 - `/api/` 转发到后端，`/lumina-images/` 转发到 MinIO，其他路径转发到前端
 - 后端 API、PostgreSQL、Redis、MinIO、前端都不单独对外暴露
 - Docker Compose 本地部署可使用默认的 `http://localhost:3000`；使用自有域名时将 `MINIO_PUBLIC_URL` 填为该统一入口，例如 `https://example.com`
+- 数据库结构由 `apps/backend/prisma/migrations/` 版本化管理；旧 `db push` 数据库若与当前 schema 有差异，backend 会拒绝启动而不会自动改表
 
 ### 方式二：本地开发
 

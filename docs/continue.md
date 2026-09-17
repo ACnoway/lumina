@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`1001ed1 fix: make image retries upstream-idempotent`
-> 分支状态：`main` 与 `origin/main` 一致，`1001ed1` 已在 `lch:/root/lumina` 完成 API/E2E 冒烟验收。
+> 基线提交：`e240051 feat(db): add baseline migration deployment`
+> 分支状态：`main` 与 `origin/main` 一致，`e240051` 已在 `lch:/root/lumina` 完成迁移与 API/E2E 验收。
 
 ## 先读这份文档
 
@@ -29,6 +29,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 管理后台供应商已改为 API Key、Base URL、请求超时和限流输入框；前后端均校验配置格式，列表和审计不暴露 API Key。
 - 已建立独立 API/E2E Compose 环境，包含 PostgreSQL、Redis、MinIO、MailHog、mock Provider、backend 和 frontend；认证、RBAC、管理端用户状态启停/余额账本/审计、聊天、生图和管理配置旅程已在远程通过。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
+- 已建立 Prisma baseline migration；生产 backend 启动使用 `prisma migrate deploy`，并对旧 `db push` 数据库执行无差异校验后自动接管。
 
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
 
@@ -45,7 +46,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：17 个套件、63 个测试通过。
+- 后端 Jest：17 个套件、64 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
@@ -115,9 +116,26 @@ Provider 限流已从按分钟编号的 `INCR + EXPIRE` 固定窗口改为 Redis
 
 新增图片服务单测，覆盖任务键从处理链路传入两类请求封装并出现在 HTTP 请求头；E2E mock Provider 也会按键缓存图片响应。提交 `1001ed1` 已在 `lch:/root/lumina` 的隔离 Compose 环境通过完整 smoke，真实供应商是否执行幂等仍取决于其 API 契约，后续可在配置真实 Provider 后做受控验证。
 
+## 本次模块：生产数据库 baseline migration（D-001）✓
+
+新增 `apps/backend/prisma/migrations/20260917000000_baseline/migration.sql`，由当前
+`schema.prisma` 生成并经过 SQL 内容比对；backend 新增 `prisma:migrate:deploy` 与
+`prisma:migrate:status` 脚本。
+
+生产镜像不再在启动时执行 `db push`，改由 `docker-entrypoint.sh` 执行
+`prisma migrate deploy`。对于历史上由 `db push` 初始化、但没有 `_prisma_migrations`
+的数据库，入口仅在 `prisma migrate diff --exit-code` 确认数据库与当前 schema 完全一致后
+执行 `migrate resolve --applied 20260917000000_baseline`；有差异或其他迁移错误时拒绝启动，
+避免静默改表。
+
+已验证：本地 schema 校验、baseline SQL 与 `prisma migrate diff` 一致性检查、backend
+17 个测试套件/64 个测试和 Nest 构建通过；`lch:/root/lumina` 的既有数据库成功完成
+baseline 接管，独立空库成功执行 baseline，完整 API/E2E smoke 通过，生产 backend
+健康检查和 `prisma migrate status` 均正常。E2E 专用容器、网络和卷已清理。
+
 ## 随后的开发顺序
 
-1. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
+1. 配置真实 SMTP 和真实 AI Provider 后，补做受控认证、聊天、生图与浏览器流程验收。
 
 ## 关键约束
 
