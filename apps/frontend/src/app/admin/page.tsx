@@ -57,6 +57,13 @@ const PROVIDER_DEFAULTS: Record<
 
 type Tab = "overview" | "users" | "config" | "audit";
 type AccessState = "checking" | "allowed" | "forbidden" | "expired";
+type ResourceType = "model" | "provider" | "upstream";
+type DeleteTarget = {
+  type: ResourceType;
+  id: string;
+  label: string;
+  warning: string;
+};
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -278,6 +285,14 @@ export default function AdminPage() {
   const [showModelForm, setShowModelForm] = useState(false);
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showUpstreamForm, setShowUpstreamForm] = useState(false);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(
+    null,
+  );
+  const [editingUpstreamId, setEditingUpstreamId] = useState<string | null>(
+    null,
+  );
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [modelForm, setModelForm] = useState({
     name: "",
     displayName: "",
@@ -372,7 +387,11 @@ export default function AdminPage() {
       );
       setUpstreamForm((current) => ({
         ...current,
-        providerId: current.providerId || nextProviders[0]?.id || "",
+        providerId: nextProviders.some(
+          (provider) => provider.id === current.providerId,
+        )
+          ? current.providerId
+          : (nextProviders[0]?.id ?? ""),
       }));
     } catch (loadError) {
       setError(getErrorMessage(loadError, "加载模型与供应商配置失败"));
@@ -520,6 +539,129 @@ export default function AdminPage() {
     }
   }
 
+  function openModelForm() {
+    setEditingModelId(null);
+    setModelForm({
+      name: "",
+      displayName: "",
+      type: "CHAT",
+      pricing: { input: "0.001", output: "0.002", perImage: "0.50" },
+      maxTokens: "",
+      isActive: true,
+    });
+    setShowModelForm(true);
+  }
+
+  function editModel(model: PlatformModelDto) {
+    setEditingModelId(model.id);
+    setModelForm({
+      name: model.name,
+      displayName: model.displayName,
+      type: model.type,
+      pricing: {
+        input: model.type === "CHAT" ? String(model.pricing.input) : "0.001",
+        output: model.type === "CHAT" ? String(model.pricing.output) : "0.002",
+        perImage:
+          model.type === "IMAGE" ? String(model.pricing.perImage) : "0.50",
+      },
+      maxTokens: model.maxTokens ? String(model.maxTokens) : "",
+      isActive: model.isActive,
+    });
+    setShowModelForm(true);
+  }
+
+  function closeModelForm() {
+    setShowModelForm(false);
+    setEditingModelId(null);
+  }
+
+  function openProviderForm() {
+    setEditingProviderId(null);
+    setProviderForm({
+      name: "",
+      apiFormat: "openai_chat",
+      supportsStreaming: true,
+      config: {
+        apiKey: "",
+        baseUrl: PROVIDER_DEFAULTS.openai_chat.baseUrl,
+        timeout: PROVIDER_DEFAULTS.openai_chat.timeout,
+        rateLimit: "60",
+      },
+      isActive: true,
+    });
+    setShowProviderForm(true);
+  }
+
+  function editProvider(provider: ProviderDto) {
+    const defaults = PROVIDER_DEFAULTS[provider.apiFormat];
+    const config = provider.config;
+    const timeout = Number(config.timeout);
+    const rateLimit = Number(config.rateLimit);
+    setEditingProviderId(provider.id);
+    setProviderForm({
+      name: provider.name,
+      apiFormat: provider.apiFormat,
+      supportsStreaming: provider.supportsStreaming,
+      config: {
+        apiKey: "",
+        baseUrl:
+          typeof config.baseUrl === "string" && config.baseUrl.trim()
+            ? config.baseUrl
+            : defaults.baseUrl,
+        timeout:
+          Number.isSafeInteger(timeout) && timeout > 0
+            ? String(timeout)
+            : defaults.timeout,
+        rateLimit:
+          Number.isSafeInteger(rateLimit) && rateLimit > 0
+            ? String(rateLimit)
+            : "60",
+      },
+      isActive: provider.isActive,
+    });
+    setShowProviderForm(true);
+  }
+
+  function closeProviderForm() {
+    setShowProviderForm(false);
+    setEditingProviderId(null);
+  }
+
+  function openUpstreamForm() {
+    setEditingUpstreamId(null);
+    setUpstreamForm((current) => ({
+      ...current,
+      upstreamModelId: "",
+      priority: "1",
+      weight: "1",
+      upstreamPricing: "",
+      maxTokens: "",
+      isActive: true,
+    }));
+    setShowUpstreamForm(true);
+  }
+
+  function editUpstream(upstream: UpstreamModelDto) {
+    setEditingUpstreamId(upstream.id);
+    setUpstreamForm({
+      providerId: upstream.providerId,
+      upstreamModelId: upstream.upstreamModelId,
+      priority: String(upstream.priority),
+      weight: String(upstream.weight),
+      upstreamPricing: upstream.upstreamPricing
+        ? JSON.stringify(upstream.upstreamPricing, null, 2)
+        : "",
+      maxTokens: upstream.maxTokens ? String(upstream.maxTokens) : "",
+      isActive: upstream.isActive,
+    });
+    setShowUpstreamForm(true);
+  }
+
+  function closeUpstreamForm() {
+    setShowUpstreamForm(false);
+    setEditingUpstreamId(null);
+  }
+
   async function submitModel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMutatingResource("model-form");
@@ -552,20 +694,25 @@ export default function AdminPage() {
                 "生图价格",
               ),
             };
-      await adminApi.createModel({
+      const payload = {
         name: modelForm.name.trim(),
         displayName: modelForm.displayName.trim(),
         type: modelForm.type,
         pricing,
         maxTokens,
         isActive: modelForm.isActive,
-      });
-      setNotice("平台模型已创建");
-      setShowModelForm(false);
-      setModelForm((current) => ({ ...current, name: "", displayName: "" }));
+      };
+      if (editingModelId) {
+        await adminApi.updateModel(editingModelId, payload);
+        setNotice("平台模型已更新");
+      } else {
+        await adminApi.createModel(payload);
+        setNotice("平台模型已创建");
+      }
+      closeModelForm();
       await loadConfig();
     } catch (formError) {
-      setError(getErrorMessage(formError, "创建模型失败"));
+      setError(getErrorMessage(formError, "保存模型失败"));
     } finally {
       setMutatingResource("");
     }
@@ -576,7 +723,8 @@ export default function AdminPage() {
     setMutatingResource("provider-form");
     try {
       if (!providerForm.name.trim()) throw new Error("请填写供应商名称");
-      if (!providerForm.config.apiKey.trim()) {
+      const apiKey = providerForm.config.apiKey.trim();
+      if (!editingProviderId && !apiKey) {
         throw new Error("请填写供应商 API Key");
       }
       const baseUrl = parseHttpUrl(providerForm.config.baseUrl, "Base URL");
@@ -588,24 +736,33 @@ export default function AdminPage() {
         providerForm.config.rateLimit,
         "限流",
       );
-      await adminApi.createProvider({
+      const config: Record<string, unknown> = {
+        baseUrl,
+        timeout,
+        rateLimit,
+      };
+      if (apiKey) config.apiKey = apiKey;
+      const payload = {
         name: providerForm.name.trim(),
         apiFormat: providerForm.apiFormat,
         supportsStreaming: providerForm.supportsStreaming,
-        config: {
-          apiKey: providerForm.config.apiKey.trim(),
-          baseUrl,
-          timeout,
-          rateLimit,
-        },
+        config,
         isActive: providerForm.isActive,
-      });
-      setNotice("供应商已创建");
-      setShowProviderForm(false);
-      setProviderForm({ ...providerForm, name: "" });
+      };
+      if (editingProviderId) {
+        await adminApi.updateProvider(editingProviderId, payload);
+        setNotice("供应商已更新");
+      } else {
+        await adminApi.createProvider({
+          ...payload,
+          config: { ...config, apiKey },
+        });
+        setNotice("供应商已创建");
+      }
+      closeProviderForm();
       await loadConfig();
     } catch (formError) {
-      setError(getErrorMessage(formError, "创建供应商失败"));
+      setError(getErrorMessage(formError, "保存供应商失败"));
     } finally {
       setMutatingResource("");
     }
@@ -634,7 +791,7 @@ export default function AdminPage() {
       ) {
         throw new Error("最大 Token 必须是大于 0 的整数");
       }
-      await adminApi.createUpstream(selectedModelId, {
+      const payload = {
         providerId: upstreamForm.providerId,
         upstreamModelId: upstreamForm.upstreamModelId.trim(),
         priority,
@@ -644,20 +801,25 @@ export default function AdminPage() {
           : undefined,
         maxTokens,
         isActive: upstreamForm.isActive,
-      });
-      setNotice("上游映射已创建");
-      setShowUpstreamForm(false);
-      setUpstreamForm((current) => ({ ...current, upstreamModelId: "" }));
+      };
+      if (editingUpstreamId) {
+        await adminApi.updateUpstream(editingUpstreamId, payload);
+        setNotice("上游映射已更新");
+      } else {
+        await adminApi.createUpstream(selectedModelId, payload);
+        setNotice("上游映射已创建");
+      }
+      closeUpstreamForm();
       await loadUpstreams();
     } catch (formError) {
-      setError(getErrorMessage(formError, "创建上游映射失败"));
+      setError(getErrorMessage(formError, "保存上游映射失败"));
     } finally {
       setMutatingResource("");
     }
   }
 
   async function toggleResource(
-    type: "model" | "provider" | "upstream",
+    type: ResourceType,
     resource: PlatformModelDto | ProviderDto | UpstreamModelDto,
   ) {
     const key = `${type}-${resource.id}`;
@@ -682,6 +844,34 @@ export default function AdminPage() {
       else await loadConfig();
     } catch (toggleError) {
       setError(getErrorMessage(toggleError, "更新状态失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function deleteResource() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setMutatingResource(`delete-${target.type}-${target.id}`);
+    try {
+      if (target.type === "model") {
+        await adminApi.deleteModel(target.id);
+        if (editingModelId === target.id) closeModelForm();
+        if (selectedModelId === target.id) setUpstreams([]);
+        await loadConfig();
+      } else if (target.type === "provider") {
+        await adminApi.deleteProvider(target.id);
+        if (editingProviderId === target.id) closeProviderForm();
+        await Promise.all([loadConfig(), loadUpstreams()]);
+      } else {
+        await adminApi.deleteUpstream(target.id);
+        if (editingUpstreamId === target.id) closeUpstreamForm();
+        await loadUpstreams();
+      }
+      setNotice(`${target.label}已删除`);
+      setDeleteTarget(null);
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, `删除${target.label}失败`));
     } finally {
       setMutatingResource("");
     }
@@ -755,11 +945,11 @@ export default function AdminPage() {
       <AppHeader
         title="管理后台"
         maxWidth="7xl"
-        trailing={(
+        trailing={
           <span className="hidden rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 sm:inline">
             {actor?.role}
           </span>
-        )}
+        }
       />
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
@@ -804,6 +994,46 @@ export default function AdminPage() {
             >
               ×
             </button>
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/30 px-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-dialog-title"
+              className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl"
+            >
+              <h2 id="delete-dialog-title" className="text-lg font-semibold">
+                确认删除
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-gray-600">
+                确定要删除{deleteTarget.label}吗？
+                <span className="mt-1 block text-red-600">
+                  {deleteTarget.warning}
+                </span>
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={mutatingResource.startsWith("delete-")}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:border-gray-300 hover:text-gray-800 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteResource()}
+                  disabled={mutatingResource.startsWith("delete-")}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {mutatingResource.startsWith("delete-")
+                    ? "删除中…"
+                    : "确认删除"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1164,10 +1394,12 @@ export default function AdminPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowModelForm((current) => !current)}
+                    onClick={() =>
+                      showModelForm ? closeModelForm() : openModelForm()
+                    }
                     className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
-                    新建模型
+                    {showModelForm ? "取消" : "新建模型"}
                   </button>
                 </div>
                 {showModelForm && (
@@ -1175,6 +1407,9 @@ export default function AdminPage() {
                     className="mb-5 space-y-3 rounded-xl bg-gray-50 p-4"
                     onSubmit={submitModel}
                   >
+                    <p className="text-sm font-medium text-gray-700">
+                      {editingModelId ? "编辑平台模型" : "新建平台模型"}
+                    </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <input
                         value={modelForm.name}
@@ -1321,7 +1556,9 @@ export default function AdminPage() {
                     >
                       {mutatingResource === "model-form"
                         ? "保存中…"
-                        : "创建模型"}
+                        : editingModelId
+                          ? "保存模型"
+                          : "创建模型"}
                     </button>
                   </form>
                 )}
@@ -1357,13 +1594,37 @@ export default function AdminPage() {
                             onChange={() => void toggleResource("model", model)}
                           />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedModelId(model.id)}
-                          className="mt-3 text-xs font-medium text-blue-600 hover:text-blue-700"
-                        >
-                          管理上游映射
-                        </button>
+                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-medium">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedModelId(model.id)}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            管理上游映射
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => editModel(model)}
+                            className="text-gray-600 hover:text-gray-800"
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "model",
+                                id: model.id,
+                                label: `平台模型“${model.displayName}”`,
+                                warning:
+                                  "删除后会级联删除该模型下的所有上游映射，且不可恢复。",
+                              })
+                            }
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            删除
+                          </button>
+                        </div>
                       </article>
                     ))
                   )}
@@ -1379,10 +1640,14 @@ export default function AdminPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowProviderForm((current) => !current)}
+                    onClick={() =>
+                      showProviderForm
+                        ? closeProviderForm()
+                        : openProviderForm()
+                    }
                     className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
-                    新建供应商
+                    {showProviderForm ? "取消" : "新建供应商"}
                   </button>
                 </div>
                 {showProviderForm && (
@@ -1390,6 +1655,9 @@ export default function AdminPage() {
                     className="mb-5 space-y-3 rounded-xl bg-gray-50 p-4"
                     onSubmit={submitProvider}
                   >
+                    <p className="text-sm font-medium text-gray-700">
+                      {editingProviderId ? "编辑供应商" : "新建供应商"}
+                    </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <input
                         value={providerForm.name}
@@ -1407,9 +1675,8 @@ export default function AdminPage() {
                         onChange={(event) => {
                           const nextFormat = event.target.value as ApiFormat;
                           setProviderForm((current) => {
-                            const previousDefaults = PROVIDER_DEFAULTS[
-                              current.apiFormat
-                            ];
+                            const previousDefaults =
+                              PROVIDER_DEFAULTS[current.apiFormat];
                             const nextDefaults = PROVIDER_DEFAULTS[nextFormat];
                             return {
                               ...current,
@@ -1424,7 +1691,8 @@ export default function AdminPage() {
                                     : current.config.baseUrl,
                                 timeout:
                                   !current.config.timeout.trim() ||
-                                  current.config.timeout === previousDefaults.timeout
+                                  current.config.timeout ===
+                                    previousDefaults.timeout
                                     ? nextDefaults.timeout
                                     : current.config.timeout,
                               },
@@ -1458,8 +1726,10 @@ export default function AdminPage() {
                           }
                           type="password"
                           autoComplete="new-password"
-                          required
-                          placeholder="sk-…"
+                          required={!editingProviderId}
+                          placeholder={
+                            editingProviderId ? "留空则保留当前密钥" : "sk-…"
+                          }
                           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
                         />
                       </label>
@@ -1530,6 +1800,7 @@ export default function AdminPage() {
                     </div>
                     <p className="text-xs text-gray-400">
                       API Key 只用于调用上游，不会显示在供应商列表或审计日志中。
+                      {editingProviderId ? "编辑时留空则保留当前密钥。" : ""}
                     </p>
                     <div className="flex gap-4 text-sm text-gray-600">
                       <label className="flex items-center gap-2">
@@ -1565,7 +1836,9 @@ export default function AdminPage() {
                     >
                       {mutatingResource === "provider-form"
                         ? "保存中…"
-                        : "创建供应商"}
+                        : editingProviderId
+                          ? "保存供应商"
+                          : "创建供应商"}
                     </button>
                   </form>
                 )}
@@ -1608,6 +1881,30 @@ export default function AdminPage() {
                             }
                           />
                         </div>
+                        <div className="mt-3 flex items-center gap-3 text-xs font-medium">
+                          <button
+                            type="button"
+                            onClick={() => editProvider(provider)}
+                            className="text-gray-600 hover:text-gray-800"
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: "provider",
+                                id: provider.id,
+                                label: `供应商“${provider.name}”`,
+                                warning:
+                                  "删除后会级联删除该供应商关联的所有上游映射，且不可恢复。",
+                              })
+                            }
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            删除
+                          </button>
+                        </div>
                       </article>
                     ))
                   )}
@@ -1638,10 +1935,14 @@ export default function AdminPage() {
                   <button
                     type="button"
                     disabled={!selectedModelId || providers.length === 0}
-                    onClick={() => setShowUpstreamForm((current) => !current)}
+                    onClick={() =>
+                      showUpstreamForm
+                        ? closeUpstreamForm()
+                        : openUpstreamForm()
+                    }
                     className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    新建映射
+                    {showUpstreamForm ? "取消" : "新建映射"}
                   </button>
                 </div>
               </div>
@@ -1650,6 +1951,9 @@ export default function AdminPage() {
                   className="mt-5 space-y-3 rounded-xl bg-gray-50 p-4"
                   onSubmit={submitUpstream}
                 >
+                  <p className="text-sm font-medium text-gray-700">
+                    {editingUpstreamId ? "编辑上游映射" : "新建上游映射"}
+                  </p>
                   <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
                     <select
                       value={upstreamForm.providerId}
@@ -1755,7 +2059,9 @@ export default function AdminPage() {
                   >
                     {mutatingResource === "upstream-form"
                       ? "保存中…"
-                      : "创建映射"}
+                      : editingUpstreamId
+                        ? "保存映射"
+                        : "创建映射"}
                   </button>
                 </form>
               )}
@@ -1771,13 +2077,14 @@ export default function AdminPage() {
                 </p>
               ) : (
                 <div className="mt-5 overflow-x-auto">
-                  <table className="w-full min-w-[680px] text-left text-sm">
+                  <table className="w-full min-w-[760px] text-left text-sm">
                     <thead className="border-b border-gray-100 text-xs text-gray-400">
                       <tr>
                         <th className="px-2 py-3 font-medium">供应商</th>
                         <th className="px-2 py-3 font-medium">上游模型</th>
                         <th className="px-2 py-3 font-medium">优先级 / 权重</th>
                         <th className="px-2 py-3 font-medium">状态</th>
+                        <th className="px-2 py-3 font-medium">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1808,6 +2115,32 @@ export default function AdminPage() {
                                 void toggleResource("upstream", upstream)
                               }
                             />
+                          </td>
+                          <td className="px-2 py-3">
+                            <div className="flex items-center gap-3 text-xs font-medium">
+                              <button
+                                type="button"
+                                onClick={() => editUpstream(upstream)}
+                                className="text-gray-600 hover:text-gray-800"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    type: "upstream",
+                                    id: upstream.id,
+                                    label: `上游映射“${upstream.upstreamModelId}”`,
+                                    warning:
+                                      "删除后该映射将从路由中移除，且不可恢复。",
+                                  })
+                                }
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                删除
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

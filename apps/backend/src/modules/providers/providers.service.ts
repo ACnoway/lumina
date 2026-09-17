@@ -16,7 +16,7 @@ import {
   ApiFormat,
 } from '@prisma/client';
 import { assertValidPlatformModelPricing } from './platform-model-pricing';
-import { assertValidProviderConfig } from './provider-config';
+import { assertValidProviderConfig, assertValidProviderConfigPatch } from './provider-config';
 
 /**
  * 路由结果
@@ -237,8 +237,17 @@ export class ProvidersService {
       throw new NotFoundException('供应商不存在');
     }
 
+    const nextConfig =
+      data.config === undefined
+        ? undefined
+        : {
+            ...((provider.config as Record<string, any>) || {}),
+            ...data.config,
+          };
+
     if (data.config !== undefined) {
-      assertValidProviderConfig(data.config);
+      assertValidProviderConfigPatch(data.config);
+      assertValidProviderConfig(nextConfig);
     }
 
     if (data.name && data.name !== provider.name) {
@@ -256,7 +265,7 @@ export class ProvidersService {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.apiFormat !== undefined && { apiFormat: data.apiFormat as ApiFormat }),
         ...(data.supportsStreaming !== undefined && { supportsStreaming: data.supportsStreaming }),
-        ...(data.config !== undefined && { config: data.config }),
+        ...(nextConfig !== undefined && { config: nextConfig }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
     });

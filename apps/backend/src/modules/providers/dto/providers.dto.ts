@@ -28,6 +28,17 @@ export class ProviderConfigConstraint implements ValidatorConstraintInterface {
   }
 }
 
+@ValidatorConstraint({ name: 'providerConfigPatch', async: false })
+export class ProviderConfigPatchConstraint implements ValidatorConstraintInterface {
+  validate(config: unknown): boolean {
+    return getProviderConfigError(config, { requireApiKey: false }) === null;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return getProviderConfigError(args.value, { requireApiKey: false }) || '供应商配置不合法';
+  }
+}
+
 export class CreateProviderDto {
   @ApiProperty({ description: '供应商名称', example: 'openai' })
   @IsString({ message: '名称必须是字符串' })
@@ -67,7 +78,42 @@ export class CreateProviderDto {
   isActive?: boolean;
 }
 
-export class UpdateProviderDto extends PartialType(CreateProviderDto) {}
+export class UpdateProviderDto {
+  @ApiProperty({ description: '供应商名称', required: false })
+  @IsOptional()
+  @IsString({ message: '名称必须是字符串' })
+  name?: string;
+
+  @ApiProperty({
+    description: 'API 格式',
+    enum: ['openai_chat', 'openai_compatible', 'anthropic_messages', 'openai_image', 'stability_image'],
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(['openai_chat', 'openai_compatible', 'anthropic_messages', 'openai_image', 'stability_image'], {
+    message: 'apiFormat 不合法',
+  })
+  apiFormat?: ApiFormat;
+
+  @ApiProperty({ description: '是否支持流式', required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'supportsStreaming 必须是布尔值' })
+  supportsStreaming?: boolean;
+
+  @ApiProperty({
+    description: '配置信息；apiKey 可选，省略时保留原密钥',
+    required: false,
+  })
+  @IsOptional()
+  @IsObject({ message: 'config 必须是对象' })
+  @Validate(ProviderConfigPatchConstraint)
+  config?: Record<string, any>;
+
+  @ApiProperty({ description: '是否启用', required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'isActive 必须是布尔值' })
+  isActive?: boolean;
+}
 
 // ==================== 平台模型 DTO ====================
 @ValidatorConstraint({ name: 'platformModelPricing', async: false })

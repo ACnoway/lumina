@@ -4,7 +4,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
-import { CreateProviderDto } from './dto/providers.dto';
+import { CreateProviderDto, UpdateProviderDto } from './dto/providers.dto';
 import { ProvidersService } from './providers.service';
 import { assertValidProviderConfig, getProviderConfigError } from './provider-config';
 
@@ -22,6 +22,21 @@ describe('provider configuration validation', () => {
         name: 'example-provider',
         apiFormat: 'openai_chat',
         config: validProviderConfig,
+      }),
+    );
+
+    expect(errors).toHaveLength(0);
+  });
+
+  it('accepts provider edits without repeating the existing API key', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateProviderDto, {
+        name: 'updated-provider',
+        config: {
+          baseUrl: 'https://api.example.com/v2',
+          timeout: 60000,
+          rateLimit: 120,
+        },
       }),
     );
 
@@ -73,5 +88,39 @@ describe('provider configuration validation', () => {
     ).rejects.toThrow(BadRequestException);
     expect(provider.findUnique).not.toHaveBeenCalled();
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it('merges provider edits with the persisted API key', async () => {
+    const provider = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'provider-1',
+        name: 'example-provider',
+        config: validProviderConfig,
+      }),
+      update: jest.fn().mockResolvedValue({ id: 'provider-1' }),
+    };
+    const service = new ProvidersService(
+      { provider, platformModel: {} } as unknown as PrismaService,
+      {} as RedisService,
+      {
+        get: jest.fn((_: string, defaultValue: number) => defaultValue),
+      } as unknown as ConfigService,
+    );
+
+    await service.updateProvider('provider-1', {
+      config: {
+        baseUrl: 'https://api.example.com/v2',
+      },
+    });
+
+    expect(provider.update).toHaveBeenCalledWith({
+      where: { id: 'provider-1' },
+      data: {
+        config: {
+          ...validProviderConfig,
+          baseUrl: 'https://api.example.com/v2',
+        },
+      },
+    });
   });
 });

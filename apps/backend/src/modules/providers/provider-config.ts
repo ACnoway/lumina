@@ -7,6 +7,8 @@ export type ProviderConfig = {
   rateLimit?: number;
 };
 
+export type ProviderConfigPatch = Partial<ProviderConfig>;
+
 const SUPPORTED_CONFIG_KEYS = new Set(['apiKey', 'baseUrl', 'timeout', 'rateLimit']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -17,7 +19,12 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
-export function getProviderConfigError(config: unknown): string | null {
+export function getProviderConfigError(
+  config: unknown,
+  options: { requireApiKey?: boolean } = {},
+): string | null {
+  const requireApiKey = options.requireApiKey ?? true;
+
   if (!isRecord(config)) {
     return '供应商配置必须是 JSON 对象';
   }
@@ -27,7 +34,10 @@ export function getProviderConfigError(config: unknown): string | null {
     return `供应商配置包含不支持的字段：${unsupportedKey}`;
   }
 
-  if (typeof config.apiKey !== 'string' || !config.apiKey.trim()) {
+  if (
+    (requireApiKey || config.apiKey !== undefined) &&
+    (typeof config.apiKey !== 'string' || !config.apiKey.trim())
+  ) {
     return '供应商 API Key 不能为空';
   }
 
@@ -60,6 +70,15 @@ export function getProviderConfigError(config: unknown): string | null {
 
 export function assertValidProviderConfig(config: unknown): asserts config is ProviderConfig {
   const error = getProviderConfigError(config);
+  if (error) {
+    throw new BadRequestException(error);
+  }
+}
+
+export function assertValidProviderConfigPatch(
+  config: unknown,
+): asserts config is ProviderConfigPatch {
+  const error = getProviderConfigError(config, { requireApiKey: false });
   if (error) {
     throw new BadRequestException(error);
   }
