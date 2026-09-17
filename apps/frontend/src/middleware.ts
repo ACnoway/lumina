@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
  * 认证保护中间件
  * 未登录用户访问受保护页面时重定向到 /login
  */
-const PROTECTED_PATHS = ['/chat', '/image', '/history', '/admin'];
+const PROTECTED_PATHS = ['/chat', '/image', '/history', '/admin', '/profile'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -36,5 +36,11 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/chat/:path*', '/image/:path*', '/history/:path*', '/admin/:path*'],
+  matcher: [
+    '/chat/:path*',
+    '/image/:path*',
+    '/history/:path*',
+    '/admin/:path*',
+    '/profile/:path*',
+  ],
 };

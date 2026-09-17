@@ -33,14 +33,6 @@ export default function Home() {
           label: title,
           key: index === 0 ? 'image' : 'chat',
         }))}
-        trailing={(
-          <Link
-            href="/login"
-            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-700"
-          >
-            登录
-          </Link>
-        )}
       />
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">

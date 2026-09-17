@@ -91,6 +91,7 @@ export default function LoginPage() {
       <AppHeader
         title="登录"
         items={[]}
+        showUserMenu={false}
         trailing={(
           <Link href="/" className="text-sm text-gray-500 transition hover:text-blue-600">
             返回首页

@@ -756,14 +756,9 @@ export default function AdminPage() {
         title="管理后台"
         maxWidth="7xl"
         trailing={(
-          <>
-            <span className="hidden rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 sm:inline">
-              {actor?.role}
-            </span>
-            <span className="max-w-40 truncate text-xs text-gray-400">
-              {actor?.email}
-            </span>
-          </>
+          <span className="hidden rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 sm:inline">
+            {actor?.role}
+          </span>
         )}
       />
 
