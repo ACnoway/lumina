@@ -218,7 +218,7 @@ async function main() {
         apiKey: 'e2e-key',
         baseUrl: 'http://mock-provider:8080/v1',
         timeout: 5000,
-        rateLimit: 1,
+        rateLimit: 2,
       },
     },
   });
