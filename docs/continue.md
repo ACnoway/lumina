@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`e240051 feat(db): add baseline migration deployment`
-> 分支状态：`main` 与 `origin/main` 一致，`e240051` 已在 `lch:/root/lumina` 完成迁移与 API/E2E 验收。
+> 基线提交：`e2966a5 fix: keep provider config lint-safe`
+> 分支状态：`main` 与 `origin/main` 一致，`e2966a5` 已在 `lch:/root/lumina` 完成根级验证和 API/E2E 验收。
 
 ## 先读这份文档
 
@@ -132,6 +132,17 @@ Provider 限流已从按分钟编号的 `INCR + EXPIRE` 固定窗口改为 Redis
 17 个测试套件/64 个测试和 Nest 构建通过；`lch:/root/lumina` 的既有数据库成功完成
 baseline 接管，独立空库成功执行 baseline，完整 API/E2E smoke 通过，生产 backend
 健康检查和 `prisma migrate status` 均正常。E2E 专用容器、网络和卷已清理。
+
+## 本次模块：验证工具链安全化（A-003）✓
+
+根级 `lint` 和后端 `lint` 现在都是只读检查；新增根级、后端和前端的
+`lint:fix` 显式修复命令，并在 Turborepo 中注册对应任务。管理端供应商响应的
+API Key 脱敏逻辑改为复制配置后删除敏感字段，消除了只读 lint 的实际未使用变量错误。
+
+远程 `lch:/root/lumina` 使用 pnpm 8.15.0 验证通过：根级 lint（0 errors，保留历史
+格式 warning）、17 个测试套件/64 个测试和根级 build；最终提交的隔离 E2E smoke
+也已通过并清理全部专用容器、网络和卷。现有 Prettier 格式 warning 未全仓自动修复，
+后续可按文件分批处理。
 
 ## 随后的开发顺序
 

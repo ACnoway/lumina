@@ -162,6 +162,7 @@ pnpm docker:dev:down        # 停止基础设施容器
 pnpm dev                    # 启动前后端开发服务
 pnpm build                  # 构建所有包
 pnpm lint                   # 代码检查
+pnpm lint:fix               # 显式执行 lint 自动修复
 
 # 后端
 pnpm --filter backend prisma:studio    # Prisma 数据库可视化管理

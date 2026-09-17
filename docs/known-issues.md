@@ -36,7 +36,13 @@
 - **影响**：无法以仓库定义的根脚本完成当前基线验证；CI 与本地的工具链结果也可能不一致。
 - **建议方案**：统一开发机和 CI 使用 pnpm 8.15.0，先以干净安装执行 `pnpm install --frozen-lockfile`；同时把 lint 拆分为只检查的 `lint` 和显式修复的 `lint:fix`，避免验证命令改写源文件。
 - **优先级**：P1
-- **状态**：未修复。
+- **修复时间**：2026-09-17
+- **修复方式**：根级、backend 和 frontend 新增显式 `lint:fix`；`lint` 改为只读检查。
+  backend 的 Prettier 规则暂降为 warning，避免历史格式债务触发自动改写或阻断 CI；
+  Provider 脱敏响应改为复制配置后删除 `apiKey`，并修复了实际的未使用变量错误。
+- **验证**：`lch:/root/lumina` 使用 pnpm 8.15.0 执行根级 lint、test、build 通过；lint
+  无 error 但有 238 个历史 warning。pnpm 11 的本地环境仍未统一。
+- **状态**：部分修复；依赖工具链统一和历史格式清理仍待完成。
 
 ---
 
