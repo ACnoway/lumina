@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`a5df32d feat: add admin resource edit and delete`
-> 分支状态：提示词优化模型配置改造正在进行，完成后会更新提交号和远程验证结果。
+> 验证提交：`6ee5917 test: account for prompt optimizer rate limit`
+> 分支状态：提示词优化模型配置改造已完成；本地 `main` 与远程 `origin/main` 已同步，远程隔离 E2E 已通过。
 
 ## 先读这份文档
 
@@ -32,6 +32,19 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
 - 已建立 Prisma baseline migration；生产 backend 启动使用 `prisma migrate deploy`，并对旧 `db push` 数据库执行无差异校验后自动接管。
 
+## 本次模块：提示词优化模型配置与真实调用 ✓
+
+管理后台新增“模型与供应商 → 提示词优化模型”配置，可从已有的平台 `CHAT` 模型中选择并保存到
+`system_configs`。后端只允许选择启用、存在可用聊天上游且格式兼容的模型；普通用户不能读取或修改该配置，
+管理员修改会写入审计日志。删除或清空配置后，服务仍可读取 `.env` 中的 `PROMPT_OPTIMIZER_MODEL` 作为兼容兜底。
+
+`POST /image/optimize-prompt` 已接入现有聊天 Provider/Adapter 路由，使用实际选中的模型调用上游，并按实际
+输入/输出 token 结算；未配置或模型不可用时返回明确错误。生图页的优化按钮不再错误依赖是否存在 IMAGE 模型。
+
+本地已通过 18 个 backend 测试套件/72 个测试、共享类型编译、Nest/Next 生产构建、lint 和 smoke 脚本语法检查。
+提交 `6ee5917` 已推送并由 `lch:/root/lumina` 拉取；远程隔离 Compose 冒烟已验证后台选择、普通用户优化调用、
+聊天模型路由、计费、RBAC 和审计，测试完成后已清理专用容器、网络和卷。
+
 详细的功能范围、API 和限制见 `docs/progress.md`；已知风险见 `docs/known-issues.md`。
 
 ## 最新验证基线
@@ -47,9 +60,9 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：18 个套件、72 个测试通过。
+- 后端 Jest：18 个套件、72 个测试通过，包含 Settings、Admin 和 ImageService 的提示词优化覆盖。
 - Nest 生产构建通过。
-- Next 生产构建通过，包含 `/admin` 路由。
+- Next 生产构建通过，包含 `/admin` 和 `/image` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
 
 当前机器安装的是 pnpm 11，而仓库固定 pnpm 8.15.0。根级 `pnpm lint`、`pnpm test` 和 `pnpm build` 会因既有 `node_modules` 与 pnpm 版本不匹配而在执行任务前中止；不要为了绕过它删除或重建当前依赖目录。若要做完整根级验证，应先在干净环境使用 pnpm 8.15.0 与 lockfile 安装依赖。
@@ -59,8 +72,8 @@ Set-Location ..\frontend
 ## 当前外部环境阻塞
 
 - 本机没有项目 `.env`，也没有运行 PostgreSQL、Redis、MinIO 或前后端服务；本地完整 E2E 仍需 Docker。
-- mock SMTP、PostgreSQL、Redis、MinIO 和 mock Provider 的 API 最小旅程已在 `lch:/root/lumina` 通过；真实 SMTP/Provider 与浏览器流程仍未验证。
-- 管理端已在远程隔离 PostgreSQL/Redis 环境验证角色边界、用户状态启停、停用后的 JWT 拦截、余额调整、账本记录、供应商/模型/上游创建、配置脱敏和审计；Provider 滑动窗口限流也已用真实 Redis 验证。真实供应商、浏览器流程和长期运行仍需补验。
+- mock SMTP、PostgreSQL、Redis、MinIO 和 mock Provider 的 API 最小旅程已在 `lch:/root/lumina` 通过并清理；真实 SMTP/Provider 与浏览器流程仍未验证。
+- 管理端已在远程隔离 PostgreSQL/Redis 环境验证角色边界、用户状态启停、停用后的 JWT 拦截、余额调整、账本记录、供应商/模型/上游创建、配置脱敏、提示词优化模型选择、计费和审计；Provider 滑动窗口限流也已用真实 Redis 验证。真实供应商、浏览器流程和长期运行仍需补验。
 
 ## 本次模块：认证验证码投递可靠性（A-001）✓
 

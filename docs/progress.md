@@ -35,7 +35,7 @@
 - 新增 `tests/e2e/smoke.mjs`，覆盖验证码登录、管理员初始化、普通用户 RBAC、供应商/模型/上游配置、聊天 SSE、生图队列与 MinIO、历史和审计日志。
 - 管理端供应商及上游映射响应已移除 `config.apiKey`，保留非敏感配置摘要；内部 Provider 路由仍使用完整配置。
 - 本地已通过 18 个后端测试套件/72 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker。
-- 远程 `lch:/root/lumina` 已拉取最终提交 `e2966a5`，启动隔离 Compose 环境并通过完整冒烟：验证码登录、管理员初始化、RBAC、用户状态启停、停用 JWT 拦截、余额调整、账本、Provider 滑动窗口限流、配置脱敏、聊天 SSE、生图队列、MinIO、历史和审计；测试完成后已清理隔离容器、网络和专用卷。
+- 远程 `lch:/root/lumina` 已拉取提交 `6ee5917`，启动隔离 Compose 环境并通过完整冒烟：验证码登录、管理员初始化、RBAC、用户状态启停、停用 JWT 拦截、余额调整、账本、Provider 滑动窗口限流、配置脱敏、提示词优化模型选择与调用、聊天 SSE、生图队列、MinIO、历史和审计；测试完成后已清理隔离容器、网络和专用卷。
 
 ### 当前交付阻塞项
 
@@ -49,6 +49,13 @@
 - [x] 将管理后台的供应商配置从 JSON 文本改为结构化输入框，覆盖 API Key、Base URL、请求超时和每分钟限流，并补充前后端校验。
 - [x] 为生产数据库建立由当前 Prisma schema 生成的 baseline migration，并将容器启动从 `db push` 切换为带旧库兼容校验的 `migrate deploy`。
 - [x] 为提示词优化增加后台模型选择，复用现有 `CHAT` 模型，并补充数据库配置迁移、接口、计费调用和测试覆盖。
+
+### 提示词优化模型配置与调用 ✓
+
+- `system_configs` 保存已选的既有 `CHAT` 平台模型；管理后台提供读取和更新入口，后端校验模型类型、启用状态、可用上游和聊天协议格式。
+- 优化请求复用现有聊天 Provider/Adapter，按真实 token 用量结算；后台未保存选择时兼容读取 `PROMPT_OPTIMIZER_MODEL`，不新增独立优化模型或供应商配置。
+- 前端优化按钮不再依赖 IMAGE 模型列表；新增 Settings、Admin、ImageService 单测和远程 E2E 断言，覆盖配置、调用、RBAC、审计与限流场景。
+- 提交 `6ee5917` 已推送并在 `lch:/root/lumina` 通过完整隔离 smoke，随后清理测试资源。
 
 ### 生产数据库 baseline migration（D-001）✓
 
