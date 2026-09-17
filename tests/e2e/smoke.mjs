@@ -218,7 +218,7 @@ async function main() {
         apiKey: 'e2e-key',
         baseUrl: 'http://mock-provider:8080/v1',
         timeout: 5000,
-        rateLimit: 1000,
+        rateLimit: 1,
       },
     },
   });
@@ -309,6 +309,25 @@ async function main() {
 
   const messages = await requestAuth(userToken, `/chat/sessions/${session.data.id}/messages`);
   assert(messages.data.total === 2, `expected two chat messages, got ${messages.data.total}`);
+
+  const rateLimitedChat = await requestAuth(
+    userToken,
+    '/chat/messages',
+    {
+      method: 'POST',
+      body: {
+        sessionId: session.data.id,
+        content: '请再次回复 E2E',
+        model: chatModel.data.name,
+        maxTokens: 40,
+      },
+    },
+    [503],
+  );
+  assert(
+    rateLimitedChat.data.message === '所有上游均不可用',
+    'provider sliding-window rate limit did not reject the second request',
+  );
 
   const imageTask = await requestAuth(userToken, '/image/generate', {
     method: 'POST',

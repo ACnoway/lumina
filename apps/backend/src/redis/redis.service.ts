@@ -139,6 +139,41 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return value;
   }
 
+  /**
+   * 使用 Redis ZSET + Lua 原子执行一分钟滑动窗口限流。
+   * 返回 true 表示当前请求被限流，false 表示请求已占用一个配额。
+   */
+  async isRateLimited(key: string, limit: number, windowSeconds = 60): Promise<boolean> {
+    const windowMilliseconds = windowSeconds * 1000;
+    const member = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const result = await this.client.eval(
+      `
+        local server_time = redis.call('TIME')
+        local now = tonumber(server_time[1]) * 1000 + math.floor(tonumber(server_time[2]) / 1000)
+        local window_start = now - tonumber(ARGV[1])
+        local request_limit = tonumber(ARGV[2])
+        local ttl = tonumber(ARGV[3])
+
+        redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', window_start)
+        local count = redis.call('ZCARD', KEYS[1])
+        if count >= request_limit then
+          redis.call('EXPIRE', KEYS[1], ttl)
+          return 0
+        end
+
+        redis.call('ZADD', KEYS[1], now, ARGV[4])
+        redis.call('EXPIRE', KEYS[1], ttl)
+        return 1
+      `,
+      {
+        keys: [key],
+        arguments: [String(windowMilliseconds), String(limit), String(windowSeconds), member],
+      },
+    );
+
+    return result !== 1;
+  }
+
   async lPush(key: string, value: string): Promise<number> {
     return this.client.lPush(key, value);
   }

@@ -580,7 +580,7 @@ export class ProvidersService {
   // ==================== 限流逻辑 ====================
 
   /**
-   * 检查是否超过限流（固定窗口，每分钟）
+   * 检查是否超过限流（滑动窗口，每分钟）
    * @returns true 表示超过限流
    */
   async checkRateLimit(
@@ -588,12 +588,13 @@ export class ProvidersService {
     upstreamModelId: string,
     limit?: number,
   ): Promise<boolean> {
-    const minute = Math.floor(Date.now() / 60000);
-    const key = `ratelimit:${providerId}:${upstreamModelId}:${minute}`;
-    const rateLimit = limit ?? this.DEFAULT_RATE_LIMIT;
+    const key = `ratelimit:${providerId}:${upstreamModelId}`;
+    const configuredLimit = Number(limit ?? this.DEFAULT_RATE_LIMIT);
+    const rateLimit =
+      Number.isFinite(configuredLimit) && configuredLimit > 0
+        ? Math.max(1, Math.floor(configuredLimit))
+        : this.DEFAULT_RATE_LIMIT;
 
-    const count = await this.redis.incr(key, 60);
-
-    return count > rateLimit;
+    return this.redis.isRateLimited(key, rateLimit, 60);
   }
 }
