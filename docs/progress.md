@@ -7,7 +7,7 @@
 ### 本次核对结果
 
 - 已完整核对 `apps/backend`、`apps/frontend`、共享类型、Prisma schema、Docker Compose 和现有文档。
-- 使用现有本地依赖直接运行后端 Jest：**15 个测试套件、59 个测试全部通过**（认证验证码投递、管理员账户初始化、钱包并发/幂等与管理员调额审计、Provider RBAC/审计脱敏与配置校验、管理员模型可见性、平台模型计费结构校验、管理端 RBAC、审计日志、MinIO 和生图队列）。
+- 使用现有本地依赖直接运行后端 Jest：**17 个测试套件、63 个测试全部通过**（认证验证码投递、管理员账户初始化、钱包并发/幂等与管理员调额审计、Provider RBAC/审计脱敏、Provider 滑动窗口限流与配置校验、管理员模型可见性、平台模型计费结构校验、管理端 RBAC、审计日志、MinIO 和生图队列）。
 - 共享类型编译、Nest 后端构建、Next 前端生产构建均通过；前端已生成 `/login`、`/chat`、`/image`、`/history` 和 `/admin` 路由。
 - 本机未启动前端、后端、PostgreSQL、Redis、MinIO 或 SMTP；认证验证码现已通过 mock SMTP 单元测试，但仍未执行真实认证、聊天、生图的端到端验证。
 - 根脚本固定 `pnpm@8.15.0`，当前环境为 pnpm 11。直接执行 `pnpm lint`、`pnpm test`、`pnpm build` 会在依赖目录检查阶段中止，尚未进入相应任务。当前 `lint` 脚本还携带 `--fix`，不应把它当作纯只读检查执行。
@@ -19,7 +19,7 @@
 | 项目脚手架、Docker Compose、Prisma schema | 已实现 | 可构建；本机未启动容器和数据库迁移。 |
 | 邮箱验证码登录、JWT、用户初始化钱包 | 代码与 mock SMTP 单元测试已验证 | 验证码仅在投递成功后写入 Redis；失败会清理验证码和 60 秒冷却状态；真实 SMTP 与数据库/Redis 联调仍待补。 |
 | 钱包与账本 | 代码与单元测试已验证 | 预扣、结算、退回和 RBAC 相关安全改动有单元测试；未接真实 PostgreSQL/Redis 联调。 |
-| Provider、模型路由、限流/熔断 | 代码与 RBAC 单元测试已验证 | 未配置真实供应商和模型数据，无法验证路由与上游调用。 |
+| Provider、模型路由、限流/熔断 | 代码、单元测试和远程 mock Provider E2E 已验证 | Provider 限流已使用 Redis ZSET + Lua 滑动窗口；远程 smoke 已验证限额为 1 时同窗口第二次聊天请求被拒绝。真实供应商路由仍待验证。 |
 | 聊天后端与前端 | 代码已实现、构建通过 | 聊天 UI、SSE 解析、会话 CRUD 调用均存在；没有聊天 API/流式/计费端到端测试。 |
 | 生图后端与前端 | 代码与单元测试已验证 | 前端已接入模型、优化、创建任务、轮询和历史；后端已使用 Redis 持久化队列、重试与启动恢复。未接 MinIO/供应商或真实 Redis 做端到端验证。 |
 | 历史记录独立页 | 代码已实现、前端构建通过 | `/history` 已接入用户自己的聊天会话与生图历史，支持各自分页、加载、空状态和错误重试；未接本地后端/数据库做端到端验证。 |
@@ -32,13 +32,13 @@
 - 新增无额外依赖的 mock Provider，支持 OpenAI 兼容聊天非流式/流式接口和图片 base64 接口；MailHog 提供可读取验证码的 SMTP 测试服务。
 - 新增 `tests/e2e/smoke.mjs`，覆盖验证码登录、管理员初始化、普通用户 RBAC、供应商/模型/上游配置、聊天 SSE、生图队列与 MinIO、历史和审计日志。
 - 管理端供应商及上游映射响应已移除 `config.apiKey`，保留非敏感配置摘要；内部 Provider 路由仍使用完整配置。
-- 本地已通过 15 个后端测试套件/59 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker。
-- 远程 `lch:/root/lumina` 已拉取提交 `ad02762`，启动隔离 Compose 环境并通过完整冒烟：验证码登录、管理员初始化、RBAC、用户状态启停、停用 JWT 拦截、余额调整、账本、配置脱敏、聊天 SSE、生图队列、MinIO、历史和审计；测试完成后已清理隔离容器、网络和专用卷。
+- 本地已通过 17 个后端测试套件/63 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker。
+- 远程 `lch:/root/lumina` 已拉取提交 `3a61940`，启动隔离 Compose 环境并通过完整冒烟：验证码登录、管理员初始化、RBAC、用户状态启停、停用 JWT 拦截、余额调整、账本、Provider 滑动窗口限流、配置脱敏、聊天 SSE、生图队列、MinIO、历史和审计；测试完成后已清理隔离容器、网络和专用卷。
 
 ### 当前交付阻塞项
 
 1. **运行环境未就绪**：需要 PostgreSQL、Redis、MinIO、有效 `JWT_SECRET`、SMTP 及至少一个可用 AI Provider/模型后，才能做端到端验收。
-2. **验证覆盖不足**：认证、聊天 SSE、生图队列、管理配置及管理员用户状态/余额/审计 API 旅程已在 mock 环境通过；真实供应商和浏览器关键流程仍未验证。
+2. **验证覆盖不足**：认证、聊天 SSE、生图队列、管理配置、管理员用户状态/余额/审计及 Provider 限流 API 旅程已在 mock 环境通过；真实供应商和浏览器关键流程仍未验证。
 3. **工具链不一致**：本地需使用 pnpm 8.15.0（与 CI 一致），再运行根级 `pnpm lint/test/build`；lint 脚本应先拆分出不带 `--fix` 的检查命令。
 
 ### 后续待办
@@ -51,14 +51,14 @@
 - 平台模型新建表单不再要求管理员编辑 JSON；`CHAT` 显示输入/输出单价（元/千 token），`IMAGE` 显示单张价格，并在页面提交前校验非负有限数字。
 - 共享类型将平台模型计费收窄为 `ChatModelPricing | ImageModelPricing`，并按模型类型关联对应字段。
 - 后端 DTO 校验计费对象必须与模型类型匹配且不能包含多余字段；service 在创建和更新时再次校验，更新模型类型时会校验合并后的已有计费配置。
-- 新增平台模型计费校验单测 9 项；当前后端全量为 15 个测试套件、59 个测试通过，Nest/Next 生产构建通过。
+- 新增平台模型计费校验单测 9 项；当前后端全量为 17 个测试套件、63 个测试通过，Nest/Next 生产构建通过。
 
 ### 管理后台供应商结构化配置表单 ✓
 
 - 供应商新建表单不再要求管理员编辑 JSON；改为 API Key、Base URL、请求超时（毫秒）和限流（次/分钟）四个输入框。
 - 切换 OpenAI、Anthropic、Stability 等 API 格式时会填充对应默认地址和超时时间，同时保留管理员已经自定义的值；API Key 使用密码输入框，列表摘要和审计数据不展示密钥。
 - 前端提交前校验 HTTP(S) 地址和正整数；后端 DTO 与 service 对配置字段、API Key、Base URL、超时和限流做相同校验，并保留缺省可选字段的旧数据兼容性。
-- 新增供应商配置校验单测 7 项；当前后端全量为 15 个测试套件、59 个测试通过，Nest/Next 生产构建通过。
+- 新增供应商配置校验单测 7 项；当前后端全量为 17 个测试套件、63 个测试通过，Nest/Next 生产构建通过。
 
 ### 管理端用户状态与余额审计 E2E 验证 ✓
 
@@ -66,6 +66,12 @@
 - 同一冒烟流程调整用户余额 `+2.5`，验证管理员详情余额从 `10` 持久化为 `12.5`，并在管理员账本中出现 `ADMIN_ADJUST` 交易及原因。
 - 审计接口同时验证 `user.status.updated` 的 ACTIVE→SUSPENDED 前后值，以及 `wallet.balance.adjusted` 的余额前后值和目标用户。
 - 提交 `ad02762` 已在 `lch:/root/lumina` 的隔离 Compose 环境通过；测试结束后已清理容器与专用卷。
+
+### Provider 滑动窗口限流（P-001）✓
+
+- Provider 限流由按分钟编号的 Redis `INCR + EXPIRE` 固定窗口改为 ZSET + Lua 原子滑动窗口，使用 Redis 服务端时间清理过期请求并写入当前配额。
+- 新增 Redis 限流脚本和 Provider 参数单测；E2E smoke 将聊天上游限额设为 1，验证首个请求成功、同窗口第二次请求返回 503。
+- 提交 `3a61940` 已在 `lch:/root/lumina` 隔离 Compose 环境通过，测试容器、网络和专用卷已清理。
 
 ## 第一轮 P0 安全与计费修复 ✓
 
@@ -197,11 +203,11 @@
 - Provider 表扩展 `apiFormat`（openai_chat/openai_compatible/anthropic_messages/openai_image/stability_image）和 `supportsStreaming`
 - 平台模型名映射多个上游，按 priority + weight 路由
 - 熔断器（Redis 实现）：失败计数 + 熔断打开，TTL 自动恢复
-- 限流（Redis 固定窗口）：INCR + EXPIRE 每分钟计数
+- 限流（Redis 滑动窗口）：ZSET + Lua 原子清理、计数和配额写入
 - `resolveUpstream` 返回 `recordResult` 回调，调用方回报结果影响熔断器
 - 管理端 API：平台模型/供应商/上游映射全套 CRUD
 - RedisService 新增 `incr` 方法
-- 已知限制：限流固定窗口（P-001），记录在 `docs/known-issues.md`
+- P-001 已修复：Provider 限流改为一分钟 Redis ZSET + Lua 滑动窗口，记录在 `docs/known-issues.md`
 
 ### 步骤 5-1：后端会话管理 CRUD（代码已实现）
 

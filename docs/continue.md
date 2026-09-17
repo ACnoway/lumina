@@ -1,7 +1,7 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`ad02762 test: cover admin user lifecycle and wallet audit`
+> 基线提交：`3a61940 fix: replace provider rate limit with sliding window`
 > 分支状态：`main` 与 `origin/main` 一致，已在 `lch:/root/lumina` 完成 API/E2E 冒烟验收。
 
 ## 先读这份文档
@@ -44,7 +44,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：15 个套件、59 个测试通过。
+- 后端 Jest：17 个套件、63 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。
@@ -57,7 +57,7 @@ Set-Location ..\frontend
 
 - 本机没有项目 `.env`，也没有运行 PostgreSQL、Redis、MinIO 或前后端服务；本地完整 E2E 仍需 Docker。
 - mock SMTP、PostgreSQL、Redis、MinIO 和 mock Provider 的 API 最小旅程已在 `lch:/root/lumina` 通过；真实 SMTP/Provider 与浏览器流程仍未验证。
-- 管理端已在远程隔离 PostgreSQL/Redis 环境验证角色边界、用户状态启停、停用后的 JWT 拦截、余额调整、账本记录、供应商/模型/上游创建、配置脱敏和审计；真实供应商、浏览器流程和长期运行仍需补验。
+- 管理端已在远程隔离 PostgreSQL/Redis 环境验证角色边界、用户状态启停、停用后的 JWT 拦截、余额调整、账本记录、供应商/模型/上游创建、配置脱敏和审计；Provider 滑动窗口限流也已用真实 Redis 验证。真实供应商、浏览器流程和长期运行仍需补验。
 
 ## 本次模块：认证验证码投递可靠性（A-001）✓
 
@@ -102,9 +102,15 @@ Set-Location ..\frontend
 
 本地已通过 smoke 脚本语法和 diff 检查；提交 `ad02762` 已推送并由 `lch:/root/lumina` 拉取。远程隔离 Compose 冒烟测试通过，随后已清理该测试项目及其专用卷。
 
+## 本次模块：Provider 滑动窗口限流（P-001）✓
+
+Provider 限流已从按分钟编号的 `INCR + EXPIRE` 固定窗口改为 Redis ZSET + Lua 原子滑动窗口。脚本使用 Redis 服务端时间，清理窗口外请求后再判断和写入配额，避免多实例时钟差异及并发竞态。
+
+新增 Redis 限流脚本单测、Provider key/参数单测，并在 E2E smoke 中将聊天上游限额设为 1，验证同一窗口第二次请求被路由层拒绝。提交 `3a61940` 已在 `lch:/root/lumina` 的隔离 Compose 环境通过。
+
 ## 随后的开发顺序
 
-1. 处理 `docs/known-issues.md` 中的 Provider 固定窗口限流（P-001）和生图恢复后可能重复请求上游（I-001）。
+1. 处理 `docs/known-issues.md` 中生图恢复后可能重复请求上游（I-001）。
 2. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
 
 ## 关键约束
