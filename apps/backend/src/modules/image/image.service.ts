@@ -7,7 +7,6 @@ import {
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -16,6 +15,7 @@ import { MinioService } from '../../minio/minio.service';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { ImageQueueService } from './image-queue.service';
+import { SettingsService } from '../settings/settings.service';
 
 // 比例 → 尺寸映射
 const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
@@ -67,8 +67,8 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly providersService: ProvidersService,
     private readonly adapterFactory: AdapterFactory,
     private readonly minioService: MinioService,
-    private readonly configService: ConfigService,
     private readonly imageQueueService: ImageQueueService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -91,20 +91,16 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     userId: string,
     originalPrompt: string,
   ): Promise<{ optimizedPrompt: string; cost: number }> {
-    const optimizerModelName = this.configService.get<string>(
-      'PROMPT_OPTIMIZER_MODEL',
-      'gpt-4o-mini',
-    );
+    // 获取后台配置的现有聊天模型；未配置时由 SettingsService 兼容读取环境变量。
+    const platformModel = await this.settingsService.getPromptOptimizerModel();
 
-    // 获取优化用的平台模型
-    const platformModel =
-      await this.providersService.getPlatformModelByName(optimizerModelName);
-
-    if (!platformModel || !platformModel.isActive) {
+    if (!platformModel || !platformModel.isActive || platformModel.type !== 'CHAT') {
       throw new ServiceUnavailableException(
-        `提示词优化模型 "${optimizerModelName}" 不可用`,
+        `提示词优化模型未配置或不可用`,
       );
     }
+
+    const optimizerModelName = platformModel.name;
 
     // 获取定价
     const pricing = (platformModel.pricing as any) || {};

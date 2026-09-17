@@ -300,7 +300,7 @@ export default function ImagePage() {
                 <button
                   type="button"
                   onClick={() => void handleOptimize()}
-                  disabled={!prompt.trim() || busy || !hasModels}
+                  disabled={!prompt.trim() || busy}
                   className="shrink-0 rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {optimizing ? '优化中...' : '优化提示词'}

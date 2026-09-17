@@ -277,6 +277,7 @@ export default function AdminPage() {
 
   const [models, setModels] = useState<PlatformModelDto[]>([]);
   const [providers, setProviders] = useState<ProviderDto[]>([]);
+  const [promptOptimizerModelId, setPromptOptimizerModelId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [upstreams, setUpstreams] = useState<UpstreamModelDto[]>([]);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -374,12 +375,14 @@ export default function AdminPage() {
   const loadConfig = useCallback(async () => {
     setLoadingConfig(true);
     try {
-      const [nextModels, nextProviders] = await Promise.all([
+      const [nextModels, nextProviders, promptOptimizerSetting] = await Promise.all([
         adminApi.getModels(),
         adminApi.getProviders(),
+        adminApi.getPromptOptimizerSetting(),
       ]);
       setModels(nextModels);
       setProviders(nextProviders);
+      setPromptOptimizerModelId(promptOptimizerSetting.modelId ?? "");
       setSelectedModelId((current) =>
         nextModels.some((model) => model.id === current)
           ? current
@@ -713,6 +716,25 @@ export default function AdminPage() {
       await loadConfig();
     } catch (formError) {
       setError(getErrorMessage(formError, "保存模型失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function submitPromptOptimizerModel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!promptOptimizerModelId) {
+      setError("请选择提示词优化模型");
+      return;
+    }
+
+    setMutatingResource("prompt-optimizer");
+    try {
+      await adminApi.updatePromptOptimizerSetting(promptOptimizerModelId);
+      setNotice("提示词优化模型已更新");
+      await loadConfig();
+    } catch (formError) {
+      setError(getErrorMessage(formError, "保存提示词优化模型失败"));
     } finally {
       setMutatingResource("");
     }
@@ -1383,6 +1405,51 @@ export default function AdminPage() {
                 {loadingConfig ? "刷新中…" : "刷新配置"}
               </button>
             </div>
+            <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 shadow-sm sm:p-6">
+              <div className="mb-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-500">
+                  Prompt Optimizer
+                </p>
+                <h3 className="mt-1 font-semibold text-gray-800">提示词优化模型</h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  选择已有的聊天模型作为生图前的提示词优化模型，不会创建额外模型。
+                </p>
+              </div>
+              <form
+                className="flex flex-col gap-3 sm:flex-row sm:items-end"
+                onSubmit={submitPromptOptimizerModel}
+              >
+                <label className="flex-1 space-y-1 text-xs text-gray-500">
+                  <span className="block font-medium text-gray-700">当前使用模型</span>
+                  <select
+                    value={promptOptimizerModelId}
+                    onChange={(event) => setPromptOptimizerModelId(event.target.value)}
+                    disabled={loadingConfig || mutatingResource === "prompt-optimizer"}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">请选择聊天模型</option>
+                    {models
+                      .filter((model) => model.type === "CHAT")
+                      .map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.displayName}（{model.name}）{model.isActive ? "" : " · 已停用"}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <button
+                  type="submit"
+                  disabled={
+                    !promptOptimizerModelId ||
+                    loadingConfig ||
+                    mutatingResource === "prompt-optimizer"
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {mutatingResource === "prompt-optimizer" ? "保存中…" : "保存优化模型"}
+                </button>
+              </form>
+            </section>
             <div className="grid gap-6 xl:grid-cols-2">
               <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-4">

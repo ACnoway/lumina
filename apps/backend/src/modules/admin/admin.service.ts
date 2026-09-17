@@ -1,17 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, User, UserStatus } from '@prisma/client';
 import {
   AdminOverviewResponse,
   AdminUserDto,
   AdminUsersResponse,
   GetTransactionsResponse,
+  PromptOptimizerSettingDto,
   TransactionItem,
   WalletTransactionDto,
 } from '@lumina/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
-import { AdjustUserBalanceDto, ListAdminUsersQueryDto, UpdateUserStatusDto } from './dto/admin.dto';
+import { SettingsService } from '../settings/settings.service';
+import {
+  AdjustUserBalanceDto,
+  ListAdminUsersQueryDto,
+  UpdatePromptOptimizerModelDto,
+  UpdateUserStatusDto,
+} from './dto/admin.dto';
+
+const CHAT_API_FORMATS = new Set(['openai_chat', 'openai_compatible', 'anthropic_messages']);
 
 const adminUserSelect = Prisma.validator<Prisma.UserSelect>()({
   id: true,
@@ -45,7 +54,71 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly auditService: AuditService,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  async getPromptOptimizerSetting(): Promise<PromptOptimizerSettingDto> {
+    const model = await this.settingsService.getPromptOptimizerModel();
+
+    return {
+      modelId: model?.id ?? null,
+      modelName: model?.name ?? null,
+    };
+  }
+
+  async updatePromptOptimizerSetting(
+    actor: User,
+    dto: UpdatePromptOptimizerModelDto,
+    context: AuditRequestContext,
+  ): Promise<PromptOptimizerSettingDto> {
+    const model = await this.prisma.platformModel.findUnique({
+      where: { id: dto.modelId },
+      include: {
+        upstreamModels: {
+          where: { isActive: true },
+          include: { provider: true },
+        },
+      },
+    });
+
+    if (!model) {
+      throw new NotFoundException('平台模型不存在');
+    }
+    if (model.type !== 'CHAT') {
+      throw new BadRequestException('提示词优化只能使用聊天模型');
+    }
+    if (!model.isActive) {
+      throw new BadRequestException('提示词优化模型必须处于启用状态');
+    }
+    if (
+      !model.upstreamModels.some(
+        (upstream) =>
+          upstream.provider.isActive && CHAT_API_FORMATS.has(upstream.provider.apiFormat),
+      )
+    ) {
+      throw new BadRequestException('提示词优化模型暂无可用的聊天上游');
+    }
+
+    const before = await this.settingsService.getPromptOptimizerModel();
+    await this.settingsService.setPromptOptimizerModel(model.id);
+    await this.auditService.record({
+      actorId: actor.id,
+      action: 'prompt_optimizer_model.updated',
+      resource: 'system_config',
+      details: {
+        before: before
+          ? { modelId: before.id, modelName: before.name }
+          : null,
+        after: { modelId: model.id, modelName: model.name },
+      },
+      ...context,
+    });
+
+    return {
+      modelId: model.id,
+      modelName: model.name,
+    };
+  }
 
   async getOverview(): Promise<AdminOverviewResponse> {
     const [

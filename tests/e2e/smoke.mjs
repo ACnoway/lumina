@@ -263,6 +263,37 @@ async function main() {
     },
   });
 
+  const promptOptimizerBefore = await requestAuth(
+    adminToken,
+    '/admin/settings/prompt-optimizer',
+  );
+  assert(
+    promptOptimizerBefore.data && Object.hasOwn(promptOptimizerBefore.data, 'modelId'),
+    'prompt optimizer setting response is missing modelId',
+  );
+  const promptOptimizerSetting = await requestAuth(
+    adminToken,
+    '/admin/settings/prompt-optimizer',
+    {
+      method: 'PATCH',
+      body: { modelId: chatModel.data.id },
+    },
+  );
+  assert(
+    promptOptimizerSetting.data.modelId === chatModel.data.id,
+    'admin prompt optimizer model setting did not persist',
+  );
+  const optimizedPrompt = await requestAuth(userToken, '/image/optimize-prompt', {
+    method: 'POST',
+    body: { prompt: 'a tiny e2e test image' },
+  });
+  assert(
+    optimizedPrompt.data.optimizedPrompt === 'E2E mock reply: a tiny e2e test image',
+    'prompt optimizer did not call the configured chat model',
+  );
+  assert(Number.isFinite(Number(optimizedPrompt.data.cost)), 'prompt optimizer cost is invalid');
+  await requestAuth(userToken, '/admin/settings/prompt-optimizer', {}, [403]);
+
   const visibleModels = await requestAuth(userToken, '/providers/models?type=CHAT');
   assert(
     visibleModels.data.some((model) => model.name === chatModel.data.name),
@@ -349,6 +380,10 @@ async function main() {
   assert(actions.includes('provider.created'), 'provider creation was not audited');
   assert(actions.includes('platform_model.created'), 'model creation was not audited');
   assert(actions.includes('upstream_model.created'), 'upstream creation was not audited');
+  assert(
+    actions.includes('prompt_optimizer_model.updated'),
+    'prompt optimizer setting was not audited',
+  );
   const statusAudits = auditLogs.data.items.filter(
     (item) => item.action === 'user.status.updated' && item.details?.targetId === userId,
   );

@@ -3,6 +3,7 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
+import { SettingsService } from '../settings/settings.service';
 import { AdminService } from './admin.service';
 
 const admin = { id: 'admin-1' };
@@ -33,7 +34,10 @@ function createService() {
       findUnique: jest.fn().mockResolvedValue(user),
     },
     wallet: { aggregate: jest.fn().mockResolvedValue({ _sum: { balance: new Decimal(12.5) } }) },
-    platformModel: { count: jest.fn().mockResolvedValue(1) },
+    platformModel: {
+      count: jest.fn().mockResolvedValue(1),
+      findUnique: jest.fn(),
+    },
     provider: { count: jest.fn().mockResolvedValue(1) },
     $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
   };
@@ -49,16 +53,22 @@ function createService() {
     }),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const settings = {
+    getPromptOptimizerModel: jest.fn().mockResolvedValue(null),
+    setPromptOptimizerModel: jest.fn().mockResolvedValue(undefined),
+  };
 
   return {
     service: new AdminService(
       prisma as unknown as PrismaService,
       wallet as unknown as WalletService,
       audit as unknown as AuditService,
+      settings as unknown as SettingsService,
     ),
     prisma,
     wallet,
     audit,
+    settings,
     tx,
   };
 }
@@ -136,5 +146,55 @@ describe('AdminService', () => {
       ipAddress: '127.0.0.1',
       userAgent: 'Lumina test',
     });
+  });
+
+  it('only allows an active chat model with an active chat-compatible upstream', async () => {
+    const { service, prisma, settings, audit } = createService();
+    prisma.platformModel.findUnique.mockResolvedValue({
+      id: 'chat-model-1',
+      name: 'chat-model',
+      type: 'CHAT',
+      isActive: true,
+      upstreamModels: [
+        {
+          isActive: true,
+          provider: { isActive: true, apiFormat: 'openai_compatible' },
+        },
+      ],
+    });
+
+    await expect(
+      service.updatePromptOptimizerSetting(
+        admin as never,
+        { modelId: 'chat-model-1' },
+        { ipAddress: '127.0.0.1' },
+      ),
+    ).resolves.toEqual({ modelId: 'chat-model-1', modelName: 'chat-model' });
+    expect(settings.setPromptOptimizerModel).toHaveBeenCalledWith('chat-model-1');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'prompt_optimizer_model.updated',
+        resource: 'system_config',
+      }),
+    );
+  });
+
+  it('rejects an image model as the prompt optimizer', async () => {
+    const { service, prisma } = createService();
+    prisma.platformModel.findUnique.mockResolvedValue({
+      id: 'image-model-1',
+      name: 'image-model',
+      type: 'IMAGE',
+      isActive: true,
+      upstreamModels: [],
+    });
+
+    await expect(
+      service.updatePromptOptimizerSetting(
+        admin as never,
+        { modelId: 'image-model-1' },
+        {},
+      ),
+    ).rejects.toThrow('提示词优化只能使用聊天模型');
   });
 });

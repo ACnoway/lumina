@@ -11,6 +11,7 @@ import type {
   ModelType,
   PlatformModelDto,
   PlatformModelPricing,
+  PromptOptimizerSettingDto,
   ProviderDto,
   UpstreamModelDto,
   UserStatus,
@@ -75,6 +76,14 @@ function queryString(
 export const adminApi = {
   getOverview(): Promise<AdminOverviewResponse> {
     return apiClient.get("/admin/overview");
+  },
+
+  getPromptOptimizerSetting(): Promise<PromptOptimizerSettingDto> {
+    return apiClient.get("/admin/settings/prompt-optimizer");
+  },
+
+  updatePromptOptimizerSetting(modelId: string): Promise<PromptOptimizerSettingDto> {
+    return apiClient.patch("/admin/settings/prompt-optimizer", { modelId });
   },
 
   getUsers(options: ListAdminUsersOptions = {}): Promise<AdminUsersResponse> {

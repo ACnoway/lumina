@@ -221,6 +221,7 @@ model PlatformModel {
   maxTokens   Int?                            // 平台限制的最大 token
 
   upstreamModels UpstreamModel[]
+  promptOptimizerConfigs SystemConfig[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -228,6 +229,18 @@ model PlatformModel {
   @@index([type])
   @@index([isActive])
   @@map("platform_models")
+}
+
+// ==================== 系统配置 ====================
+model SystemConfig {
+  id                    Int           @id @default(1)
+  promptOptimizerModelId String?
+  promptOptimizerModel  PlatformModel? @relation(fields: [promptOptimizerModelId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
 }
 
 enum ModelType {

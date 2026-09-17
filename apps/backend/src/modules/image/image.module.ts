@@ -8,6 +8,7 @@ import { ProvidersModule } from '../providers/providers.module';
 import { AdaptersModule } from '../chat/adapters/adapters.module';
 import { RedisModule } from '../../redis/redis.module';
 import { ImageQueueService } from './image-queue.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ImageQueueService } from './image-queue.service';
     ProvidersModule,
     AdaptersModule,
     RedisModule,
+    SettingsModule,
   ],
   controllers: [ImageController],
   providers: [ImageService, ImageQueueService],

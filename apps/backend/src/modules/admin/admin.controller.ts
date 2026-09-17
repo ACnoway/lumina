@@ -11,6 +11,7 @@ import {
   AdjustUserBalanceDto,
   ListAdminUsersQueryDto,
   PaginationQueryDto,
+  UpdatePromptOptimizerModelDto,
   UpdateUserStatusDto,
 } from './dto/admin.dto';
 
@@ -26,6 +27,26 @@ export class AdminController {
   @ApiOperation({ summary: '获取管理后台概览' })
   async getOverview() {
     return this.adminService.getOverview();
+  }
+
+  @Get('settings/prompt-optimizer')
+  @ApiOperation({ summary: '获取提示词优化模型配置' })
+  async getPromptOptimizerSetting() {
+    return this.adminService.getPromptOptimizerSetting();
+  }
+
+  @Patch('settings/prompt-optimizer')
+  @ApiOperation({ summary: '更新提示词优化模型配置' })
+  async updatePromptOptimizerSetting(
+    @CurrentUser() actor: User,
+    @Body() dto: UpdatePromptOptimizerModelDto,
+    @Req() request: Request,
+  ) {
+    return this.adminService.updatePromptOptimizerSetting(
+      actor,
+      dto,
+      this.auditContext(request),
+    );
   }
 
   @Get('users')

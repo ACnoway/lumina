@@ -59,3 +59,10 @@ export class AdjustUserBalanceDto {
   @MaxLength(500, { message: 'reason 不能超过 500 个字符' })
   reason!: string;
 }
+
+export class UpdatePromptOptimizerModelDto {
+  @IsString({ message: 'modelId 必须是字符串' })
+  @IsNotEmpty({ message: 'modelId 不能为空' })
+  @MaxLength(100, { message: 'modelId 不能超过 100 个字符' })
+  modelId!: string;
+}

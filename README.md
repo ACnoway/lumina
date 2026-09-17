@@ -24,7 +24,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + MinIO
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
+- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
 
@@ -61,6 +61,12 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 - 后端 API、PostgreSQL、Redis、MinIO、前端都不单独对外暴露
 - Docker Compose 本地部署可使用默认的 `http://localhost:3000`；使用自有域名时将 `MINIO_PUBLIC_URL` 填为该统一入口，例如 `https://example.com`
 - 数据库结构由 `apps/backend/prisma/migrations/` 版本化管理；旧 `db push` 数据库若与当前 schema 有差异，backend 会拒绝启动而不会自动改表
+
+### 提示词优化模型
+
+登录管理后台后，进入“模型与供应商 → 提示词优化模型”，从已经配置并有可用聊天上游的 `CHAT` 平台模型中选择并保存。生图页面的“优化提示词”会通过该模型调用现有聊天适配器，并按实际 token 用量计费。
+
+`.env` 中的 `PROMPT_OPTIMIZER_MODEL` 仅用于后台尚未保存选择时的兼容兜底；它必须对应一个已存在的平台模型，且该模型应配置可用的聊天上游。
 
 ### 方式二：本地开发
 

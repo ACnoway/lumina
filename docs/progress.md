@@ -6,8 +6,9 @@
 
 ### 本次核对结果
 
+- 提示词优化模型已支持在管理后台从现有 `CHAT` 平台模型中选择；配置写入数据库，`PROMPT_OPTIMIZER_MODEL` 仅作为未保存后台配置时的兼容兜底。
 - 已完整核对 `apps/backend`、`apps/frontend`、共享类型、Prisma schema、Docker Compose 和现有文档；生产数据库已切换到版本化 baseline migration。
-- 使用现有本地依赖直接运行后端 Jest：**17 个测试套件、64 个测试全部通过**（认证验证码投递、管理员账户初始化、钱包并发/幂等与管理员调额审计、Provider RBAC/审计脱敏、Provider 滑动窗口限流与配置校验、管理员模型可见性、平台模型计费结构校验、管理端 RBAC、审计日志、MinIO 和生图队列及上游幂等请求头）。
+- 使用现有本地依赖直接运行后端 Jest：**18 个测试套件、72 个测试全部通过**（包含提示词优化配置、管理员校验审计和实际聊天适配器调用计费测试）。
 - 共享类型编译、Nest 后端构建、Next 前端生产构建均通过；前端已生成 `/login`、`/chat`、`/image`、`/history` 和 `/admin` 路由。
 - 本机未启动前端、后端、PostgreSQL、Redis、MinIO 或 SMTP；认证验证码现已通过 mock SMTP 单元测试，但仍未执行真实认证、聊天、生图的端到端验证。
 - 根脚本固定 `pnpm@8.15.0`，当前环境为 pnpm 11；本机根级命令仍受 pnpm 版本与既有依赖目录影响。`lint` 已改为只读检查，格式修复必须显式执行 `lint:fix`。
@@ -24,7 +25,7 @@
 | 聊天后端与前端 | 代码已实现、构建通过 | 聊天 UI、SSE 解析、会话 CRUD 调用均存在；没有聊天 API/流式/计费端到端测试。 |
 | 生图后端与前端 | 代码、单元测试和远程 mock Provider E2E 已验证 | 前端已接入模型、优化、创建任务、轮询和历史；后端已使用 Redis 持久化队列、重试与启动恢复，并将稳定任务幂等键传给图片上游。远程 smoke 已验证图片队列、MinIO 和任务结算，真实供应商幂等语义仍待确认。 |
 | 历史记录独立页 | 代码已实现、前端构建通过 | `/history` 已接入用户自己的聊天会话与生图历史，支持各自分页、加载、空状态和错误重试；未接本地后端/数据库做端到端验证。 |
-| 管理后台与审计 | 代码、单元测试、前端构建和远程隔离 E2E 已验证 | `/admin` 已接入概览、用户/账本/余额调整、模型/供应商/上游映射、审计日志；远程冒烟已验证管理员用户检索、详情、停用/恢复、停用后的 JWT 401、余额调整后的账本和审计前后值；平台模型表单按 `CHAT/IMAGE` 展示对应计费字段，供应商配置也改为 API Key、Base URL、超时和限流输入框，后端 DTO/service 会拒绝错误配置；服务启动会按 `ADMIN_EMAIL` 幂等创建或修复管理员账户。真实供应商和浏览器流程仍待验证。 |
+| 管理后台与审计 | 代码、单元测试、前端构建和远程隔离 E2E 已验证 | `/admin` 已接入概览、用户/账本/余额调整、模型/供应商/上游映射、提示词优化模型选择和审计日志；提示词优化只能选择已有且可用的 `CHAT` 模型；真实供应商和浏览器流程仍待验证。 |
 | CI | 已配置，远程按 CI 工具链复跑通过 | 工作流固定 Node 20 / pnpm 8.15.0；GitHub Actions 首次运行结果仍待平台触发后确认。 |
 
 ### API/E2E 测试环境（已实现，远程冒烟通过）
@@ -33,7 +34,7 @@
 - 新增无额外依赖的 mock Provider，支持 OpenAI 兼容聊天非流式/流式接口和图片 base64 接口；图片接口会按 `Idempotency-Key` 复用响应；MailHog 提供可读取验证码的 SMTP 测试服务。
 - 新增 `tests/e2e/smoke.mjs`，覆盖验证码登录、管理员初始化、普通用户 RBAC、供应商/模型/上游配置、聊天 SSE、生图队列与 MinIO、历史和审计日志。
 - 管理端供应商及上游映射响应已移除 `config.apiKey`，保留非敏感配置摘要；内部 Provider 路由仍使用完整配置。
-- 本地已通过 17 个后端测试套件/64 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker。
+- 本地已通过 18 个后端测试套件/72 个测试、Nest/Next 生产构建和 smoke/mock 脚本语法检查；本机未安装 Docker。
 - 远程 `lch:/root/lumina` 已拉取最终提交 `e2966a5`，启动隔离 Compose 环境并通过完整冒烟：验证码登录、管理员初始化、RBAC、用户状态启停、停用 JWT 拦截、余额调整、账本、Provider 滑动窗口限流、配置脱敏、聊天 SSE、生图队列、MinIO、历史和审计；测试完成后已清理隔离容器、网络和专用卷。
 
 ### 当前交付阻塞项
@@ -47,13 +48,14 @@
 - [x] 将管理后台的平台模型配置从 JSON 文本改为按模型类型展示的结构化表单，至少覆盖聊天模型的 input/output 价格和生图模型的 perImage 价格，并补充前后端校验。
 - [x] 将管理后台的供应商配置从 JSON 文本改为结构化输入框，覆盖 API Key、Base URL、请求超时和每分钟限流，并补充前后端校验。
 - [x] 为生产数据库建立由当前 Prisma schema 生成的 baseline migration，并将容器启动从 `db push` 切换为带旧库兼容校验的 `migrate deploy`。
+- [x] 为提示词优化增加后台模型选择，复用现有 `CHAT` 模型，并补充数据库配置迁移、接口、计费调用和测试覆盖。
 
 ### 生产数据库 baseline migration（D-001）✓
 
 - 新增 `apps/backend/prisma/migrations/20260917000000_baseline/migration.sql`，覆盖当前全部枚举、表、索引和外键；SQL 已与 `prisma migrate diff --from-empty --to-schema-datamodel ... --script` 输出比对。
 - backend 镜像通过 `apps/backend/docker-entrypoint.sh` 在启动前执行 `prisma migrate deploy`。新数据库直接应用 baseline；历史 `db push` 数据库只有在只读 schema diff 返回无差异时才执行 `migrate resolve --applied`。
 - 旧库 schema 有差异、迁移命令异常或 baseline 接管失败时，容器不启动，等待人工迁移处理；不会再由启动命令静默修改生产结构。
-- 本地 schema 校验、17 个 backend 测试套件/64 个测试、Nest 构建通过；远程验证覆盖既有生产库接管、独立空库 baseline、完整 E2E smoke、生产健康检查和迁移状态检查。
+- 本地 schema 校验、18 个 backend 测试套件/72 个测试、Nest 构建通过；远程验证覆盖既有生产库接管、独立空库 baseline、完整 E2E smoke、生产健康检查和迁移状态检查。
 
 ### 管理后台平台模型计费表单 ✓
 
@@ -130,7 +132,7 @@
 - 失败时最多尝试 3 次；每次重试先退回预扣，再使用相同 `image:<taskId>` 幂等键重新进入计费链路。已结算任务绝不重新入队。
 - 启动时会重入所有 `PENDING` 任务，并将超过 15 分钟未更新的 `PROCESSING` 任务按同一重试策略恢复。
 - 上游图片请求统一携带稳定的 `Idempotency-Key: image:<taskId>`，启动恢复后由支持该协议的上游复用原请求结果。
-- 新增队列及生图服务单元测试，验证入队、原子领取/确认、重复领取拦截、失败重试和两类图片请求的幂等头；后端当前全量 17 个测试套件、64 个测试及生产构建通过。
+- 新增队列及生图服务单元测试，验证入队、原子领取/确认、重复领取拦截、失败重试和两类图片请求的幂等头；后端当前全量 18 个测试套件、72 个测试及生产构建通过。
 - 本机没有运行 Redis、PostgreSQL、MinIO 或真实上游，因此尚未完成跨进程重启和真实 Provider 的端到端验证。
 
 ## 步骤 9-1：管理端后端与审计 ✓
@@ -369,6 +371,8 @@ lumina/
 - `GET /admin/users/:id/transactions?page=1&limit=20` — 用户账本
 - `PATCH /admin/users/:id/status` — 更新用户状态
 - `POST /admin/wallet/adjustments` — 调整用户余额
+- `GET /admin/settings/prompt-optimizer` — 获取提示词优化模型配置
+- `PATCH /admin/settings/prompt-optimizer` — 从已有聊天模型中选择提示词优化模型
 - `GET /admin/audit-logs?page=1&limit=20&userId=&action=&resource=` — 审计日志
 
 ## SSE 事件格式

@@ -1,8 +1,8 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-17
-> 基线提交：`e2966a5 fix: keep provider config lint-safe`
-> 分支状态：`main` 与 `origin/main` 一致，`e2966a5` 已在 `lch:/root/lumina` 完成根级验证和 API/E2E 验收。
+> 基线提交：`a5df32d feat: add admin resource edit and delete`
+> 分支状态：提示词优化模型配置改造正在进行，完成后会更新提交号和远程验证结果。
 
 ## 先读这份文档
 
@@ -26,6 +26,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
 - 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
+- 提示词优化模型配置使用已有的 `CHAT` 平台模型，后台选择写入 `system_configs`；`PROMPT_OPTIMIZER_MODEL` 只作为未保存后台配置时的兼容兜底。
 - 管理后台供应商已改为 API Key、Base URL、请求超时和限流输入框；前后端均校验配置格式，列表和审计不暴露 API Key。
 - 已建立独立 API/E2E Compose 环境，包含 PostgreSQL、Redis、MinIO、MailHog、mock Provider、backend 和 frontend；认证、RBAC、管理端用户状态启停/余额账本/审计、聊天、生图和管理配置旅程已在远程通过。
 - CI 工作流已固定 Node 20 与 pnpm 8.15.0。
@@ -46,7 +47,7 @@ Set-Location ..\frontend
 .\node_modules\.bin\next.CMD build
 ```
 
-- 后端 Jest：17 个套件、64 个测试通过。
+- 后端 Jest：18 个套件、72 个测试通过。
 - Nest 生产构建通过。
 - Next 生产构建通过，包含 `/admin` 路由。
 - 新增/修改的认证文件已通过 Prettier 检查。

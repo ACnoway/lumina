@@ -240,6 +240,11 @@ export interface AuditLogsResponse {
   totalPages: number;
 }
 
+export interface PromptOptimizerSettingDto {
+  modelId: string | null;
+  modelName: string | null;
+}
+
 // ==================== 供应商/模型相关类型 ====================
 export type ApiFormat =
   | 'openai_chat'

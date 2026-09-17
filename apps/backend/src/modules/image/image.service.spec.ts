@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -7,6 +6,7 @@ import { AdapterFactory } from '../chat/adapters/adapter-factory';
 import { MinioService } from '../../minio/minio.service';
 import { ImageQueueService } from './image-queue.service';
 import { ImageService } from './image.service';
+import { SettingsService } from '../settings/settings.service';
 import axios from 'axios';
 
 const imageModel = {
@@ -15,6 +15,14 @@ const imageModel = {
   type: 'IMAGE',
   isActive: true,
   pricing: { perImage: 0.5 },
+};
+
+const promptOptimizerModel = {
+  id: 'model-chat-1',
+  name: 'chat-model',
+  type: 'CHAT',
+  isActive: true,
+  pricing: { input: 0.01, output: 0.02 },
 };
 
 const queuedTask = {
@@ -52,6 +60,13 @@ function createService() {
     getPlatformModelByName: jest.fn().mockResolvedValue(imageModel),
     resolveUpstream: jest.fn(),
   };
+  const adapter = { chat: jest.fn() };
+  const adapterFactory = {
+    createAdapter: jest.fn().mockReturnValue(adapter),
+  };
+  const settings = {
+    getPromptOptimizerModel: jest.fn().mockResolvedValue(null),
+  };
   const minio = {
     upload: jest.fn(),
     getPresignedUrl: jest.fn().mockResolvedValue('https://minio.test/image.png'),
@@ -66,16 +81,62 @@ function createService() {
     prisma as unknown as PrismaService,
     wallet as unknown as WalletService,
     providers as unknown as ProvidersService,
-    {} as AdapterFactory,
+    adapterFactory as unknown as AdapterFactory,
     minio as unknown as MinioService,
-    {} as ConfigService,
     queue as unknown as ImageQueueService,
+    settings as unknown as SettingsService,
   );
 
-  return { service, prisma, wallet, providers, minio, queue };
+  return { service, prisma, wallet, providers, minio, queue, adapter, settings };
 }
 
 describe('ImageService durable queue integration', () => {
+  it('uses the configured existing chat model to optimize a prompt and settle actual usage', async () => {
+    const { service, wallet, providers, adapter, settings } = createService();
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    settings.getPromptOptimizerModel.mockResolvedValue(promptOptimizerModel);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: {
+        name: 'chat-provider',
+        config: { apiKey: 'test-key' },
+        apiFormat: 'openai_compatible',
+      },
+      upstreamModel: { upstreamModelId: 'upstream-chat-model' },
+      recordResult,
+    });
+    adapter.chat.mockResolvedValue({
+      content: 'expanded prompt',
+      inputTokens: 10,
+      outputTokens: 20,
+    });
+
+    const result = await service.optimizePrompt('user-1', '一只猫');
+    const idempotencyKey = wallet.preDeduct.mock.calls[0][2];
+
+    expect(result).toEqual({ optimizedPrompt: 'expanded prompt', cost: 0.0005 });
+    expect(providers.resolveUpstream).toHaveBeenCalledWith('chat-model');
+    expect(adapter.chat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'upstream-chat-model',
+        stream: false,
+        maxTokens: 300,
+      }),
+    );
+    expect(wallet.preDeduct).toHaveBeenCalledWith(
+      'user-1',
+      0.01,
+      expect.stringMatching(/^prompt-opt:user-1:/),
+    );
+    expect(wallet.settle).toHaveBeenCalledWith(
+      'user-1',
+      0.0005,
+      idempotencyKey,
+      '提示词优化: chat-model',
+      { inputTokens: 10, outputTokens: 20 },
+    );
+    expect(recordResult).toHaveBeenCalledWith(true);
+  });
+
   it('stores a pricing snapshot and enqueues only after the task has been created', async () => {
     const { service, prisma, queue } = createService();
 
