@@ -43,5 +43,6 @@ ENV NODE_ENV=production
 
 EXPOSE 3001
 
-# 启动前先同步数据库表结构（从 schema.prisma 直接创建/更新表）
-CMD ["sh", "-c", "pnpm --filter backend exec prisma db push --skip-generate && node apps/backend/dist/main.js"]
+# 启动前执行版本化迁移。旧的 db push 数据库会在 schema 完全匹配时自动
+# 标记 baseline；有差异则拒绝启动，避免静默覆盖或误认生产数据。
+CMD ["sh", "apps/backend/docker-entrypoint.sh"]
