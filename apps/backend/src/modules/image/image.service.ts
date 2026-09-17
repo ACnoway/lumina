@@ -30,6 +30,7 @@ const QUEUE_BLOCK_TIMEOUT_SECONDS = 1;
 const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_IMAGE_ATTEMPTS = 3;
 const MIN_IMAGE_CHARGE = 0.01;
+const UPSTREAM_IDEMPOTENCY_HEADER = 'Idempotency-Key';
 
 interface ImageTaskParameters {
   aspectRatio?: string;
@@ -558,6 +559,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             resolved.upstreamModel.upstreamModelId,
             prompt,
             size,
+            idempotencyKey,
           ));
           upstreamSucceeded = true;
           break;
@@ -569,6 +571,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             prompt,
             negativePrompt,
             size,
+            idempotencyKey,
           ));
           upstreamSucceeded = true;
           break;
@@ -694,6 +697,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     model: string,
     prompt: string,
     size: { width: number; height: number },
+    idempotencyKey: string,
   ): Promise<{ imageUrl: string; imageBuffer: Buffer }> {
     const baseUrl = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
     const apiKey = config.apiKey;
@@ -715,6 +719,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
+          [UPSTREAM_IDEMPOTENCY_HEADER]: idempotencyKey,
         },
         timeout,
       },
@@ -757,6 +762,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     prompt: string,
     negativePrompt: string | undefined,
     size: { width: number; height: number },
+    idempotencyKey: string,
   ): Promise<{ imageUrl: string; imageBuffer: Buffer }> {
     const baseUrl = (config.baseUrl || 'https://api.stability.ai').replace(/\/+$/, '');
     const apiKey = config.apiKey;
@@ -779,6 +785,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           Accept: 'image/*',
+          [UPSTREAM_IDEMPOTENCY_HEADER]: idempotencyKey,
         },
         timeout,
         responseType: 'arraybuffer',

@@ -90,10 +90,11 @@
 - **发现时间**：2026-09-16（持久化队列实现）
 - **文件**：`apps/backend/src/modules/image/image.service.ts` → `recoverQueuedTasks()`
 - **现象**：worker 在上游已经完成生成、但本地尚未写入任务成功状态时异常退出，任务会在 15 分钟后被视为过期并重新处理。
-- **影响**：账本使用固定 `image:<taskId>` 幂等键，不会重复扣费；但现有 OpenAI/Stability 调用没有统一传递上游幂等键，可能产生额外的上游生成成本或重复图片。
-- **建议方案**：为支持的供应商传递上游幂等键；后续若拆分独立 worker，可增加任务 lease/heartbeat 和显式的“上游已接受”状态，缩小恢复窗口。
+- **影响**：账本使用固定 `image:<taskId>` 幂等键，不会重复扣费；若上游不识别幂等键，恢复任务仍可能再次产生上游生成成本或重复图片。
+- **修复方式**：OpenAI Images、OpenAI-compatible 和 Stability Image 请求统一传递稳定的 `Idempotency-Key: image:<taskId>`；E2E mock Provider 会按该键复用响应，避免测试重试时生成不同结果。
+- **剩余边界**：真实供应商是否真正执行幂等由其 API 契约决定；后续若拆分独立 worker，仍可增加任务 lease/heartbeat 和显式的“上游已接受”状态，进一步缩小恢复窗口。
 - **优先级**：P1
-- **状态**：已记录，待上游适配器支持后改进。
+- **状态**：已缓解（2026-09-17）；上游幂等能力需按实际供应商单独确认。
 
 ---
 

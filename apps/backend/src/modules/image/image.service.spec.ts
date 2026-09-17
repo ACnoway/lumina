@@ -7,6 +7,7 @@ import { AdapterFactory } from '../chat/adapters/adapter-factory';
 import { MinioService } from '../../minio/minio.service';
 import { ImageQueueService } from './image-queue.service';
 import { ImageService } from './image.service';
+import axios from 'axios';
 
 const imageModel = {
   id: 'model-1',
@@ -161,6 +162,13 @@ describe('ImageService durable queue integration', () => {
       '生图: image-model',
       { taskId: 'task-1', model: 'image-model' },
     );
+    expect((service as any).callOpenAIImage).toHaveBeenCalledWith(
+      {},
+      'upstream-image',
+      'a blue house',
+      { width: 1024, height: 1024 },
+      'image:task-1',
+    );
     expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'SUCCESS', cost: 0.01 }),
@@ -168,6 +176,54 @@ describe('ImageService durable queue integration', () => {
     );
     expect(recordResult).toHaveBeenCalledWith(true);
     expect(recordResult).not.toHaveBeenCalledWith(false);
+  });
+
+  it('passes the stable task key to OpenAI and Stability image requests', async () => {
+    const { service } = createService();
+    const imageResponse = {
+      data: { data: [{ b64_json: Buffer.from('image').toString('base64') }] },
+    };
+    const axiosPost = jest
+      .spyOn(axios, 'post')
+      .mockResolvedValueOnce(imageResponse as any)
+      .mockResolvedValueOnce({ data: Buffer.from('image') } as any);
+
+    await (service as any).callOpenAIImage(
+      { apiKey: 'openai-key', baseUrl: 'https://openai.test/v1' },
+      'openai-image',
+      'a blue house',
+      { width: 1024, height: 1024 },
+      'image:task-1',
+    );
+    await (service as any).callStabilityImage(
+      { apiKey: 'stability-key', baseUrl: 'https://stability.test' },
+      'stable-image',
+      'a blue house',
+      undefined,
+      { width: 1024, height: 1024 },
+      'image:task-1',
+    );
+
+    expect(axiosPost).toHaveBeenNthCalledWith(
+      1,
+      'https://openai.test/v1/images/generations',
+      expect.objectContaining({ model: 'openai-image' }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'image:task-1',
+        }),
+      }),
+    );
+    expect(axiosPost).toHaveBeenNthCalledWith(
+      2,
+      'https://stability.test/v2beta/stable-image/generate/stable-image',
+      expect.any(FormData),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'image:task-1',
+        }),
+      }),
+    );
   });
 
   it('does not mark the provider as failed when settlement fails after upstream success', async () => {

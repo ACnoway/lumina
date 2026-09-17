@@ -22,6 +22,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - Provider、平台模型和上游映射已具备管理员 RBAC、审计日志、优先级/权重路由、基础限流与熔断。
 - 聊天的会话、SSE 流式、钱包和 Provider 调用链已实现；真实上游端到端验证尚未完成。
 - 生图前端、任务查询/历史、Redis 持久化队列、重试及启动恢复已实现。
+- 生图恢复重试已向 OpenAI Images、OpenAI-compatible 和 Stability Image 请求透传稳定的 `Idempotency-Key: image:<taskId>`；mock Provider 会按键复用响应。
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
 - 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
@@ -108,10 +109,15 @@ Provider 限流已从按分钟编号的 `INCR + EXPIRE` 固定窗口改为 Redis
 
 新增 Redis 限流脚本单测、Provider key/参数单测，并在 E2E smoke 中将聊天上游限额设为 1，验证同一窗口第二次请求被路由层拒绝。提交 `3a61940` 已在 `lch:/root/lumina` 的隔离 Compose 环境通过。
 
+## 本次模块：生图恢复的上游幂等（I-001）✓
+
+生图任务继续使用 `image:<taskId>` 作为钱包幂等键，并将同一个稳定键透传到 OpenAI Images、OpenAI-compatible 和 Stability Image 的 `Idempotency-Key` 请求头。这样任务在上游已完成、但本地状态尚未落库而被恢复时，支持该约定的上游可以复用原请求结果，不会因为 Lumina 重试而创建新的生成请求。
+
+新增图片服务单测，覆盖任务键从处理链路传入两类请求封装并出现在 HTTP 请求头；E2E mock Provider 也会按键缓存图片响应。真实供应商是否执行幂等仍取决于其 API 契约，后续可在配置真实 Provider 后做受控验证。
+
 ## 随后的开发顺序
 
-1. 处理 `docs/known-issues.md` 中生图恢复后可能重复请求上游（I-001）。
-2. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
+1. 为生产数据库迁移流程建立可验证的 baseline migration，再调整容器启动策略；不要直接替换既有 `db push` 流程。
 
 ## 关键约束
 

@@ -5,6 +5,7 @@ const imagePng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 );
+const imageResponses = new Map();
 
 function sendJson(response, status, value) {
   const body = JSON.stringify(value);
@@ -126,10 +127,22 @@ async function handle(request, response) {
   }
 
   if (url.pathname === '/v1/images/generations') {
-    sendJson(response, 200, {
+    const idempotencyKey = request.headers['idempotency-key'];
+    const cachedResponse =
+      typeof idempotencyKey === 'string' ? imageResponses.get(idempotencyKey) : undefined;
+    if (cachedResponse) {
+      sendJson(response, 200, cachedResponse);
+      return;
+    }
+
+    const imageResponse = {
       created: Math.floor(Date.now() / 1000),
       data: [{ b64_json: imagePng.toString('base64') }],
-    });
+    };
+    if (typeof idempotencyKey === 'string' && idempotencyKey) {
+      imageResponses.set(idempotencyKey, imageResponse);
+    }
+    sendJson(response, 200, imageResponse);
     return;
   }
 
