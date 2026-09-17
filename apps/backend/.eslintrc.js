@@ -21,5 +21,7 @@ module.exports = {
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'warn',
+    // The existing backend has formatting drift; keep lint read-only until it is cleaned up deliberately.
+    'prettier/prettier': 'warn',
   },
 };

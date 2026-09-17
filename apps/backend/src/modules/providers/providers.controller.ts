@@ -366,8 +366,10 @@ export class ProvidersController {
    * 上游路由仍直接使用 ProvidersService 返回的完整 Provider，不经过此响应层。
    */
   private providerResponse(provider: Provider) {
-    const { apiKey: _apiKey, ...safeConfig } =
-      (provider.config as Record<string, unknown>) || {};
+    const safeConfig = {
+      ...((provider.config as Record<string, unknown>) || {}),
+    };
+    delete safeConfig.apiKey;
 
     return {
       ...provider,
