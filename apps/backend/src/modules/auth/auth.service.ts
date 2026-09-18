@@ -1,13 +1,23 @@
-import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import * as bcrypt from 'bcrypt';
+import { Prisma, User } from '@prisma/client';
 import { RedisService } from '../../redis/redis.service';
 import { UsersService } from '../users/users.service';
-import { User } from '@prisma/client';
 
 const VERIFICATION_CODE_TTL_SECONDS = 300;
 const SEND_COOLDOWN_TTL_SECONDS = 60;
+const BCRYPT_ROUNDS = 12;
+
+type CodePurpose = 'login' | 'register';
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') return value;
@@ -37,9 +47,7 @@ export class AuthService {
       host: this.config.get<string>('SMTP_HOST'),
       port: this.config.get<number>('SMTP_PORT', 587),
       secure: parseBoolean(this.config.get('SMTP_SECURE', false), false),
-      ...(smtpUser && smtpPassword
-        ? { auth: { user: smtpUser, pass: smtpPassword } }
-        : {}),
+      ...(smtpUser && smtpPassword ? { auth: { user: smtpUser, pass: smtpPassword } } : {}),
     };
     this.transporter = nodemailer.createTransport(transportOptions);
   }
@@ -55,18 +63,22 @@ export class AuthService {
     return email.trim().toLowerCase();
   }
 
-  private getCodeKey(email: string): string {
-    return `auth:code:${email}`;
+  private getCodeKey(email: string, purpose: CodePurpose): string {
+    return `auth:code:${purpose}:${email}`;
   }
 
-  private getCooldownKey(email: string): string {
-    return `auth:code:cooldown:${email}`;
+  private getCooldownKey(email: string, purpose: CodePurpose): string {
+    return `auth:code:cooldown:${purpose}:${email}`;
   }
 
-  private async clearSendState(email: string, clearCode: boolean): Promise<void> {
-    const keys = [this.getCooldownKey(email)];
+  private async clearSendState(
+    email: string,
+    purpose: CodePurpose,
+    clearCode: boolean,
+  ): Promise<void> {
+    const keys = [this.getCooldownKey(email, purpose)];
     if (clearCode) {
-      keys.push(this.getCodeKey(email));
+      keys.push(this.getCodeKey(email, purpose));
     }
 
     const results = await Promise.allSettled(keys.map((key) => this.redis.del(key)));
@@ -100,10 +112,20 @@ export class AuthService {
   /**
    * 发送验证码
    */
-  async sendCode(email: string): Promise<void> {
+  async sendCode(email: string, purpose: CodePurpose = 'login'): Promise<void> {
     const normalizedEmail = this.normalizeEmail(email);
-    const codeKey = this.getCodeKey(normalizedEmail);
-    const cooldownKey = this.getCooldownKey(normalizedEmail);
+    const existingUser = await this.usersService.findByEmail(normalizedEmail);
+
+    if (purpose === 'register' && existingUser) {
+      throw new ConflictException('该邮箱已注册，请直接登录');
+    }
+
+    if (purpose === 'login' && !existingUser) {
+      throw new BadRequestException('该邮箱尚未注册，请先注册');
+    }
+
+    const codeKey = this.getCodeKey(normalizedEmail, purpose);
+    const cooldownKey = this.getCooldownKey(normalizedEmail, purpose);
 
     // 使用独立的短期 key 原子限频，避免并发请求重复投递邮件。
     const retryAfterSeconds = await this.reserveSendCooldown(cooldownKey);
@@ -117,11 +139,11 @@ export class AuthService {
       await this.transporter.sendMail({
         from: this.config.get<string>('SMTP_FROM'),
         to: normalizedEmail,
-        subject: '【AI聊天生图平台】登录验证码',
+        subject: purpose === 'register' ? '【Lumina】注册验证码' : '【Lumina】登录验证码',
         html: `
           <div style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>您的登录验证码</h2>
-            <p>您正在登录 AI聊天生图平台，验证码为：</p>
+            <h2>${purpose === 'register' ? '您的注册验证码' : '您的登录验证码'}</h2>
+            <p>您正在${purpose === 'register' ? '注册 Lumina 账号' : '登录 Lumina'}，验证码为：</p>
             <div style="font-size: 32px; font-weight: bold; color: #C4612F; letter-spacing: 8px; margin: 20px 0;">
               ${code}
             </div>
@@ -137,51 +159,111 @@ export class AuthService {
       await this.redis.set(codeKey, code, VERIFICATION_CODE_TTL_SECONDS);
       this.logger.log(`Verification code sent to ${normalizedEmail}`);
     } catch (error) {
-      await this.clearSendState(normalizedEmail, true);
+      await this.clearSendState(normalizedEmail, purpose, true);
       this.logger.error(`Failed to send verification code to ${normalizedEmail}: ${String(error)}`);
       throw new BadRequestException('邮件发送失败，请稍后重试');
     }
   }
 
+  private async verifyCode(email: string, code: string, purpose: CodePurpose): Promise<void> {
+    const normalizedEmail = this.normalizeEmail(email);
+    const result = await this.redis.consumeVerificationCode(
+      this.getCodeKey(normalizedEmail, purpose),
+      code,
+    );
+
+    if (result !== 'matched') {
+      throw new UnauthorizedException('验证码错误或已过期');
+    }
+  }
+
+  private ensureActive(user: User): void {
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('账号已被停用');
+    }
+  }
+
+  private issueToken(user: User): { accessToken: string; user: User } {
+    this.ensureActive(user);
+    const payload = { sub: user.id, email: user.email };
+    const accessToken = this.jwtService.sign(payload);
+    return { accessToken, user };
+  }
+
   /**
-   * 验证码登录/注册
+   * 验证码登录，仅允许已注册用户登录。
    */
   async login(email: string, code: string): Promise<{ accessToken: string; user: User }> {
     const normalizedEmail = this.normalizeEmail(email);
-    const codeKey = this.getCodeKey(normalizedEmail);
-    const storedCode = await this.redis.get(codeKey);
+    await this.verifyCode(normalizedEmail, code, 'login');
 
-    // 验证码校验
-    if (!storedCode || storedCode !== code) {
-      // 验证码错误，删除 Redis 中的 key，防止暴力枚举
-      if (storedCode) {
-        await this.redis.del(codeKey);
-      }
-      throw new UnauthorizedException('验证码错误或已过期');
-    }
-
-    // 验证码正确，删除已使用的验证码
-    await this.redis.del(codeKey);
-
-    // 查找或创建用户
-    let user = await this.usersService.findByEmail(normalizedEmail);
-
+    const user = await this.usersService.findByEmail(normalizedEmail);
     if (!user) {
-      this.logger.log(`New user registration: ${normalizedEmail}`);
-      // 新用户，自动注册
-      const userWithWallet = await this.usersService.create({
-        email: normalizedEmail,
-      });
-      user = userWithWallet;
-    } else {
-      this.logger.log(`Existing user login: ${normalizedEmail}`);
+      throw new BadRequestException('该邮箱尚未注册，请先注册');
     }
 
-    // 签发 JWT
-    const payload = { sub: user.id, email: user.email };
-    const accessToken = this.jwtService.sign(payload);
+    this.logger.log(`Existing user code login: ${normalizedEmail}`);
+    return this.issueToken(user);
+  }
 
-    return { accessToken, user };
+  /**
+   * 密码登录。
+   */
+  async passwordLogin(
+    email: string,
+    password: string,
+  ): Promise<{ accessToken: string; user: User }> {
+    const normalizedEmail = this.normalizeEmail(email);
+    const user = await this.usersService.findByEmail(normalizedEmail);
+
+    if (!user?.password || !(await bcrypt.compare(password, user.password))) {
+      throw new UnauthorizedException('邮箱或密码错误');
+    }
+
+    this.logger.log(`Password login: ${normalizedEmail}`);
+    return this.issueToken(user);
+  }
+
+  /**
+   * 注册新用户并初始化钱包。
+   */
+  async register(data: {
+    email: string;
+    code: string;
+    password: string;
+    confirmPassword: string;
+    nickname?: string;
+  }): Promise<{ accessToken: string; user: User }> {
+    if (data.password !== data.confirmPassword) {
+      throw new BadRequestException('两次输入的密码不一致');
+    }
+
+    const normalizedEmail = this.normalizeEmail(data.email);
+    await this.verifyCode(normalizedEmail, data.code, 'register');
+
+    const existingUser = await this.usersService.findByEmail(normalizedEmail);
+    if (existingUser) {
+      throw new ConflictException('该邮箱已注册，请直接登录');
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
+    const nickname = data.nickname?.trim() || undefined;
+
+    try {
+      const user = await this.usersService.create({
+        email: normalizedEmail,
+        nickname,
+        password: passwordHash,
+      });
+
+      this.logger.log(`New user registered: ${normalizedEmail}`);
+      return this.issueToken(user);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('该邮箱已注册，请直接登录');
+      }
+      throw error;
+    }
   }
 
   /**

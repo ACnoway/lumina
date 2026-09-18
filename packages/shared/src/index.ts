@@ -43,6 +43,19 @@ export interface LoginDto {
   code: string;
 }
 
+export interface PasswordLoginDto {
+  email: string;
+  password: string;
+}
+
+export interface RegisterDto {
+  email: string;
+  code: string;
+  password: string;
+  confirmPassword: string;
+  nickname?: string;
+}
+
 export interface LoginResponse {
   accessToken: string;
   user: UserInfo;

@@ -131,7 +131,7 @@ apps/backend/src/
 ├── redis/                 # Redis 连接
 ├── minio/                 # MinIO 对象存储
 └── modules/
-    ├── auth/              # 邮箱验证码登录、JWT
+    ├── auth/              # 注册、密码/邮箱验证码登录、JWT
     ├── users/             # 用户管理
     ├── wallet/            # 钱包/账本（预扣-结算-退回 + 幂等键）
     ├── providers/         # 上游供应商（路由/熔断/限流）
@@ -148,6 +148,7 @@ apps/frontend/src/app/
 ├── layout.tsx             # 根布局
 ├── page.tsx               # 公开首页（展示 AI 生图与 AI 聊天入口）
 ├── login/                 # 登录页
+├── register/              # 注册页
 ├── chat/                  # 聊天页
 ├── image/                 # 生图页
 ├── history/               # 历史记录

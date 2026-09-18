@@ -101,6 +101,25 @@ async function sendCodeAndLogin(email) {
   });
 }
 
+async function registerAndLogin(email, nickname) {
+  const sentAt = Date.now() - 1000;
+  await requestJson('/auth/register/send-code', {
+    method: 'POST',
+    body: { email },
+  });
+  const code = await waitForMailCode(email, sentAt);
+  return requestJson('/auth/register', {
+    method: 'POST',
+    body: {
+      email,
+      code,
+      nickname,
+      password: 'E2ePassword1',
+      confirmPassword: 'E2ePassword1',
+    },
+  });
+}
+
 function authHeaders(token) {
   return { authorization: `Bearer ${token}` };
 }
@@ -134,14 +153,29 @@ async function main() {
 
   const adminEmail = 'e2e-admin@example.com';
   const userEmail = `e2e-user-${Date.now()}@example.com`;
+  const unregisteredEmail = `e2e-unregistered-${Date.now()}@example.com`;
+  await requestJson('/auth/send-code', {
+    method: 'POST',
+    body: { email: unregisteredEmail },
+  }, [400]);
   const adminLogin = await sendCodeAndLogin(adminEmail);
-  const userLogin = await sendCodeAndLogin(userEmail);
+  const userLogin = await registerAndLogin(userEmail, 'E2E User');
   const adminToken = adminLogin.data.accessToken;
   const userToken = userLogin.data.accessToken;
 
   assert(adminToken && userToken, 'login did not return access tokens');
   assert(adminLogin.data.user.role === 'ADMIN', 'configured admin did not receive ADMIN role');
-  assert(userLogin.data.user.role === 'USER', 'new user did not receive USER role');
+  assert(userLogin.data.user.role === 'USER', 'registered user did not receive USER role');
+  assert(userLogin.data.user.nickname === 'E2E User', 'registered nickname was not persisted');
+
+  const passwordLogin = await requestJson('/auth/password-login', {
+    method: 'POST',
+    body: { email: userEmail, password: 'E2ePassword1' },
+  });
+  assert(passwordLogin.data.user.id === userLogin.data.user.id, 'password login returned a different user');
+
+  const codeLogin = await sendCodeAndLogin(userEmail);
+  assert(codeLogin.data.user.id === userLogin.data.user.id, 'code login returned a different user');
 
   const adminMe = await requestAuth(adminToken, '/auth/me');
   const userMe = await requestAuth(userToken, '/auth/me');
@@ -405,7 +439,7 @@ async function main() {
   assert(Number(balanceAudit.details.after?.balance) === 12.5, 'wallet audit after balance mismatch');
 
   console.log(
-    'Lumina E2E smoke passed: auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, MinIO, history, audit',
+    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, MinIO, history, audit',
   );
 }
 

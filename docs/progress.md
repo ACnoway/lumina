@@ -194,15 +194,17 @@
 - Docker Compose 全容器化部署
 - 共享类型包 `@lumina/shared`
 
-### 步骤 2：用户模块 + 邮箱验证码登录（代码已实现，真实 SMTP 联调待补）
+### 步骤 2：用户模块 + 注册/登录认证（代码已实现，真实 SMTP 联调待补）
 
 - commit: `62134d5`
-- 邮箱验证码登录（Redis 存验证码，5分钟 TTL）
+- 独立注册流程：邮箱验证码、昵称、密码和确认密码；注册后创建钱包并返回 JWT
+- 已注册用户支持邮箱验证码登录和密码登录；验证码登录不再自动创建用户
+- 登录/注册验证码使用独立 Redis Key，验证码 5 分钟 TTL 且原子一次性消费
 - JWT 认证（7天过期）
-- 注册自动创建钱包并赋予初始额度（默认 10.00 元）
-- 前端登录页（邮箱 + 验证码 + 60秒倒计时）
+- 注册创建钱包并赋予初始额度（默认 10.00 元）
+- 前端统一认证布局：密码登录、验证码登录和注册页
 - middleware 路由保护（/chat, /image, /history, /admin）
-- **当前状态**：前端和认证接口均已实现并通过构建；真实 SMTP、PostgreSQL 和 Redis 联调待补。
+- **当前状态**：类型检查、认证单元测试和 E2E 冒烟脚本已更新；真实 SMTP、PostgreSQL、Redis 和容器构建待远程验证。
 
 ### 步骤 2-1：认证验证码投递可靠性（A-001）✓
 
@@ -210,7 +212,7 @@
 - 仅在 SMTP 投递成功后写入 5 分钟验证码；投递或保存失败会清理验证码和冷却状态，失败后可立即重试。
 - 发送和登录统一 trim/lowercase 邮箱；限频错误按 Redis TTL 准确提示剩余秒数。
 - 新增 mock SMTP 单元测试，覆盖成功投递、失败清理、失败重试、并发限频、验证码一次性使用和错误登录失效。
-- 当前认证测试为 6 tests；真实 SMTP 与 API/E2E 旅程仍需远程环境验收。
+- 当前认证测试覆盖注册、密码登录、验证码登录和邮件投递；真实 SMTP 与 API/E2E 旅程仍需远程环境验收。
 
 ### 步骤 3：钱包/账本模块 ✓
 
@@ -291,7 +293,7 @@ lumina/
 │   │   │   ├── redis/                     # RedisService (get/set/del/incr/ttl)
 │   │   │   ├── minio/                     # MinioService
 │   │   │   └── modules/
-│   │   │       ├── auth/                  # 邮箱验证码登录 + JWT（SMTP 配置后才可用）
+│   │   │       ├── auth/                  # 注册、密码/邮箱验证码登录 + JWT（SMTP 配置后才可用）
 │   │   │       ├── users/                 # 用户管理
 │   │   │       ├── wallet/                # 钱包/账本 (三阶段计费)
 │   │   │       ├── providers/             # 平台模型 + 上游路由/熔断/限流
@@ -319,6 +321,7 @@ lumina/
 │       │       ├── layout.tsx             # 根布局
 │       │       ├── page.tsx               # 公开首页：AI 生图与 AI 聊天入口
 │       │       ├── login/page.tsx         # 登录页（已实现）
+│       │       ├── register/page.tsx      # 注册页（已实现）
 │       │       ├── chat/                  # 已接入会话、SSE、模型和余额的聊天页
 │       │       ├── image/page.tsx         # 已接入生图 API 的页面，外部服务待验证
 │       │       ├── history/page.tsx       # 聊天会话与生图历史，已接入真实 API
@@ -339,7 +342,10 @@ lumina/
 
 ### Auth
 - `POST /auth/send-code` — 发送验证码
-- `POST /auth/login` — 验证码登录
+- `POST /auth/register/send-code` — 发送注册验证码
+- `POST /auth/register` — 邮箱验证码注册并返回 JWT
+- `POST /auth/login` — 已注册用户验证码登录
+- `POST /auth/password-login` — 密码登录
 
 ### Users
 - `GET /users/me` — 获取当前用户信息（含钱包余额）

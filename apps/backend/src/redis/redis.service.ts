@@ -106,16 +106,42 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * 原子删除预扣记录及其用户索引。
    */
-  async removePreDeduct(
-    redisKey: string,
-    indexKey: string,
-    field: string,
-  ): Promise<void> {
+  async removePreDeduct(redisKey: string, indexKey: string, field: string): Promise<void> {
     await this.client.multi().del(redisKey).hDel(indexKey, field).exec();
   }
 
   async del(key: string): Promise<void> {
     await this.client.del(key);
+  }
+
+  /**
+   * 原子校验并消费验证码。
+   * 返回 1 表示匹配并删除，-1 表示验证码存在但不匹配，0 表示不存在或已过期。
+   */
+  async consumeVerificationCode(
+    key: string,
+    expected: string,
+  ): Promise<'matched' | 'mismatch' | 'missing'> {
+    const result = await this.client.eval(
+      `
+        local stored = redis.call('get', KEYS[1])
+        if not stored then
+          return 0
+        end
+
+        redis.call('del', KEYS[1])
+        if stored == ARGV[1] then
+          return 1
+        end
+
+        return -1
+      `,
+      { keys: [key], arguments: [expected] },
+    );
+
+    if (result === 1) return 'matched';
+    if (result === -1) return 'mismatch';
+    return 'missing';
   }
 
   async ttl(key: string): Promise<number> {
@@ -182,11 +208,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * 原子地从待处理列表领取一个任务，并放入处理中列表。
    * 返回 null 表示在 timeout 秒内没有新任务。
    */
-  async brPopLPush(
-    source: string,
-    destination: string,
-    timeout: number,
-  ): Promise<string | null> {
+  async brPopLPush(source: string, destination: string, timeout: number): Promise<string | null> {
     return this.client.brPopLPush(source, destination, timeout);
   }
 

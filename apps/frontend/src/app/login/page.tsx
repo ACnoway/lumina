@@ -1,177 +1,221 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { saveAuth } from '@/lib/auth';
 import type { LoginResponse } from '@lumina/shared';
-import AppHeader from '@/components/AppHeader';
+import {
+  AuthField,
+  AuthLayout,
+  AuthMessage,
+  VerificationCodeField,
+  authInputClassName,
+  authPrimaryButtonClassName,
+} from '@/components/AuthLayout';
+
+type LoginMode = 'password' | 'code';
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginPage() {
   const router = useRouter();
-
+  const [mode, setMode] = useState<LoginMode>('password');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
-  const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // 倒计时逻辑
-  useEffect(() => {
-    if (countdown > 0) {
-      timerRef.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            if (timerRef.current) clearInterval(timerRef.current);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [countdown]);
-
-  // 发送验证码
-  async function handleSendCode() {
+  function switchMode(nextMode: LoginMode) {
+    setMode(nextMode);
     setError('');
     setInfo('');
+  }
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  function validateEmail(): boolean {
+    if (!emailPattern.test(email.trim())) {
       setError('请输入有效的邮箱地址');
-      return;
+      return false;
     }
+    return true;
+  }
+
+  async function handleSendCode(): Promise<boolean> {
+    setError('');
+    setInfo('');
+    if (!validateEmail()) return false;
 
     setSendingCode(true);
     try {
-      await apiClient.post('/auth/send-code', { email });
+      await apiClient.post('/auth/send-code', { email: email.trim() });
       setInfo('验证码已发送，请查收邮件');
-      setCountdown(60);
+      return true;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '发送失败';
-      setError(msg);
+      setError(err instanceof Error ? err.message : '发送失败');
+      return false;
     } finally {
       setSendingCode(false);
     }
   }
 
-  // 登录
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
+  async function handlePasswordLogin(event: React.FormEvent) {
+    event.preventDefault();
     setError('');
     setInfo('');
 
-    if (!email || !code) {
-      setError('请填写邮箱和验证码');
+    if (!validateEmail() || !password) {
+      if (!password) setError('请输入邮箱和密码');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await apiClient.post<LoginResponse>('/auth/login', { email, code });
-      saveAuth(res);
+      const response = await apiClient.post<LoginResponse>('/auth/password-login', {
+        email: email.trim(),
+        password,
+      });
+      saveAuth(response);
       router.push('/chat');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '登录失败';
-      setError(msg);
+      setError(err instanceof Error ? err.message : '登录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCodeLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setError('');
+    setInfo('');
+
+    if (!validateEmail() || !/^\d{6}$/.test(code)) {
+      if (!/^\d{6}$/.test(code)) setError('请输入6位验证码');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await apiClient.post<LoginResponse>('/auth/login', {
+        email: email.trim(),
+        code,
+      });
+      saveAuth(response);
+      router.push('/chat');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '登录失败');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
-      <AppHeader
-        title="登录"
-        items={[]}
-        showUserMenu={false}
-        trailing={(
-          <Link href="/" className="text-sm text-gray-500 transition hover:text-blue-600">
-            返回首页
+    <AuthLayout
+      title="登录"
+      eyebrow="Welcome back"
+      heading="进入 Lumina"
+      description="登录后即可使用 AI 聊天与 AI 生图。"
+      footer={(
+        <p className="text-center text-sm text-gray-500">
+          还没有账号？{' '}
+          <Link href="/register" className="font-medium text-blue-600 transition hover:text-blue-700">
+            立即注册
           </Link>
-        )}
-      />
-      <div className="flex min-h-[calc(100vh-81px)] items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md space-y-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Welcome back</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-gray-900">进入 Lumina</h2>
-            <p className="mt-2 text-sm leading-6 text-gray-500">登录后即可使用 AI 聊天与 AI 生图。</p>
-          </div>
+        </p>
+      )}
+    >
+      <div className="mb-5 grid grid-cols-2 rounded-xl bg-gray-100 p-1" role="tablist" aria-label="登录方式">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'password'}
+          onClick={() => switchMode('password')}
+          className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+            mode === 'password' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          密码登录
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'code'}
+          onClick={() => switchMode('code')}
+          className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+            mode === 'code' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          验证码登录
+        </button>
+      </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          {/* 邮箱 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">邮箱</label>
+      {mode === 'password' ? (
+        <form onSubmit={handlePasswordLogin} className="space-y-4">
+          <AuthField label="邮箱" htmlFor="login-email">
             <input
+              id="login-email"
               type="email"
+              autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               placeholder="请输入邮箱"
-              disabled={loading || sendingCode}
-              className="mt-1 block w-full rounded-xl border border-gray-300 px-3 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
+              disabled={loading}
+              className={authInputClassName}
             />
-          </div>
+          </AuthField>
 
-          {/* 验证码 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">验证码</label>
-            <div className="mt-1 flex gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                placeholder="6位验证码"
-                disabled={loading}
-                className="block w-full rounded-xl border border-gray-300 px-3 py-3 text-sm tracking-widest outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
-              />
-              <button
-                type="button"
-                onClick={handleSendCode}
-                disabled={countdown > 0 || sendingCode || loading}
-                className="whitespace-nowrap rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {countdown > 0 ? `${countdown}s` : sendingCode ? '发送中...' : '获取验证码'}
-              </button>
-            </div>
-          </div>
+          <AuthField label="密码" htmlFor="login-password">
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="请输入密码"
+              disabled={loading}
+              className={authInputClassName}
+            />
+          </AuthField>
 
-          {/* 错误/提示信息 */}
-          {error && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </div>
-          )}
-          {info && !error && (
-            <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
-              {info}
-            </div>
-          )}
+          <AuthMessage error={error} info={info} />
 
-          {/* 登录按钮 */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading} className={authPrimaryButtonClassName}>
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
+      ) : (
+        <form onSubmit={handleCodeLogin} className="space-y-4">
+          <AuthField label="邮箱" htmlFor="code-login-email">
+            <input
+              id="code-login-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="请输入邮箱"
+              disabled={loading || sendingCode}
+              className={authInputClassName}
+            />
+          </AuthField>
 
-        <p className="text-center text-xs text-gray-400">
-          新用户会自动注册并获得初始体验额度
-        </p>
-        </div>
-      </div>
-    </main>
+          <VerificationCodeField
+            value={code}
+            onChange={setCode}
+            onSend={handleSendCode}
+            disabled={loading}
+            sending={sendingCode}
+          />
+
+          <AuthMessage error={error} info={info} />
+
+          <button type="submit" disabled={loading} className={authPrimaryButtonClassName}>
+            {loading ? '登录中...' : '登录'}
+          </button>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

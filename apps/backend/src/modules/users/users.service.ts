@@ -16,8 +16,8 @@ export class UsersService implements OnModuleInit {
   /**
    * 初始化配置中的管理员账户。
    *
-   * 管理端仍使用邮箱验证码登录，ADMIN_PASSWORD 只作为账户初始化时的
-   * 密码哈希保留，供后续密码登录能力使用。
+   * 管理端仍可使用邮箱验证码登录，ADMIN_PASSWORD 作为账户初始化时的
+   * 密码哈希同时支持密码登录。
    */
   async onModuleInit(): Promise<void> {
     const adminEmail = this.normalizeEmail(this.config.get<string>('ADMIN_EMAIL', ''));

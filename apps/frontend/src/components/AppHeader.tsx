@@ -170,12 +170,20 @@ export default function AppHeader({
                 )}
               </div>
             ) : (
-              <Link
-                href="/login"
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-700"
-              >
-                登录
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/register"
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 hover:text-blue-700"
+                >
+                  注册
+                </Link>
+                <Link
+                  href="/login"
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-700"
+                >
+                  登录
+                </Link>
+              </div>
             ))}
         </div>
       </div>
