@@ -1,12 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsOptional,
-  IsInt,
-  Min,
-  IsIn,
-  MaxLength,
-} from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, IsIn, MaxLength, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ==================== 提示词优化 DTO ====================
@@ -21,7 +14,10 @@ export class OptimizePromptDto {
 // ==================== 生图任务 DTO ====================
 
 export class CreateImageTaskDto {
-  @ApiProperty({ description: '最终提示词（可能经过优化和编辑）', example: '一只可爱的白色猫娘...' })
+  @ApiProperty({
+    description: '最终提示词（可能经过优化和编辑）',
+    example: '一只可爱的白色猫娘...',
+  })
   @IsString({ message: '提示词必须是字符串' })
   @MaxLength(4000, { message: '提示词最多4000个字符' })
   prompt!: string;
@@ -49,6 +45,14 @@ export class CreateImageTaskDto {
   @IsOptional()
   @IsIn(['1:1', '9:16', '16:9', '4:3', '3:4'], { message: '比例不合法' })
   aspectRatio?: string;
+
+  @ApiProperty({ description: '生成图片数量', minimum: 1, maximum: 4, default: 1, required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: '图片数量必须是整数' })
+  @Min(1, { message: '图片数量至少为1' })
+  @Max(4, { message: '图片数量最多为4' })
+  imageCount?: number = 1;
 }
 
 // ==================== 分页查询 DTO ====================

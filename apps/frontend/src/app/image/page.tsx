@@ -21,12 +21,92 @@ const ASPECT_RATIOS = [
 
 type AspectRatio = (typeof ASPECT_RATIOS)[number]['value'];
 type ImageTask = Omit<ImageTaskDto, 'cost'> & { cost: number | null };
+type TaskImage = ImageTask['images'][number];
 
 function normalizeTask(task: ImageTaskResponse | ImageTaskDto): ImageTask {
   return {
     ...task,
     cost: task.cost === null ? null : Number(task.cost),
+    images: (task.images || []).map((image) => ({
+      ...image,
+      cost: image.cost === null ? null : Number(image.cost),
+    })),
   };
+}
+
+function getTaskImages(task: ImageTask): TaskImage[] {
+  const completedImages = task.images.filter((image) => Boolean(image.imageUrl));
+  if (completedImages.length > 0) return completedImages;
+  if (task.images.length > 0) return task.images;
+  if (!task.imageUrl) return [];
+
+  return [
+    {
+      id: `${task.id}:legacy:0`,
+      sequence: 0,
+      status: task.status,
+      width: null,
+      height: null,
+      imageUrl: task.imageUrl,
+      cost: task.cost,
+      errorMessage: task.errorMessage,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    },
+  ];
+}
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  if (!copied) throw new Error('clipboard copy failed');
+}
+
+function PromptField({
+  label,
+  value,
+  copyKey,
+  copiedPrompt,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copyKey: string;
+  copiedPrompt: string;
+  onCopy: (copyKey: string, value: string) => void;
+}) {
+  const hasValue = Boolean(value);
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-gray-600">{label}</span>
+        <button
+          type="button"
+          onClick={() => onCopy(copyKey, value)}
+          disabled={!hasValue}
+          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {copiedPrompt === copyKey ? '已复制' : '复制'}
+        </button>
+      </div>
+      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">
+        {hasValue ? value : '未填写'}
+      </p>
+    </div>
+  );
 }
 
 function statusLabel(status: ImageStatus): string {
@@ -77,6 +157,7 @@ export default function ImagePage() {
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+  const [imageCount, setImageCount] = useState(1);
   const [task, setTask] = useState<ImageTask | null>(null);
   const [history, setHistory] = useState<ImageTask[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
@@ -86,6 +167,7 @@ export default function ImagePage() {
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [copiedPrompt, setCopiedPrompt] = useState('');
   const pollRunRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -230,6 +312,7 @@ export default function ImagePage() {
           negativePrompt: negativePrompt.trim() || undefined,
           model: selectedModel,
           aspectRatio,
+          imageCount,
         }),
       );
       setTask(createdTask);
@@ -239,6 +322,18 @@ export default function ImagePage() {
       setError(getErrorMessage(generateError, '创建生图任务失败'));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleCopyPrompt(copyKey: string, value: string) {
+    if (!value) return;
+
+    try {
+      await copyText(value);
+      setCopiedPrompt(copyKey);
+      window.setTimeout(() => setCopiedPrompt(''), 1500);
+    } catch {
+      setError('复制失败，请检查浏览器剪贴板权限');
     }
   }
 
@@ -267,12 +362,18 @@ export default function ImagePage() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+            <div
+              className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+              role="alert"
+            >
               {error}
             </div>
           )}
           {notice && (
-            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700" role="status">
+            <div
+              className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+              role="status"
+            >
               {notice}
             </div>
           )}
@@ -296,7 +397,9 @@ export default function ImagePage() {
                 disabled={busy}
               />
               <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-400">可以先用中文描述，再让优化器扩展成英文提示词。</p>
+                <p className="text-xs text-gray-400">
+                  可以先用中文描述，再让优化器扩展成英文提示词。
+                </p>
                 <button
                   type="button"
                   onClick={() => void handleOptimize()}
@@ -309,7 +412,10 @@ export default function ImagePage() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700" htmlFor="negative-prompt">
+              <label
+                className="mb-2 block text-sm font-medium text-gray-700"
+                htmlFor="negative-prompt"
+              >
                 反向提示词 <span className="font-normal text-gray-400">（可选）</span>
               </label>
               <input
@@ -323,9 +429,12 @@ export default function ImagePage() {
               />
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700" htmlFor="image-model">
+                <label
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                  htmlFor="image-model"
+                >
                   模型
                 </label>
                 <select
@@ -350,7 +459,10 @@ export default function ImagePage() {
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700" htmlFor="aspect-ratio">
+                <label
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                  htmlFor="aspect-ratio"
+                >
                   画面比例
                 </label>
                 <select
@@ -363,6 +475,28 @@ export default function ImagePage() {
                   {ASPECT_RATIOS.map((ratio) => (
                     <option key={ratio.value} value={ratio.value}>
                       {ratio.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  className="mb-2 block text-sm font-medium text-gray-700"
+                  htmlFor="image-count"
+                >
+                  图片数量
+                </label>
+                <select
+                  id="image-count"
+                  value={imageCount}
+                  onChange={(event) => setImageCount(Number(event.target.value))}
+                  disabled={busy}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
+                >
+                  {[1, 2, 3, 4].map((count) => (
+                    <option key={count} value={count}>
+                      {count} 张
                     </option>
                   ))}
                 </select>
@@ -389,7 +523,9 @@ export default function ImagePage() {
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Latest result</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                Latest result
+              </p>
               <h2 className="mt-1 text-xl font-semibold">生成结果</h2>
             </div>
             {task && (
@@ -407,22 +543,34 @@ export default function ImagePage() {
             )}
           </div>
 
-          {task?.status === 'SUCCESS' && task.imageUrl ? (
-            <div className="overflow-hidden rounded-xl bg-gray-100">
-              {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={task.imageUrl} alt={task.prompt} className="h-auto w-full object-contain" />
+          {task?.status === 'SUCCESS' && getTaskImages(task).length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {getTaskImages(task).map((image) => (
+                <div key={image.id} className="overflow-hidden rounded-xl bg-gray-100">
+                  {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={image.imageUrl || undefined}
+                    alt={`${task.prompt} - ${image.sequence + 1}`}
+                    className="h-auto w-full object-contain"
+                  />
+                </div>
+              ))}
             </div>
           ) : task && (task.status === 'PENDING' || task.status === 'PROCESSING') ? (
             <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl bg-gray-50 px-6 text-center">
               <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
-              <p className="font-medium text-gray-700">{task.status === 'PENDING' ? '任务排队中' : '正在绘制你的图片'}</p>
+              <p className="font-medium text-gray-700">
+                {task.status === 'PENDING' ? '任务排队中' : '正在绘制你的图片'}
+              </p>
               <p className="mt-2 text-sm text-gray-400">可以离开页面，回来后会自动恢复任务状态。</p>
             </div>
           ) : task?.status === 'FAILED' ? (
             <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl bg-red-50 px-6 text-center">
               <p className="font-medium text-red-700">这次生成没有完成</p>
-              <p className="mt-2 text-sm text-red-600">{task.errorMessage || '上游服务返回失败，请稍后重试。'}</p>
+              <p className="mt-2 text-sm text-red-600">
+                {task.errorMessage || '上游服务返回失败，请稍后重试。'}
+              </p>
             </div>
           ) : (
             <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 px-6 text-center">
@@ -444,7 +592,31 @@ export default function ImagePage() {
                   <span className="font-medium text-gray-700">¥{task.cost.toFixed(4)}</span>
                 </div>
               )}
-              <p className="line-clamp-3 pt-1 text-gray-400">{task.prompt}</p>
+              <div className="space-y-3 pt-2">
+                <PromptField
+                  label="正面提示词"
+                  value={task.prompt}
+                  copyKey="prompt"
+                  copiedPrompt={copiedPrompt}
+                  onCopy={(copyKey, value) => void handleCopyPrompt(copyKey, value)}
+                />
+                <PromptField
+                  label="反面提示词"
+                  value={task.negativePrompt || ''}
+                  copyKey="negativePrompt"
+                  copiedPrompt={copiedPrompt}
+                  onCopy={(copyKey, value) => void handleCopyPrompt(copyKey, value)}
+                />
+                {task.originalPrompt && (
+                  <PromptField
+                    label="原始提示词"
+                    value={task.originalPrompt}
+                    copyKey="originalPrompt"
+                    copiedPrompt={copiedPrompt}
+                    onCopy={(copyKey, value) => void handleCopyPrompt(copyKey, value)}
+                  />
+                )}
+              </div>
             </div>
           )}
         </section>
@@ -452,7 +624,9 @@ export default function ImagePage() {
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:col-span-2 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">History</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                History
+              </p>
               <h2 className="mt-1 text-xl font-semibold">最近生成</h2>
             </div>
             <Link className="text-sm font-medium text-blue-600 hover:text-blue-700" href="/history">
@@ -467,7 +641,9 @@ export default function ImagePage() {
               ))}
             </div>
           ) : history.length === 0 ? (
-            <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">还没有生图记录</p>
+            <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
+              还没有生图记录
+            </p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {history.map((historyTask) => (
@@ -477,10 +653,14 @@ export default function ImagePage() {
                   onClick={() => handleHistorySelect(historyTask)}
                   className="group overflow-hidden rounded-xl border border-gray-200 text-left transition hover:border-blue-300 hover:shadow-sm"
                 >
-                  {historyTask.imageUrl ? (
+                  {historyTask.images?.[0]?.imageUrl || historyTask.imageUrl ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={historyTask.imageUrl} alt={historyTask.prompt} className="h-32 w-full object-cover" />
+                      <img
+                        src={historyTask.images?.[0]?.imageUrl || historyTask.imageUrl || undefined}
+                        alt={historyTask.prompt}
+                        className="h-32 w-full object-cover"
+                      />
                     </>
                   ) : (
                     <div className="flex h-32 items-center justify-center bg-gray-50 text-xs text-gray-400">
@@ -489,10 +669,19 @@ export default function ImagePage() {
                   )}
                   <div className="p-3">
                     <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="truncate font-medium text-gray-700">{historyTask.model}</span>
-                      <span className="shrink-0 text-gray-400">{formatDate(historyTask.createdAt)}</span>
+                      <span className="truncate font-medium text-gray-700">
+                        {historyTask.model}
+                      </span>
+                      <span className="shrink-0 text-gray-400">
+                        {formatDate(historyTask.createdAt)}
+                      </span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs text-gray-400">{historyTask.prompt}</p>
+                    {historyTask.images && historyTask.images.length > 1 && (
+                      <p className="mt-1 text-xs text-blue-600">
+                        共 {historyTask.images.length} 张
+                      </p>
+                    )}
                   </div>
                 </button>
               ))}

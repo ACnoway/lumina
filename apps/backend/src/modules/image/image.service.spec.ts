@@ -37,11 +37,61 @@ const queuedTask = {
   parameters: {
     aspectRatio: '1:1',
     perImagePrice: 0.5,
+    imageCount: 1,
     retryCount: 0,
   },
+  images: [],
 };
 
 function createService() {
+  const imageRecords = [
+    {
+      id: 'image-1',
+      generationId: 'task-1',
+      sequence: 0,
+      status: 'PENDING',
+      width: null,
+      height: null,
+      imageUrl: null,
+      imageKey: null,
+      cost: null,
+      errorMessage: null,
+    },
+  ];
+  const imageGenerationImage = {
+    findMany: jest.fn().mockImplementation(async () => imageRecords),
+    createMany: jest.fn().mockImplementation(async ({ data }) => {
+      for (const item of data) {
+        imageRecords.push({
+          id: `image-${imageRecords.length + 1}`,
+          generationId: item.generationId,
+          sequence: item.sequence,
+          status: 'PENDING',
+          width: null,
+          height: null,
+          imageUrl: null,
+          imageKey: null,
+          cost: null,
+          errorMessage: null,
+        });
+      }
+    }),
+    updateMany: jest.fn().mockImplementation(async ({ where, data }) => {
+      const matches = imageRecords.filter((record) => {
+        if (where.id && record.id !== where.id) return false;
+        if (where.generationId && record.generationId !== where.generationId) return false;
+        if (where.status?.in && !where.status.in.includes(record.status)) return false;
+        return true;
+      });
+      matches.forEach((record) => Object.assign(record, data));
+      return { count: matches.length };
+    }),
+    update: jest.fn().mockImplementation(async ({ where, data }) => {
+      const record = imageRecords.find((item) => item.id === where.id);
+      if (record) Object.assign(record, data);
+      return record;
+    }),
+  };
   const prisma = {
     imageGeneration: {
       create: jest.fn().mockResolvedValue(queuedTask),
@@ -50,6 +100,7 @@ function createService() {
       update: jest.fn(),
       findMany: jest.fn(),
     },
+    imageGenerationImage,
   };
   const wallet = {
     preDeduct: jest.fn(),
@@ -87,7 +138,7 @@ function createService() {
     settings as unknown as SettingsService,
   );
 
-  return { service, prisma, wallet, providers, minio, queue, adapter, settings };
+  return { service, prisma, wallet, providers, minio, queue, adapter, settings, imageRecords };
 }
 
 describe('ImageService durable queue integration', () => {
@@ -155,6 +206,7 @@ describe('ImageService durable queue integration', () => {
           parameters: {
             aspectRatio: '16:9',
             perImagePrice: 0.5,
+            imageCount: 1,
             retryCount: 0,
           },
         }),
@@ -215,20 +267,20 @@ describe('ImageService durable queue integration', () => {
       { retryCount: 0 },
     );
 
-    expect(wallet.preDeduct).toHaveBeenCalledWith('user-1', 0.01, 'image:task-1');
+    expect(wallet.preDeduct).toHaveBeenCalledWith('user-1', 0.01, 'image:task-1:0');
     expect(wallet.settle).toHaveBeenCalledWith(
       'user-1',
       0.01,
-      'image:task-1',
+      'image:task-1:0',
       '生图: image-model',
-      { taskId: 'task-1', model: 'image-model' },
+      { taskId: 'task-1', imageId: 'image-1', sequence: 0, model: 'image-model' },
     );
     expect((service as any).callOpenAIImage).toHaveBeenCalledWith(
       {},
       'upstream-image',
       'a blue house',
       { width: 1024, height: 1024 },
-      'image:task-1',
+      'image:task-1:0',
     );
     expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -287,6 +339,64 @@ describe('ImageService durable queue integration', () => {
     );
   });
 
+  it('settles each successful image separately and only charges completed images', async () => {
+    const { service, prisma, wallet, providers, imageRecords } = createService();
+    imageRecords.push({
+      id: 'image-2',
+      generationId: 'task-1',
+      sequence: 1,
+      status: 'PENDING',
+      width: null,
+      height: null,
+      imageUrl: null,
+      imageKey: null,
+      cost: null,
+      errorMessage: null,
+    });
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult,
+    });
+    (service as any).callOpenAIImage = jest
+      .fn()
+      .mockResolvedValueOnce({ imageBuffer: Buffer.from('image-1') })
+      .mockRejectedValueOnce(new Error('上游拒绝第二张图片'));
+
+    await (service as any).processImageTask(
+      'user-1',
+      'task-1',
+      'a blue house',
+      undefined,
+      'image-model',
+      '1:1',
+      0.5,
+      { retryCount: 0, imageCount: 2 },
+    );
+
+    expect(wallet.preDeduct).toHaveBeenNthCalledWith(1, 'user-1', 0.5, 'image:task-1:0');
+    expect(wallet.preDeduct).toHaveBeenNthCalledWith(2, 'user-1', 0.5, 'image:task-1:1');
+    expect(wallet.settle).toHaveBeenCalledTimes(1);
+    expect(wallet.settle).toHaveBeenCalledWith(
+      'user-1',
+      0.5,
+      'image:task-1:0',
+      '生图: image-model',
+      { taskId: 'task-1', imageId: 'image-1', sequence: 0, model: 'image-model' },
+    );
+    expect(wallet.refund).toHaveBeenCalledWith(
+      'user-1',
+      'image:task-1:1',
+      expect.stringContaining('上游拒绝第二张图片'),
+    );
+    expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'SUCCESS', cost: 0.5 }),
+      }),
+    );
+  });
+
   it('does not mark the provider as failed when settlement fails after upstream success', async () => {
     const { service, prisma, wallet, providers } = createService();
     const recordResult = jest.fn().mockResolvedValue(undefined);
@@ -314,7 +424,7 @@ describe('ImageService durable queue integration', () => {
 
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',
-      'image:task-1',
+      'image:task-1:0',
       '生图失败: 阶段=钱包结算; Error: 结算失败',
     );
     expect(recordResult).not.toHaveBeenCalledWith(false);
@@ -358,7 +468,7 @@ describe('ImageService durable queue integration', () => {
     );
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',
-      'image:task-1',
+      'image:task-1:0',
       '生图失败: 阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
     );
     expect(recordResult).not.toHaveBeenCalledWith(false);

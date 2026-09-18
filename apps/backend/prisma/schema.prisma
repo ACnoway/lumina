@@ -161,6 +161,7 @@ model ImageGeneration {
   // 结果
   imageUrl     String?
   imageKey     String? // MinIO 存储 key
+  images       ImageGenerationImage[]
   
   // 计费
   cost         Decimal? @db.Decimal(10, 4)
@@ -175,6 +176,29 @@ model ImageGeneration {
   @@index([status])
   @@index([createdAt])
   @@map("image_generations")
+}
+
+model ImageGenerationImage {
+  id           String         @id @default(cuid())
+  generationId String
+  generation   ImageGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  sequence     Int
+  status       ImageStatus    @default(PENDING)
+  width        Int?
+  height       Int?
+  imageUrl     String?
+  imageKey     String?
+  cost         Decimal?       @db.Decimal(10, 4)
+  errorMessage String?        @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([generationId, sequence])
+  @@index([generationId])
+  @@index([status])
+  @@map("image_generation_images")
 }
 
 enum ImageStatus {

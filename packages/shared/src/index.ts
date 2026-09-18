@@ -171,6 +171,20 @@ export interface CreateImageTaskDto {
   negativePrompt?: string;
   model: string;
   aspectRatio?: '1:1' | '9:16' | '16:9' | '4:3' | '3:4';
+  imageCount?: number;
+}
+
+export interface ImageTaskImageDto {
+  id: string;
+  sequence: number;
+  status: ImageStatus;
+  width: number | null;
+  height: number | null;
+  imageUrl: string | null;
+  cost: number | string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ImageTaskDto {
@@ -181,6 +195,7 @@ export interface ImageTaskDto {
   model: string;
   status: ImageStatus;
   imageUrl: string | null;
+  images: ImageTaskImageDto[];
   cost: number | null;
   errorMessage: string | null;
   createdAt: string;
@@ -266,11 +281,7 @@ export interface PromptOptimizerSettingDto {
 
 // ==================== 供应商/模型相关类型 ====================
 export type ApiFormat =
-  | 'openai_chat'
-  | 'openai_compatible'
-  | 'anthropic_messages'
-  | 'openai_image'
-  | 'stability_image';
+  'openai_chat' | 'openai_compatible' | 'anthropic_messages' | 'openai_image' | 'stability_image';
 
 export type ModelType = 'CHAT' | 'IMAGE';
 

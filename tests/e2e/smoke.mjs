@@ -13,8 +13,7 @@ function sleep(ms) {
 }
 
 async function requestJson(path, options = {}, expectedStatuses) {
-  const allowedStatuses =
-    expectedStatuses || (options.method === 'POST' ? [200, 201] : [200]);
+  const allowedStatuses = expectedStatuses || (options.method === 'POST' ? [200, 201] : [200]);
   const headers = new Headers(options.headers || {});
   if (options.body !== undefined && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
@@ -127,7 +126,10 @@ function authHeaders(token) {
 async function requestAuth(token, path, options = {}, expectedStatuses) {
   return requestJson(
     path,
-    { ...options, headers: { ...authHeaders(token), ...(options.headers || {}) } },
+    {
+      ...options,
+      headers: { ...authHeaders(token), ...(options.headers || {}) },
+    },
     expectedStatuses,
   );
 }
@@ -154,10 +156,14 @@ async function main() {
   const adminEmail = 'e2e-admin@example.com';
   const userEmail = `e2e-user-${Date.now()}@example.com`;
   const unregisteredEmail = `e2e-unregistered-${Date.now()}@example.com`;
-  await requestJson('/auth/send-code', {
-    method: 'POST',
-    body: { email: unregisteredEmail },
-  }, [400]);
+  await requestJson(
+    '/auth/send-code',
+    {
+      method: 'POST',
+      body: { email: unregisteredEmail },
+    },
+    [400],
+  );
   const adminLogin = await sendCodeAndLogin(adminEmail);
   const userLogin = await registerAndLogin(userEmail, 'E2E User');
   const adminToken = adminLogin.data.accessToken;
@@ -172,24 +178,36 @@ async function main() {
     method: 'POST',
     body: { email: userEmail, password: 'E2ePassword1' },
   });
-  assert(passwordLogin.data.user.id === userLogin.data.user.id, 'password login returned a different user');
+  assert(
+    passwordLogin.data.user.id === userLogin.data.user.id,
+    'password login returned a different user',
+  );
 
-  await requestJson('/users/me/password', {
-    method: 'PATCH',
-    body: {
-      currentPassword: 'E2ePassword1',
-      newPassword: 'E2ePassword2',
-      confirmPassword: 'E2ePassword2',
+  await requestJson(
+    '/users/me/password',
+    {
+      method: 'PATCH',
+      body: {
+        currentPassword: 'E2ePassword1',
+        newPassword: 'E2ePassword2',
+        confirmPassword: 'E2ePassword2',
+      },
     },
-  }, [401]);
-  await requestAuth(userToken, '/users/me/password', {
-    method: 'PATCH',
-    body: {
-      currentPassword: 'WrongPassword1',
-      newPassword: 'E2ePassword2',
-      confirmPassword: 'E2ePassword2',
+    [401],
+  );
+  await requestAuth(
+    userToken,
+    '/users/me/password',
+    {
+      method: 'PATCH',
+      body: {
+        currentPassword: 'WrongPassword1',
+        newPassword: 'E2ePassword2',
+        confirmPassword: 'E2ePassword2',
+      },
     },
-  }, [400]);
+    [400],
+  );
   const changedPassword = await requestAuth(userToken, '/users/me/password', {
     method: 'PATCH',
     body: {
@@ -199,10 +217,14 @@ async function main() {
     },
   });
   assert(changedPassword.data.message === '密码修改成功', 'password change did not succeed');
-  await requestJson('/auth/password-login', {
-    method: 'POST',
-    body: { email: userEmail, password: 'E2ePassword1' },
-  }, [401]);
+  await requestJson(
+    '/auth/password-login',
+    {
+      method: 'POST',
+      body: { email: userEmail, password: 'E2ePassword1' },
+    },
+    [401],
+  );
   const changedPasswordLogin = await requestJson('/auth/password-login', {
     method: 'POST',
     body: { email: userEmail, password: 'E2ePassword2' },
@@ -258,11 +280,20 @@ async function main() {
   });
   assert(balanceAdjustment.data.type === 'ADMIN_ADJUST', 'admin wallet adjustment type mismatch');
   assert(Number(balanceAdjustment.data.amount) === 2.5, 'admin wallet adjustment amount mismatch');
-  assert(Number(balanceAdjustment.data.balance) === 12.5, 'admin wallet adjustment balance mismatch');
-  assert(balanceAdjustment.data.reason === adjustmentReason, 'admin wallet adjustment reason mismatch');
+  assert(
+    Number(balanceAdjustment.data.balance) === 12.5,
+    'admin wallet adjustment balance mismatch',
+  );
+  assert(
+    balanceAdjustment.data.reason === adjustmentReason,
+    'admin wallet adjustment reason mismatch',
+  );
 
   const adminUserAfter = await requestAuth(adminToken, `/admin/users/${userId}`);
-  assert(Number(adminUserAfter.data.wallet?.balance) === 12.5, 'admin user balance was not persisted');
+  assert(
+    Number(adminUserAfter.data.wallet?.balance) === 12.5,
+    'admin user balance was not persisted',
+  );
   const adminTransactions = await requestAuth(
     adminToken,
     `/admin/users/${userId}/transactions?limit=10`,
@@ -332,22 +363,15 @@ async function main() {
     },
   });
 
-  const promptOptimizerBefore = await requestAuth(
-    adminToken,
-    '/admin/settings/prompt-optimizer',
-  );
+  const promptOptimizerBefore = await requestAuth(adminToken, '/admin/settings/prompt-optimizer');
   assert(
     promptOptimizerBefore.data && Object.hasOwn(promptOptimizerBefore.data, 'modelId'),
     'prompt optimizer setting response is missing modelId',
   );
-  const promptOptimizerSetting = await requestAuth(
-    adminToken,
-    '/admin/settings/prompt-optimizer',
-    {
-      method: 'PATCH',
-      body: { modelId: chatModel.data.id },
-    },
-  );
+  const promptOptimizerSetting = await requestAuth(adminToken, '/admin/settings/prompt-optimizer', {
+    method: 'PATCH',
+    body: { modelId: chatModel.data.id },
+  });
   assert(
     promptOptimizerSetting.data.modelId === chatModel.data.id,
     'admin prompt optimizer model setting did not persist',
@@ -372,7 +396,10 @@ async function main() {
   const providerList = await requestAuth(adminToken, '/providers');
   const visibleProvider = providerList.data.find((item) => item.id === providerId);
   assert(visibleProvider, 'created provider is missing from admin list');
-  assert(!Object.hasOwn(visibleProvider.config || {}, 'apiKey'), 'provider API key leaked in admin list');
+  assert(
+    !Object.hasOwn(visibleProvider.config || {}, 'apiKey'),
+    'provider API key leaked in admin list',
+  );
 
   const upstreamList = await requestAuth(
     adminToken,
@@ -399,13 +426,18 @@ async function main() {
   });
   const streamText = await streamResponse.text();
   assert(streamResponse.ok, `chat stream returned ${streamResponse.status}: ${streamText}`);
-  const streamEvents = [...streamText.matchAll(/^data:\s*(\{.*\})$/gm)].map((match) => JSON.parse(match[1]));
+  const streamEvents = [...streamText.matchAll(/^data:\s*(\{.*\})$/gm)].map((match) =>
+    JSON.parse(match[1]),
+  );
   const streamedContent = streamEvents
     .filter((event) => event.type === 'content')
     .map((event) => event.content)
     .join('');
   assert(streamedContent.includes('E2E mock reply'), 'chat SSE did not contain mock content');
-  assert(streamEvents.some((event) => event.type === 'done'), 'chat SSE did not finish with done event');
+  assert(
+    streamEvents.some((event) => event.type === 'done'),
+    'chat SSE did not finish with done event',
+  );
 
   const messages = await requestAuth(userToken, `/chat/sessions/${session.data.id}/messages`);
   assert(messages.data.total === 2, `expected two chat messages, got ${messages.data.total}`);
@@ -433,16 +465,28 @@ async function main() {
     method: 'POST',
     body: {
       prompt: 'a tiny e2e test image',
+      negativePrompt: 'blurry, watermark',
       model: imageModel.data.name,
       aspectRatio: '1:1',
+      imageCount: 4,
     },
   });
   const completedImage = await pollImageTask(userToken, imageTask.data.id);
   assert(completedImage.imageKey, 'successful image task did not store an object key');
   assert(completedImage.imageUrl, 'successful image task did not return a signed URL');
+  assert(completedImage.images?.length === 4, 'four-image task did not return four image records');
+  assert(
+    Number(completedImage.cost) === 0.04,
+    'four-image task was not charged per successful image',
+  );
 
   const imageHistory = await requestAuth(userToken, '/image/history');
   assert(imageHistory.data.total >= 1, 'image history did not contain generated task');
+  const historyImage = imageHistory.data.items.find((item) => item.id === imageTask.data.id);
+  assert(historyImage, 'generated image task was missing from history');
+  assert(historyImage.prompt === 'a tiny e2e test image', 'positive prompt was not preserved');
+  assert(historyImage.negativePrompt === 'blurry, watermark', 'negative prompt was not preserved');
+  assert(historyImage.images?.length === 4, 'image history did not include all four images');
 
   const auditLogs = await requestAuth(adminToken, '/admin/audit-logs?limit=100');
   const actions = auditLogs.data.items.map((item) => item.action);
@@ -470,8 +514,14 @@ async function main() {
       item.details?.reason === adjustmentReason,
   );
   assert(balanceAudit, 'wallet balance adjustment was not audited');
-  assert(Number(balanceAudit.details.before?.balance) === 10, 'wallet audit before balance mismatch');
-  assert(Number(balanceAudit.details.after?.balance) === 12.5, 'wallet audit after balance mismatch');
+  assert(
+    Number(balanceAudit.details.before?.balance) === 10,
+    'wallet audit before balance mismatch',
+  );
+  assert(
+    Number(balanceAudit.details.after?.balance) === 12.5,
+    'wallet audit after balance mismatch',
+  );
 
   console.log(
     'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, MinIO, history, audit',

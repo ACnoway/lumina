@@ -35,6 +35,7 @@ const UPSTREAM_IDEMPOTENCY_HEADER = 'Idempotency-Key';
 interface ImageTaskParameters {
   aspectRatio?: string;
   perImagePrice?: number;
+  imageCount?: number;
   retryCount?: number;
 }
 
@@ -95,9 +96,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     const platformModel = await this.settingsService.getPromptOptimizerModel();
 
     if (!platformModel || !platformModel.isActive || platformModel.type !== 'CHAT') {
-      throw new ServiceUnavailableException(
-        `提示词优化模型未配置或不可用`,
-      );
+      throw new ServiceUnavailableException(`提示词优化模型未配置或不可用`);
     }
 
     const optimizerModelName = platformModel.name;
@@ -111,17 +110,12 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     const estimatedInputTokens = 350;
     const estimatedOutputTokens = 200;
     const estimatedCost =
-      (estimatedInputTokens / 1000) * inputPrice +
-      (estimatedOutputTokens / 1000) * outputPrice;
+      (estimatedInputTokens / 1000) * inputPrice + (estimatedOutputTokens / 1000) * outputPrice;
 
     const idempotencyKey = `prompt-opt:${userId}:${Date.now()}`;
 
     // 预扣
-    await this.walletService.preDeduct(
-      userId,
-      Math.max(estimatedCost, 0.01),
-      idempotencyKey,
-    );
+    await this.walletService.preDeduct(userId, Math.max(estimatedCost, 0.01), idempotencyKey);
 
     // 路由上游
     let resolved;
@@ -134,10 +128,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // 创建适配器
     const providerConfig = (resolved.provider.config as Record<string, any>) || {};
-    const adapter = this.adapterFactory.createAdapter(
-      resolved.provider.apiFormat,
-      providerConfig,
-    );
+    const adapter = this.adapterFactory.createAdapter(resolved.provider.apiFormat, providerConfig);
 
     try {
       // 调用聊天模型
@@ -154,8 +145,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
       // 计算实际成本
       const actualCost =
-        (response.inputTokens / 1000) * inputPrice +
-        (response.outputTokens / 1000) * outputPrice;
+        (response.inputTokens / 1000) * inputPrice + (response.outputTokens / 1000) * outputPrice;
 
       // 结算
       await this.walletService.settle(
@@ -188,9 +178,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
       const msg = error instanceof Error ? error.message : '优化失败';
       this.logger.error(`提示词优化失败: ${msg}`);
-      throw error instanceof Error
-        ? error
-        : new ServiceUnavailableException('提示词优化失败');
+      throw error instanceof Error ? error : new ServiceUnavailableException('提示词优化失败');
     }
   }
 
@@ -207,12 +195,11 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       negativePrompt?: string;
       model: string;
       aspectRatio?: string;
+      imageCount?: number;
     },
   ) {
     // 验证模型存在且是生图类型
-    const platformModel = await this.providersService.getPlatformModelByName(
-      data.model,
-    );
+    const platformModel = await this.providersService.getPlatformModelByName(data.model);
 
     if (!platformModel) {
       throw new NotFoundException(`模型 "${data.model}" 不存在`);
@@ -223,6 +210,8 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     if (platformModel.type !== 'IMAGE') {
       throw new BadRequestException(`模型 "${data.model}" 不是生图模型`);
     }
+
+    const imageCount = this.normalizeImageCount(data.imageCount);
 
     // 获取定价
     const pricing = (platformModel.pricing as any) || {};
@@ -241,7 +230,13 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         parameters: {
           aspectRatio: data.aspectRatio || '1:1',
           perImagePrice,
+          imageCount,
           retryCount: 0,
+        },
+        images: {
+          create: Array.from({ length: imageCount }, (_, sequence) => ({
+            sequence,
+          })),
         },
       },
     });
@@ -256,7 +251,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     this.logger.log(`生图任务已入队: userId=${userId}, taskId=${task.id}, model=${data.model}`);
 
-    return task;
+    return this.serializeTask(task);
   }
 
   private async runWorker(): Promise<void> {
@@ -337,9 +332,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     }
 
     if (pendingTasks.length || stalledTasks.length) {
-      this.logger.log(
-        `恢复生图队列: pending=${pendingTasks.length}, stale=${stalledTasks.length}`,
-      );
+      this.logger.log(`恢复生图队列: pending=${pendingTasks.length}, stale=${stalledTasks.length}`);
     }
   }
 
@@ -381,34 +374,30 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
-  private getTaskParameters(
-    value: Prisma.JsonValue | null,
-  ): ImageTaskParameters {
+  private getTaskParameters(value: Prisma.JsonValue | null): ImageTaskParameters {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
     }
 
     const parameters = value as Record<string, unknown>;
     return {
-      aspectRatio:
-        typeof parameters.aspectRatio === 'string'
-          ? parameters.aspectRatio
-          : undefined,
+      aspectRatio: typeof parameters.aspectRatio === 'string' ? parameters.aspectRatio : undefined,
       perImagePrice:
-        typeof parameters.perImagePrice === 'number'
-          ? parameters.perImagePrice
-          : undefined,
-      retryCount:
-        typeof parameters.retryCount === 'number'
-          ? parameters.retryCount
-          : undefined,
+        typeof parameters.perImagePrice === 'number' ? parameters.perImagePrice : undefined,
+      retryCount: typeof parameters.retryCount === 'number' ? parameters.retryCount : undefined,
+      imageCount: typeof parameters.imageCount === 'number' ? parameters.imageCount : undefined,
     };
   }
 
-  private async getTaskPrice(
-    modelName: string,
-    parameters: ImageTaskParameters,
-  ): Promise<number> {
+  private normalizeImageCount(value: unknown): number {
+    const imageCount = value === undefined ? 1 : Number(value);
+    if (!Number.isInteger(imageCount) || imageCount < 1 || imageCount > 4) {
+      throw new BadRequestException('图片数量必须是1到4之间的整数');
+    }
+    return imageCount;
+  }
+
+  private async getTaskPrice(modelName: string, parameters: ImageTaskParameters): Promise<number> {
     if (
       typeof parameters.perImagePrice === 'number' &&
       Number.isFinite(parameters.perImagePrice) &&
@@ -418,8 +407,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     }
 
     // 兼容已在本次改造前创建、未保存价格快照的旧 PENDING 任务。
-    const platformModel =
-      await this.providersService.getPlatformModelByName(modelName);
+    const platformModel = await this.providersService.getPlatformModelByName(modelName);
     if (!platformModel || !platformModel.isActive || platformModel.type !== 'IMAGE') {
       throw new BadRequestException(`生图模型 "${modelName}" 当前不可用`);
     }
@@ -437,8 +425,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     if (!Number.isFinite(configuredPrice) || configuredPrice <= 0) {
       this.logger.warn(
-        `生图模型未配置有效 perImage: model=${modelName}, ` +
-          `使用最低收费 ${MIN_IMAGE_CHARGE} 元`,
+        `生图模型未配置有效 perImage: model=${modelName}, ` + `使用最低收费 ${MIN_IMAGE_CHARGE} 元`,
       );
       return MIN_IMAGE_CHARGE;
     }
@@ -482,15 +469,23 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     });
 
     if (result.count === 1) {
+      await this.prisma.imageGenerationImage.updateMany({
+        where: {
+          generationId: taskId,
+          status: { in: ['PROCESSING', 'FAILED'] },
+        },
+        data: {
+          status: 'PENDING',
+          errorMessage: null,
+        },
+      });
       try {
         await this.imageQueueService.enqueue(taskId);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`生图重试任务入队失败: taskId=${taskId}, err=${message}`);
       }
-      this.logger.warn(
-        `生图任务重试: taskId=${taskId}, retry=${retryCount}, err=${errorMessage}`,
-      );
+      this.logger.warn(`生图任务重试: taskId=${taskId}, retry=${retryCount}, err=${errorMessage}`);
     }
   }
 
@@ -507,44 +502,145 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     perImagePrice: number,
     taskParameters: ImageTaskParameters,
   ): Promise<void> {
-    const idempotencyKey = `image:${taskId}`;
     const chargeAmount = this.normalizeImagePrice(perImagePrice, modelName);
+    const imageCount = this.normalizeImageCount(taskParameters.imageCount);
+    const imageRecords = await this.ensureImageRecords(taskId, imageCount);
 
-    // 1. 预扣
-    try {
-      await this.walletService.preDeduct(userId, chargeAmount, idempotencyKey);
-    } catch (error) {
-      const msg = this.describeError(error, '预扣失败');
-      await this.retryOrFail(taskId, taskParameters, msg);
-      return;
+    const pendingImages = imageRecords.filter((image) => image.status !== 'SUCCESS');
+    for (const image of pendingImages) {
+      try {
+        await this.processSingleImage(
+          userId,
+          taskId,
+          image.id,
+          image.sequence,
+          prompt,
+          negativePrompt,
+          modelName,
+          aspectRatio,
+          chargeAmount,
+        );
+      } catch (error) {
+        const message = this.describeError(error);
+        await this.prisma.imageGenerationImage.update({
+          where: { id: image.id },
+          data: { status: 'FAILED', errorMessage: message },
+        });
+        this.logger.error(
+          `单张生图失败: taskId=${taskId}, sequence=${image.sequence}, err=${message}`,
+          this.getErrorStack(error),
+        );
+      }
     }
 
-    // 2. 路由上游
-    let resolved;
-    try {
-      resolved = await this.providersService.resolveUpstream(modelName);
-    } catch (error) {
-      const msg = this.describeError(error, '路由失败');
-      await this.walletService.refund(userId, idempotencyKey, '生图路由失败');
-      await this.retryOrFail(taskId, taskParameters, msg);
-      return;
-    }
+    const completedImages = await this.prisma.imageGenerationImage.findMany({
+      where: { generationId: taskId },
+      orderBy: { sequence: 'asc' },
+    });
+    const successfulImages = completedImages.filter((image) => image.status === 'SUCCESS');
+    const totalCost = successfulImages.reduce((sum, image) => sum + Number(image.cost || 0), 0);
+    const firstSuccessfulImage = successfulImages[0];
 
-    // 更新任务状态为处理中
     await this.prisma.imageGeneration.update({
       where: { id: taskId },
-      data: { status: 'PROCESSING', provider: resolved.provider.name },
+      data: {
+        status: successfulImages.length > 0 ? 'SUCCESS' : 'PROCESSING',
+        cost: totalCost,
+        ...(firstSuccessfulImage
+          ? {
+              imageUrl: firstSuccessfulImage.imageUrl,
+              imageKey: firstSuccessfulImage.imageKey,
+              width: firstSuccessfulImage.width,
+              height: firstSuccessfulImage.height,
+            }
+          : {}),
+        parameters: {
+          ...taskParameters,
+          imageCount,
+          completedImageCount: successfulImages.length,
+        },
+      },
     });
 
-    // 3. 调用上游生图 API
+    if (successfulImages.length === 0) {
+      const failedImage = completedImages.find((image) => image.status === 'FAILED');
+      await this.retryOrFail(
+        taskId,
+        taskParameters,
+        failedImage?.errorMessage || '所有图片均生成失败',
+      );
+      return;
+    }
+
+    this.logger.log(
+      `生图任务完成: taskId=${taskId}, success=${successfulImages.length}/${imageCount}, cost=${totalCost}`,
+    );
+  }
+
+  private async ensureImageRecords(taskId: string, imageCount: number) {
+    let records = await this.prisma.imageGenerationImage.findMany({
+      where: { generationId: taskId },
+      orderBy: { sequence: 'asc' },
+    });
+
+    if (records.length < imageCount) {
+      await this.prisma.imageGenerationImage.createMany({
+        data: Array.from({ length: imageCount }, (_, sequence) => ({
+          generationId: taskId,
+          sequence,
+        })).filter(({ sequence }) => !records.some((record) => record.sequence === sequence)),
+      });
+      records = await this.prisma.imageGenerationImage.findMany({
+        where: { generationId: taskId },
+        orderBy: { sequence: 'asc' },
+      });
+    }
+
+    return records;
+  }
+
+  private async processSingleImage(
+    userId: string,
+    taskId: string,
+    imageId: string,
+    sequence: number,
+    prompt: string,
+    negativePrompt: string | undefined,
+    modelName: string,
+    aspectRatio: string | undefined,
+    chargeAmount: number,
+  ): Promise<void> {
+    const claim = await this.prisma.imageGenerationImage.updateMany({
+      where: {
+        id: imageId,
+        generationId: taskId,
+        status: { in: ['PENDING', 'PROCESSING', 'FAILED'] },
+      },
+      data: { status: 'PROCESSING', errorMessage: null },
+    });
+    if (claim.count !== 1) return;
+
+    const idempotencyKey = `image:${taskId}:${sequence}`;
+    let reserved = false;
     let settled = false;
     let upstreamSucceeded = false;
+    let resolved: any;
     let processingStage = '上游生图 API';
+
     try {
+      processingStage = '钱包预扣';
+      await this.walletService.preDeduct(userId, chargeAmount, idempotencyKey);
+      reserved = true;
+
+      processingStage = '上游路由';
+      resolved = await this.providersService.resolveUpstream(modelName);
+      await this.prisma.imageGeneration.update({
+        where: { id: taskId },
+        data: { status: 'PROCESSING', provider: resolved.provider.name },
+      });
+
       const providerConfig = (resolved.provider.config as Record<string, any>) || {};
       const size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
-
-      // 根据 apiFormat 调用不同的生图接口
       let imageBuffer: Buffer;
 
       switch (resolved.provider.apiFormat) {
@@ -559,7 +655,6 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           ));
           upstreamSucceeded = true;
           break;
-
         case 'stability_image':
           ({ imageBuffer } = await this.callStabilityImage(
             providerConfig,
@@ -571,37 +666,29 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           ));
           upstreamSucceeded = true;
           break;
-
         default:
-          throw new BadRequestException(
-            `apiFormat "${resolved.provider.apiFormat}" 不支持生图`,
-          );
+          throw new BadRequestException(`apiFormat "${resolved.provider.apiFormat}" 不支持生图`);
       }
 
-      // 4. 上传到 MinIO
       processingStage = 'MinIO 上传';
-      const objectName = `images/${taskId}.png`;
+      const objectName = `images/${taskId}/${sequence}.png`;
       await this.minioService.upload(objectName, imageBuffer, imageBuffer.length);
 
-      // 获取预签名 URL
       processingStage = 'MinIO 生成预签名 URL';
       const presignedUrl = await this.minioService.getPresignedUrl(objectName);
 
-      // 5. 结算
       processingStage = '钱包结算';
-      await this.walletService.settle(
-        userId,
-        chargeAmount,
-        idempotencyKey,
-        `生图: ${modelName}`,
-        { taskId, model: modelName },
-      );
+      await this.walletService.settle(userId, chargeAmount, idempotencyKey, `生图: ${modelName}`, {
+        taskId,
+        imageId,
+        sequence,
+        model: modelName,
+      });
       settled = true;
 
-      // 6. 更新任务状态为成功
-      processingStage = '保存任务结果';
-      await this.prisma.imageGeneration.update({
-        where: { id: taskId },
+      processingStage = '保存图片结果';
+      await this.prisma.imageGenerationImage.update({
+        where: { id: imageId },
         data: {
           status: 'SUCCESS',
           imageUrl: presignedUrl,
@@ -609,49 +696,25 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           cost: chargeAmount,
           width: size.width,
           height: size.height,
+          errorMessage: null,
         },
       });
 
-      // 记录上游成功
-      processingStage = '记录上游结果';
-      await resolved.recordResult(true);
-
-      this.logger.log(`生图任务完成: taskId=${taskId}, cost=${chargeAmount}`);
+      await resolved.recordResult(true).catch((recordError: unknown) => {
+        this.logger.warn(`记录上游成功结果异常: ${this.describeError(recordError)}`);
+      });
     } catch (error) {
       const details = this.describeError(error);
-      const msg = `阶段=${processingStage}; ${details}`;
-      this.logger.error(
-        `生图任务处理失败: taskId=${taskId}, ${msg}`,
-        this.getErrorStack(error),
-      );
-
-      if (!settled) {
-        // 退回预扣后才允许重试；相同 idempotency key 保证重试不会重复扣费。
-        await this.walletService.refund(userId, idempotencyKey, `生图失败: ${msg}`);
-        if (!upstreamSucceeded) {
-          await resolved.recordResult(false).catch((recordError) => {
-            const recordMessage = this.describeError(recordError);
-            this.logger.warn(
-              `记录上游失败结果异常: ${recordMessage}`,
-            );
-          });
-        }
-        await this.retryOrFail(taskId, taskParameters, msg);
-        return;
+      const message = `阶段=${processingStage}; ${details}`;
+      if (reserved && !settled) {
+        await this.walletService.refund(userId, idempotencyKey, `生图失败: ${message}`);
       }
-
-      // 结算完成后绝不重新入队，避免外部上游调用和账本语义被重复执行。
-      const latestTask = await this.prisma.imageGeneration.findUnique({
-        where: { id: taskId },
-        select: { status: true },
-      });
-      if (latestTask?.status !== 'SUCCESS') {
-        await this.failTask(taskId, `已结算但任务状态保存失败: ${msg}`);
+      if (resolved && !upstreamSucceeded) {
+        await resolved.recordResult(false).catch((recordError: unknown) => {
+          this.logger.warn(`记录上游失败结果异常: ${this.describeError(recordError)}`);
+        });
       }
-      this.logger.error(
-        `生图任务结算后处理异常: taskId=${taskId}, ${msg}`,
-        this.getErrorStack(error),
-      );
+      throw new Error(message);
     }
   }
 
@@ -659,10 +722,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     if (error instanceof Error) {
       const name = error.name || 'Error';
       const message = error.message?.trim() || '未提供错误消息';
-      const code =
-        'code' in error && typeof error.code === 'string'
-          ? `, code=${error.code}`
-          : '';
+      const code = 'code' in error && typeof error.code === 'string' ? `, code=${error.code}` : '';
       return `${name}: ${message}${code}`;
     }
 
@@ -815,6 +875,11 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
   async getTask(userId: string, taskId: string) {
     const task = await this.prisma.imageGeneration.findUnique({
       where: { id: taskId },
+      include: {
+        images: {
+          orderBy: { sequence: 'asc' },
+        },
+      },
     });
 
     if (!task) {
@@ -827,7 +892,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // 如果图片 URL 是预签名的，可能需要刷新（7天过期）
     // 这里简单返回，前端可以缓存
-    return task;
+    return this.serializeTask(task);
   }
 
   /**
@@ -842,10 +907,50 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: {
+          images: {
+            orderBy: { sequence: 'asc' },
+          },
+        },
       }),
       this.prisma.imageGeneration.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    return { items: items.map((item) => this.serializeTask(item)), total, page, limit };
+  }
+
+  private serializeTask(task: any) {
+    const storedImages = Array.isArray(task.images) ? task.images : [];
+    const images = storedImages.length
+      ? storedImages.map((image: any) => ({
+          id: image.id,
+          sequence: image.sequence,
+          status: image.status,
+          width: image.width,
+          height: image.height,
+          imageUrl: image.imageUrl,
+          cost: image.cost,
+          errorMessage: image.errorMessage,
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt,
+        }))
+      : task.imageUrl
+        ? [
+            {
+              id: `${task.id}:legacy:0`,
+              sequence: 0,
+              status: task.status,
+              width: task.width,
+              height: task.height,
+              imageUrl: task.imageUrl,
+              cost: task.cost,
+              errorMessage: task.errorMessage,
+              createdAt: task.createdAt,
+              updatedAt: task.updatedAt,
+            },
+          ]
+        : [];
+
+    return { ...task, images };
   }
 }
