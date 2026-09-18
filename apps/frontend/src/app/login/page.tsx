@@ -79,7 +79,7 @@ export default function LoginPage() {
         password,
       });
       saveAuth(response);
-      router.push('/chat');
+      router.replace('/');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '登录失败');
     } finally {
@@ -104,7 +104,7 @@ export default function LoginPage() {
         code,
       });
       saveAuth(response);
-      router.push('/chat');
+      router.replace('/');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '登录失败');
     } finally {

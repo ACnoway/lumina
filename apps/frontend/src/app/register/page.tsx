@@ -88,7 +88,7 @@ export default function RegisterPage() {
         confirmPassword,
       });
       saveAuth(response);
-      router.push('/chat');
+      router.replace('/');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '注册失败');
     } finally {
