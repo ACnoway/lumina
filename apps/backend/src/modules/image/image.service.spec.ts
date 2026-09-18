@@ -50,6 +50,7 @@ function createService() {
       generationId: 'task-1',
       sequence: 0,
       status: 'PENDING',
+      retryCount: 0,
       width: null,
       height: null,
       imageUrl: null,
@@ -67,6 +68,7 @@ function createService() {
           generationId: item.generationId,
           sequence: item.sequence,
           status: 'PENDING',
+          retryCount: 0,
           width: null,
           height: null,
           imageUrl: null,
@@ -231,13 +233,9 @@ describe('ImageService durable queue integration', () => {
 
     await service.processQueuedTask('task-1');
 
-    expect(prisma.imageGeneration.updateMany).toHaveBeenNthCalledWith(
-      2,
+    expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'PENDING',
-          parameters: expect.objectContaining({ retryCount: 1 }),
-        }),
+        data: expect.objectContaining({ status: 'PENDING', cost: 0 }),
       }),
     );
     expect(queue.enqueue).toHaveBeenCalledWith('task-1');
@@ -340,12 +338,13 @@ describe('ImageService durable queue integration', () => {
   });
 
   it('settles each successful image separately and only charges completed images', async () => {
-    const { service, prisma, wallet, providers, imageRecords } = createService();
+    const { service, prisma, wallet, providers, imageRecords, queue } = createService();
     imageRecords.push({
       id: 'image-2',
       generationId: 'task-1',
       sequence: 1,
       status: 'PENDING',
+      retryCount: 0,
       width: null,
       height: null,
       imageUrl: null,
@@ -392,7 +391,60 @@ describe('ImageService durable queue integration', () => {
     );
     expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'SUCCESS', cost: 0.5 }),
+        data: expect.objectContaining({ status: 'PENDING', cost: 0.5 }),
+      }),
+    );
+    expect(imageRecords.find((image) => image.id === 'image-2')).toMatchObject({
+      status: 'PENDING',
+      retryCount: 1,
+    });
+    expect(queue.enqueue).toHaveBeenCalledWith('task-1');
+  });
+
+  it('retries each failed image independently up to three times and preserves upstream 400 details', async () => {
+    const { service, prisma, wallet, providers, queue, imageRecords } = createService();
+    const recordResult = jest.fn().mockResolvedValue(undefined);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult,
+    });
+    const upstreamError = Object.assign(new Error('Request failed with status code 400'), {
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          message:
+            '非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。如果你认为此判断有误，请重试或修改提示语。',
+        },
+      },
+    });
+    (service as any).callOpenAIImage = jest.fn().mockRejectedValue(upstreamError);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await (service as any).processImageTask(
+        'user-1',
+        'task-1',
+        'a blue house',
+        undefined,
+        'image-model',
+        '1:1',
+        0.5,
+        { retryCount: 0, imageCount: 1 },
+      );
+    }
+
+    expect((service as any).callOpenAIImage).toHaveBeenCalledTimes(4);
+    expect(wallet.preDeduct).toHaveBeenCalledTimes(4);
+    expect(wallet.refund).toHaveBeenCalledTimes(4);
+    expect(queue.enqueue).toHaveBeenCalledTimes(3);
+    expect(imageRecords[0]).toMatchObject({ status: 'FAILED', retryCount: 3 });
+    expect(imageRecords[0].errorMessage).toContain(
+      'status_code=400, 非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。如果你认为此判断有误，请重试或修改提示语。',
+    );
+    expect(prisma.imageGeneration.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'FAILED', cost: 0 }),
       }),
     );
   });
@@ -428,7 +480,7 @@ describe('ImageService durable queue integration', () => {
       '生图失败: 阶段=钱包结算; Error: 结算失败',
     );
     expect(recordResult).not.toHaveBeenCalledWith(false);
-    expect(prisma.imageGeneration.updateMany).toHaveBeenLastCalledWith(
+    expect(prisma.imageGeneration.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'PENDING' }),
       }),
@@ -436,7 +488,7 @@ describe('ImageService durable queue integration', () => {
   });
 
   it('keeps the processing stage when MinIO returns an empty error message', async () => {
-    const { service, prisma, wallet, providers, minio } = createService();
+    const { service, prisma, wallet, providers, minio, queue, imageRecords } = createService();
     const recordResult = jest.fn().mockResolvedValue(undefined);
     providers.resolveUpstream.mockResolvedValue({
       provider: { name: 'provider-1', config: {}, apiFormat: 'openai_image' },
@@ -462,10 +514,19 @@ describe('ImageService durable queue integration', () => {
       { retryCount: 0 },
     );
 
-    const retryData = prisma.imageGeneration.updateMany.mock.calls.at(-1)?.[0].data;
-    expect(retryData.errorMessage).toContain(
+    expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'PENDING',
+          errorMessage: '部分图片生成失败，正在重试',
+        }),
+      }),
+    );
+    expect(imageRecords[0]).toMatchObject({ status: 'PENDING', retryCount: 1 });
+    expect(imageRecords[0].errorMessage).toContain(
       '阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
     );
+    expect(queue.enqueue).toHaveBeenCalledWith('task-1');
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',
       'image:task-1:0',

@@ -29,6 +29,7 @@ const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
 const QUEUE_BLOCK_TIMEOUT_SECONDS = 1;
 const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
 const MAX_IMAGE_ATTEMPTS = 3;
+const MAX_IMAGE_RETRIES = 3;
 const MIN_IMAGE_CHARGE = 0.01;
 const UPSTREAM_IDEMPOTENCY_HEADER = 'Idempotency-Key';
 
@@ -473,6 +474,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         where: {
           generationId: taskId,
           status: { in: ['PROCESSING', 'FAILED'] },
+          retryCount: { lt: MAX_IMAGE_RETRIES },
         },
         data: {
           status: 'PENDING',
@@ -506,7 +508,9 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     const imageCount = this.normalizeImageCount(taskParameters.imageCount);
     const imageRecords = await this.ensureImageRecords(taskId, imageCount);
 
-    const pendingImages = imageRecords.filter((image) => image.status !== 'SUCCESS');
+    const pendingImages = imageRecords.filter(
+      (image) => image.status === 'PENDING' && image.retryCount <= MAX_IMAGE_RETRIES,
+    );
     for (const image of pendingImages) {
       try {
         await this.processSingleImage(
@@ -522,12 +526,20 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         );
       } catch (error) {
         const message = this.describeError(error);
+        const exhausted = image.retryCount >= MAX_IMAGE_RETRIES;
+        const retryCount = Math.min(image.retryCount + 1, MAX_IMAGE_RETRIES);
         await this.prisma.imageGenerationImage.update({
           where: { id: image.id },
-          data: { status: 'FAILED', errorMessage: message },
+          data: {
+            status: exhausted ? 'FAILED' : 'PENDING',
+            retryCount,
+            errorMessage: exhausted
+              ? message
+              : `图片生成失败，将重试（${retryCount}/${MAX_IMAGE_RETRIES}）：${message}`,
+          },
         });
         this.logger.error(
-          `单张生图失败: taskId=${taskId}, sequence=${image.sequence}, err=${message}`,
+          `单张生图失败: taskId=${taskId}, sequence=${image.sequence}, retry=${retryCount}/${MAX_IMAGE_RETRIES}, err=${message}`,
           this.getErrorStack(error),
         );
       }
@@ -538,14 +550,29 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       orderBy: { sequence: 'asc' },
     });
     const successfulImages = completedImages.filter((image) => image.status === 'SUCCESS');
+    const retryableImages = completedImages.filter(
+      (image) => image.status === 'PENDING' && image.retryCount <= MAX_IMAGE_RETRIES,
+    );
     const totalCost = successfulImages.reduce((sum, image) => sum + Number(image.cost || 0), 0);
     const firstSuccessfulImage = successfulImages[0];
+    const taskStatus = retryableImages.length
+      ? 'PENDING'
+      : successfulImages.length > 0
+        ? 'SUCCESS'
+        : 'FAILED';
+    const taskErrorMessage = retryableImages.length
+      ? '部分图片生成失败，正在重试'
+      : successfulImages.length > 0
+        ? null
+        : completedImages.find((image) => image.status === 'FAILED')?.errorMessage ||
+          '所有图片均生成失败';
 
     await this.prisma.imageGeneration.update({
       where: { id: taskId },
       data: {
-        status: successfulImages.length > 0 ? 'SUCCESS' : 'PROCESSING',
+        status: taskStatus,
         cost: totalCost,
+        errorMessage: taskErrorMessage,
         ...(firstSuccessfulImage
           ? {
               imageUrl: firstSuccessfulImage.imageUrl,
@@ -562,19 +589,23 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       },
     });
 
-    if (successfulImages.length === 0) {
-      const failedImage = completedImages.find((image) => image.status === 'FAILED');
-      await this.retryOrFail(
-        taskId,
-        taskParameters,
-        failedImage?.errorMessage || '所有图片均生成失败',
+    if (retryableImages.length > 0) {
+      await this.imageQueueService.enqueue(taskId);
+      this.logger.warn(
+        `生图任务等待单张重试: taskId=${taskId}, retryable=${retryableImages.length}, success=${successfulImages.length}/${imageCount}`,
       );
       return;
     }
 
-    this.logger.log(
-      `生图任务完成: taskId=${taskId}, success=${successfulImages.length}/${imageCount}, cost=${totalCost}`,
-    );
+    if (successfulImages.length > 0) {
+      this.logger.log(
+        `生图任务完成: taskId=${taskId}, success=${successfulImages.length}/${imageCount}, cost=${totalCost}`,
+      );
+    } else {
+      this.logger.error(
+        `生图任务失败: taskId=${taskId}, attempts=${MAX_IMAGE_RETRIES + 1}`,
+      );
+    }
   }
 
   private async ensureImageRecords(taskId: string, imageCount: number) {
@@ -719,6 +750,47 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private describeError(error: unknown, fallback = '未知错误'): string {
+    if (axios.isAxiosError(error)) {
+      const rawData = error.response?.data;
+      const rawText = Buffer.isBuffer(rawData)
+        ? rawData.toString('utf8')
+        : typeof rawData === 'string'
+          ? rawData
+          : undefined;
+      let responseData: unknown = rawData;
+      if (rawText) {
+        try {
+          responseData = JSON.parse(rawText);
+        } catch {
+          responseData = rawText;
+        }
+      }
+
+      const data =
+        responseData && typeof responseData === 'object'
+          ? (responseData as Record<string, unknown>)
+          : undefined;
+      const nestedError = data?.error;
+      const nestedErrorData =
+        nestedError && typeof nestedError === 'object'
+          ? (nestedError as Record<string, unknown>)
+          : undefined;
+      const responseMessage =
+        (typeof data?.message === 'string' && data.message) ||
+        (typeof data?.detail === 'string' && data.detail) ||
+        (typeof nestedError === 'string' && nestedError) ||
+        (typeof nestedErrorData?.message === 'string' && nestedErrorData.message) ||
+        (typeof responseData === 'string' && responseData) ||
+        error.message;
+      const responseStatus =
+        error.response?.status ||
+        (typeof data?.status_code === 'number' ? data.status_code : undefined);
+
+      if (responseStatus) {
+        return `status_code=${responseStatus}, ${responseMessage}`;
+      }
+    }
+
     if (error instanceof Error) {
       const name = error.name || 'Error';
       const message = error.message?.trim() || '未提供错误消息';

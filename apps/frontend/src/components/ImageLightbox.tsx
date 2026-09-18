@@ -65,7 +65,7 @@ export function ImageDownloadButton({
         className={`inline-flex items-center gap-1.5 rounded-lg border border-white/70 bg-black/65 px-3 py-2 text-xs font-medium text-white shadow-sm backdrop-blur transition hover:bg-black/80 disabled:cursor-wait disabled:opacity-70 ${className}`}
       >
         <span aria-hidden="true">⇩</span>
-        {downloading ? '保存中…' : compact ? '保存' : '下载/保存'}
+        {downloading ? '保存中…' : compact ? '保存' : '下载'}
       </button>
       {downloadError && (
         <span className="rounded bg-black/70 px-2 py-1 text-[10px] text-white">

@@ -185,6 +185,7 @@ model ImageGenerationImage {
 
   sequence     Int
   status       ImageStatus    @default(PENDING)
+  retryCount   Int            @default(0)
   width        Int?
   height       Int?
   imageUrl     String?

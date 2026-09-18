@@ -50,8 +50,6 @@ function normalizeTask(task: ImageTaskResponse | ImageTaskDto): ImageTask {
 }
 
 function getTaskImages(task: ImageTask): TaskImage[] {
-  const completedImages = task.images.filter((image) => Boolean(image.imageUrl));
-  if (completedImages.length > 0) return completedImages;
   if (task.images.length > 0) return task.images;
   if (!task.imageUrl) return [];
 
@@ -569,8 +567,14 @@ export default function ImagePage() {
             )}
           </div>
 
-          {task?.status === 'SUCCESS' && getTaskImages(task).length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+          {task && getTaskImages(task).length > 0 ? (
+            <div className="space-y-3">
+              {task.status !== 'SUCCESS' && (
+                <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                  {task.status === 'FAILED' ? '本次生成未完成' : '部分图片正在重试，请稍候…'}
+                </p>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
               {getTaskImages(task).map((image) => (
                 <div key={image.id} className="group relative overflow-hidden rounded-xl bg-gray-100">
                   {image.imageUrl ? (
@@ -600,12 +604,24 @@ export default function ImagePage() {
                       </div>
                     </>
                   ) : (
-                    <div className="flex min-h-[180px] items-center justify-center text-sm text-gray-400">
-                      {statusLabel(image.status)}
+                    <div
+                      className={`flex min-h-[180px] flex-col items-center justify-center px-4 text-center ${
+                        image.status === 'FAILED' ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-500'
+                      }`}
+                    >
+                      <p className="font-medium">
+                        {image.status === 'FAILED' ? '这张图片生成失败' : statusLabel(image.status)}
+                      </p>
+                      {image.errorMessage && (
+                        <p className="mt-2 max-w-full whitespace-pre-wrap break-words text-xs leading-5">
+                          {image.errorMessage}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
               ))}
+              </div>
             </div>
           ) : task && (task.status === 'PENDING' || task.status === 'PROCESSING') ? (
             <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl bg-gray-50 px-6 text-center">
