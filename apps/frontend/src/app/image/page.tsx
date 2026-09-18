@@ -6,6 +6,10 @@ import type { ImageStatus, ImageTaskDto, PlatformModelDto } from '@lumina/shared
 import { ApiError } from '@/lib/api-client';
 import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
 import AppHeader from '@/components/AppHeader';
+import ImageLightbox, {
+  ImageDownloadButton,
+  type PreviewImage,
+} from '@/components/ImageLightbox';
 
 const MODEL_STORAGE_KEY = 'lumina_image_model';
 const ACTIVE_TASK_STORAGE_KEY = 'lumina_image_active_task';
@@ -22,6 +26,16 @@ const ASPECT_RATIOS = [
 type AspectRatio = (typeof ASPECT_RATIOS)[number]['value'];
 type ImageTask = Omit<ImageTaskDto, 'cost'> & { cost: number | null };
 type TaskImage = ImageTask['images'][number];
+
+function toPreviewImage(task: ImageTask, image: TaskImage): PreviewImage | null {
+  if (!image.imageUrl) return null;
+
+  return {
+    src: image.imageUrl,
+    alt: `${task.prompt} - 第 ${image.sequence + 1} 张`,
+    filename: `lumina-${task.id}-${image.sequence + 1}.png`,
+  };
+}
 
 function normalizeTask(task: ImageTaskResponse | ImageTaskDto): ImageTask {
   return {
@@ -168,6 +182,7 @@ export default function ImagePage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState('');
+  const [lightboxImage, setLightboxImage] = useState<PreviewImage | null>(null);
   const pollRunRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -351,7 +366,8 @@ export default function ImagePage() {
   const hasModels = models.length > 0;
 
   return (
-    <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
+    <>
+      <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
       <AppHeader title="AI 生图" active="image" />
 
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
@@ -546,14 +562,38 @@ export default function ImagePage() {
           {task?.status === 'SUCCESS' && getTaskImages(task).length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2">
               {getTaskImages(task).map((image) => (
-                <div key={image.id} className="overflow-hidden rounded-xl bg-gray-100">
-                  {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={image.imageUrl || undefined}
-                    alt={`${task.prompt} - ${image.sequence + 1}`}
-                    className="h-auto w-full object-contain"
-                  />
+                <div key={image.id} className="group relative overflow-hidden rounded-xl bg-gray-100">
+                  {image.imageUrl ? (
+                    <>
+                      <button
+                        type="button"
+                        className="block w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+                        onClick={() => {
+                          const preview = toPreviewImage(task, image);
+                          if (preview) setLightboxImage(preview);
+                        }}
+                        aria-label={`查看第 ${image.sequence + 1} 张图片大图`}
+                      >
+                        {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={image.imageUrl}
+                          alt={`${task.prompt} - ${image.sequence + 1}`}
+                          className="h-auto w-full object-contain transition duration-200 group-hover:scale-[1.01]"
+                        />
+                      </button>
+                      <div className="absolute right-2 top-2">
+                        <ImageDownloadButton
+                          image={toPreviewImage(task, image)!}
+                          compact
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex min-h-[180px] items-center justify-center text-sm text-gray-400">
+                      {statusLabel(image.status)}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -689,6 +729,8 @@ export default function ImagePage() {
           )}
         </section>
       </div>
-    </main>
+      </main>
+      <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
+    </>
   );
 }
