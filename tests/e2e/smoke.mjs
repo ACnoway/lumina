@@ -323,6 +323,21 @@ async function main() {
     },
   });
   const providerId = provider.data.id;
+  const imageProvider = await requestAuth(adminToken, '/providers', {
+    method: 'POST',
+    body: {
+      name: `mock-image-provider-${Date.now()}`,
+      apiFormat: 'openai_compatible',
+      supportsStreaming: false,
+      config: {
+        apiKey: 'e2e-image-key',
+        baseUrl: 'http://mock-provider:8080/v1',
+        timeout: 5000,
+        rateLimit: 10,
+      },
+    },
+  });
+  const imageProviderId = imageProvider.data.id;
 
   const chatModel = await requestAuth(adminToken, '/providers/models', {
     method: 'POST',
@@ -356,7 +371,7 @@ async function main() {
   await requestAuth(adminToken, `/providers/models/${imageModel.data.id}/upstreams`, {
     method: 'POST',
     body: {
-      providerId,
+      providerId: imageProviderId,
       upstreamModelId: 'mock-image-model',
       priority: 1,
       weight: 1,
