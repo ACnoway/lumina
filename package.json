@@ -10,6 +10,7 @@
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
     "test": "turbo run test",
+    "test:auth-storage": "node tests/auth-storage.mjs",
     "clean": "turbo run clean && rm -rf node_modules",
     "backend:dev": "pnpm --filter backend dev",
     "frontend:dev": "pnpm --filter frontend dev",
