@@ -83,13 +83,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         ) : (
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
         )}
-        {/* token 和成本信息 */}
-        {!isPending && !isError && message.tokens && (
-          <div className="mt-1.5 border-t border-gray-200 pt-1 text-xs text-gray-400">
-            {message.tokens} tokens
-            {message.cost != null && ` · ¥${message.cost.toFixed(4)}`}
-          </div>
-        )}
+        {/* token 和本次实际费用 */}
+        {!isPending &&
+          !isError &&
+          (message.tokens !== null || message.cost !== null) && (
+            <div className="mt-1.5 border-t border-gray-200 pt-1 text-xs text-gray-400">
+              {message.tokens !== null && `${message.tokens} tokens`}
+              {message.tokens !== null && message.cost != null && ' · '}
+              {message.cost != null && `实际费用 ¥${message.cost.toFixed(4)}`}
+            </div>
+          )}
       </div>
     </div>
   );

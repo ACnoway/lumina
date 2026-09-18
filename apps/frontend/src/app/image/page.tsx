@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ImageStatus, ImageTaskDto, PlatformModelDto } from '@lumina/shared';
 import { ApiError } from '@/lib/api-client';
 import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
+import { formatImageModelPricing } from '@/lib/model-pricing';
 import AppHeader from '@/components/AppHeader';
 import ImageLightbox, {
   ImageDownloadButton,
@@ -364,6 +365,9 @@ export default function ImagePage() {
 
   const busy = submitting || optimizing || polling;
   const hasModels = models.length > 0;
+  const selectedModelInfo = models.find((model) => model.name === selectedModel);
+  const selectedImagePricing =
+    selectedModelInfo?.type === 'IMAGE' ? selectedModelInfo.pricing : null;
 
   return (
     <>
@@ -458,6 +462,7 @@ export default function ImagePage() {
                   value={selectedModel}
                   onChange={(event) => handleModelChange(event.target.value)}
                   disabled={busy || loadingModels || !hasModels}
+                  aria-describedby={selectedImagePricing ? 'image-model-pricing' : undefined}
                   className="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
                 >
                   {loadingModels ? (
@@ -472,6 +477,11 @@ export default function ImagePage() {
                     <option value="">暂无可用模型</option>
                   )}
                 </select>
+                {selectedImagePricing && (
+                  <p id="image-model-pricing" className="mt-1.5 text-xs leading-4 text-gray-400">
+                    {formatImageModelPricing(selectedImagePricing, imageCount)}
+                  </p>
+                )}
               </div>
 
               <div>

@@ -5,6 +5,7 @@
 import type {
   ChatSessionDto,
   ChatMessageDto,
+  ChatModelPricing,
   MessageRole,
 } from '@lumina/shared';
 
@@ -16,6 +17,7 @@ export interface ChatModel {
   id: string;
   name: string;
   displayName: string;
+  pricing: ChatModelPricing;
 }
 
 export interface BalanceInfo {
