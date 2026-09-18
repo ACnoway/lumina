@@ -90,7 +90,7 @@ const normal = loadAuth({
 });
 normal.auth.saveAuth(response);
 assert.equal(normal.auth.getToken(), response.accessToken);
-assert.deepEqual(normal.auth.getStoredUser(), response.user);
+assert.equal(JSON.stringify(normal.auth.getStoredUser()), JSON.stringify(response.user));
 assert.deepEqual(storageCalls.slice(0, 2), ['set:lumina_token', 'set:lumina_user']);
 assert.match(normal.document.cookie, /^lumina_token=/);
 
