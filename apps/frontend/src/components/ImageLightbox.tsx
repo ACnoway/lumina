@@ -28,11 +28,9 @@ async function downloadImage(src: string, filename: string): Promise<void> {
 export function ImageDownloadButton({
   image,
   className = '',
-  compact = false,
 }: {
   image: PreviewImage;
   className?: string;
-  compact?: boolean;
 }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);

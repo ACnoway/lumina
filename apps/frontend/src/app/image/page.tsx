@@ -599,7 +599,6 @@ export default function ImagePage() {
                       <div className="absolute right-2 top-2">
                         <ImageDownloadButton
                           image={toPreviewImage(task, image)!}
-                          compact
                         />
                       </div>
                     </>

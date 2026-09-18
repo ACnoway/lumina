@@ -460,7 +460,6 @@ export default function HistoryPage() {
                           <div className="absolute right-2 top-2">
                             <ImageDownloadButton
                               image={getPreviewImage(task)!}
-                              compact
                             />
                           </div>
                         )}
