@@ -97,13 +97,17 @@ export const chatApi = {
       signal?: AbortSignal;
     },
   ): AsyncGenerator<SSEEvent> {
-    const res = await apiClient.stream('/chat/messages', {
-      sessionId,
-      content,
-      model,
-      temperature: options?.temperature,
-      maxTokens: options?.maxTokens,
-    });
+    const res = await apiClient.stream(
+      '/chat/messages',
+      {
+        sessionId,
+        content,
+        model,
+        temperature: options?.temperature,
+        maxTokens: options?.maxTokens,
+      },
+      { signal: options?.signal },
+    );
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));

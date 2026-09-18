@@ -40,6 +40,12 @@ function ChatPageContent() {
   // AbortController 用于取消流式请求
   const abortRef = useRef<AbortController | null>(null);
 
+  // 防止旧的会话/消息请求在新状态上落地
+  const sessionListRequestRef = useRef(0);
+  const messageListRequestRef = useRef(0);
+  const skipNextSessionLoadRef = useRef<string | null>(null);
+  const interactionVersionRef = useRef(0);
+
   // 初始化：加载会话列表、模型列表、余额
   useEffect(() => {
     loadSessions();
@@ -65,8 +71,16 @@ function ChatPageContent() {
   // 切换会话时加载历史消息
   useEffect(() => {
     if (currentSessionId) {
+      if (skipNextSessionLoadRef.current === currentSessionId) {
+        skipNextSessionLoadRef.current = null;
+        messageListRequestRef.current += 1;
+        setLoadingMessages(false);
+        return;
+      }
       loadMessages(currentSessionId);
     } else {
+      messageListRequestRef.current += 1;
+      setLoadingMessages(false);
       setMessages([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,10 +94,13 @@ function ChatPageContent() {
   }, []);
 
   async function loadSessions() {
+    const requestId = ++sessionListRequestRef.current;
     try {
       const res = await chatApi.getSessions(1, 50);
+      if (requestId !== sessionListRequestRef.current) return;
       setSessions(res.sessions);
-    } catch (err) {
+    } catch {
+      if (requestId !== sessionListRequestRef.current) return;
       setError("加载会话列表失败");
     }
   }
@@ -114,15 +131,20 @@ function ChatPageContent() {
   }
 
   async function loadMessages(sessionId: string) {
+    const requestId = ++messageListRequestRef.current;
     setLoadingMessages(true);
     setError("");
     try {
       const res = await chatApi.getMessages(sessionId, 1, 50);
+      if (requestId !== messageListRequestRef.current) return;
       setMessages(res.messages);
     } catch {
+      if (requestId !== messageListRequestRef.current) return;
       setError("加载历史消息失败");
     } finally {
-      setLoadingMessages(false);
+      if (requestId === messageListRequestRef.current) {
+        setLoadingMessages(false);
+      }
     }
   }
 
@@ -130,14 +152,20 @@ function ChatPageContent() {
   async function handleNewSession() {
     // 中止当前流式请求
     abortRef.current?.abort();
+    interactionVersionRef.current += 1;
+    messageListRequestRef.current += 1;
+    skipNextSessionLoadRef.current = null;
     setCurrentSessionId(null);
     setMessages([]);
+    setLoadingMessages(false);
+    setError("");
   }
 
   // 切换会话
   function handleSelectSession(sessionId: string) {
     if (sessionId === currentSessionId) return;
     abortRef.current?.abort();
+    interactionVersionRef.current += 1;
     setCurrentSessionId(sessionId);
   }
 
@@ -145,10 +173,14 @@ function ChatPageContent() {
   async function handleDeleteSession(sessionId: string) {
     try {
       await chatApi.deleteSession(sessionId);
+      sessionListRequestRef.current += 1;
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (sessionId === currentSessionId) {
+        interactionVersionRef.current += 1;
+        messageListRequestRef.current += 1;
         setCurrentSessionId(null);
         setMessages([]);
+        setLoadingMessages(false);
       }
     } catch {
       setError("删除会话失败");
@@ -166,6 +198,8 @@ function ChatPageContent() {
     async (content: string) => {
       if (!content.trim() || sending) return;
 
+      const interactionVersion = interactionVersionRef.current;
+
       if (!selectedModel) {
         setError("请先选择模型");
         return;
@@ -179,7 +213,15 @@ function ChatPageContent() {
       if (!sessionId) {
         try {
           const session = await chatApi.createSession();
+          if (interactionVersion !== interactionVersionRef.current) {
+            setSending(false);
+            return;
+          }
           sessionId = session.id;
+          // 懒创建的新会话暂时没有历史消息，跳过这一次空历史加载，
+          // 避免覆盖下面即将写入的乐观消息。
+          skipNextSessionLoadRef.current = sessionId;
+          sessionListRequestRef.current += 1;
           setCurrentSessionId(sessionId);
           setSessions((prev) => [session, ...prev]);
         } catch {
@@ -209,6 +251,9 @@ function ChatPageContent() {
         createdAt: new Date().toISOString(),
       };
 
+      // 发送时使当前历史加载失效，避免其返回结果覆盖乐观消息。
+      messageListRequestRef.current += 1;
+      setLoadingMessages(false);
       setMessages((prev) => [...prev, tempUserMsg, tempAiMsg]);
 
       // 创建 AbortController
@@ -269,8 +314,11 @@ function ChatPageContent() {
         }
 
         // 刷新会话列表（标题可能被自动更新了）
-        loadSessions();
+        if (!controller.signal.aborted) {
+          loadSessions();
+        }
       } catch (err) {
+        if (controller.signal.aborted) return;
         const msg = err instanceof Error ? err.message : "发送失败";
         setMessages((prev) =>
           prev.map((m) =>

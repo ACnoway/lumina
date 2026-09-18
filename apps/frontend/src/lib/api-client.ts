@@ -87,7 +87,11 @@ export const apiClient = {
    * SSE 流式请求（用于聊天流式输出）
    * 返回 Response，调用方自行处理 stream
    */
-  stream: async (path: string, body: unknown): Promise<Response> => {
+  stream: async (
+    path: string,
+    body: unknown,
+    options?: { signal?: AbortSignal },
+  ): Promise<Response> => {
     const token = getToken();
     return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
@@ -97,6 +101,7 @@ export const apiClient = {
       },
       body: JSON.stringify(body),
       credentials: 'include',
+      signal: options?.signal,
     });
   },
 };
