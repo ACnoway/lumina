@@ -1,4 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { User, UserRole } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
@@ -7,6 +14,7 @@ import * as bcrypt from 'bcrypt';
 @Injectable()
 export class UsersService implements OnModuleInit {
   private readonly logger = new Logger(UsersService.name);
+  private readonly passwordHashRounds = 12;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -111,6 +119,65 @@ export class UsersService implements OnModuleInit {
 
     this.logger.log(`User ${user.id} created successfully`);
     return user;
+  }
+
+  /**
+   * 修改当前用户密码。
+   *
+   * 只接收当前用户 ID，不允许调用方指定其他用户；修改前重新读取账号状态
+   * 并校验旧密码，避免仅凭有效 JWT 就能直接覆盖密码。
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ): Promise<void> {
+    if (newPassword !== confirmPassword) {
+      throw new BadRequestException('两次输入的新密码不一致');
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('新密码不能与当前密码相同');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, password: true, status: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('当前账号不可执行此操作');
+    }
+
+    if (!user.password) {
+      throw new BadRequestException('当前账号尚未设置密码，暂时无法修改密码');
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordMatches) {
+      throw new BadRequestException('当前密码错误');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, this.passwordHashRounds);
+    const result = await this.prisma.user.updateMany({
+      where: {
+        id: user.id,
+        password: user.password,
+        status: 'ACTIVE',
+      },
+      data: { password: passwordHash },
+    });
+
+    if (result.count !== 1) {
+      throw new BadRequestException('账号状态已变化，请重新验证后再试');
+    }
+
+    this.logger.log(`用户密码已更新: ${user.id}`);
   }
 
   private normalizeEmail(email: string): string {

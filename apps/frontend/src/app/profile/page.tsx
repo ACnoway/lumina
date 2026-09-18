@@ -4,7 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GetCurrentUserResponse } from "@lumina/shared";
 import AppHeader from "@/components/AppHeader";
+import {
+  AuthField,
+  AuthMessage,
+  authInputClassName,
+  authPrimaryButtonClassName,
+} from "@/components/AuthLayout";
+import { apiClient } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
+
+const passwordPattern = /^(?=.*[A-Za-z])(?=.*\d).+$/;
 
 function formatBalance(value: number): string {
   return new Intl.NumberFormat("zh-CN", {
@@ -54,6 +63,12 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<GetCurrentUserResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordInfo, setPasswordInfo] = useState("");
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -75,6 +90,49 @@ export default function ProfilePage() {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordError("");
+    setPasswordInfo("");
+
+    if (!currentPassword) {
+      setPasswordError("请输入当前密码");
+      return;
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 72 || !passwordPattern.test(newPassword)) {
+      setPasswordError("新密码长度需为8-72位，且至少包含一个字母和一个数字");
+      return;
+    }
+
+    if (newPassword === currentPassword) {
+      setPasswordError("新密码不能与当前密码相同");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("两次输入的新密码不一致");
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await apiClient.patch<{ message: string }>("/users/me/password", {
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordInfo("密码修改成功，请妥善保管新密码");
+    } catch (err: unknown) {
+      setPasswordError(err instanceof Error ? err.message : "密码修改失败，请稍后重试");
+    } finally {
+      setPasswordLoading(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
@@ -137,6 +195,67 @@ export default function ProfilePage() {
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                  Security
+                </p>
+                <h2 className="mt-1 text-xl font-semibold tracking-tight">修改密码</h2>
+                <p className="mt-2 text-sm text-gray-400">
+                  修改密码前需要验证当前密码，新密码需包含字母和数字。
+                </p>
+              </div>
+
+              <form onSubmit={handleChangePassword} className="max-w-2xl space-y-4">
+                <AuthField label="当前密码" htmlFor="current-password">
+                  <input
+                    id="current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                    placeholder="请输入当前密码"
+                    disabled={passwordLoading}
+                    className={authInputClassName}
+                  />
+                </AuthField>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <AuthField label="新密码" htmlFor="new-password">
+                    <input
+                      id="new-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                      placeholder="8-72位，含字母和数字"
+                      disabled={passwordLoading}
+                      className={authInputClassName}
+                    />
+                  </AuthField>
+
+                  <AuthField label="确认新密码" htmlFor="confirm-password">
+                    <input
+                      id="confirm-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="请再次输入新密码"
+                      disabled={passwordLoading}
+                      className={authInputClassName}
+                    />
+                  </AuthField>
+                </div>
+
+                <AuthMessage error={passwordError} info={passwordInfo} />
+
+                <button type="submit" disabled={passwordLoading} className={authPrimaryButtonClassName}>
+                  {passwordLoading ? "保存中..." : "保存新密码"}
+                </button>
+              </form>
+            </section>
+
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
                   More
                 </p>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight">更多功能</h2>
@@ -146,7 +265,7 @@ export default function ProfilePage() {
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <ExtensionCard title="消费记录" description="查看余额变动、聊天和生图消费明细。" />
-                <ExtensionCard title="账户设置" description="管理昵称、头像和其他个人偏好。" />
+                <ExtensionCard title="个性化设置" description="管理头像和其他个人偏好。" />
                 <ExtensionCard title="充值中心" description="支持更多余额充值方式和套餐。" />
               </div>
             </section>

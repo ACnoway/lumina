@@ -83,3 +83,104 @@ describe('UsersService administrator bootstrap', () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('UsersService password changes', () => {
+  function createService(user: unknown, updateMany = jest.fn().mockResolvedValue({ count: 1 })) {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(user),
+        updateMany,
+      },
+    };
+    const config = {
+      get: jest.fn((_key: string, fallback?: unknown) => fallback),
+    } as unknown as ConfigService;
+
+    return {
+      service: new UsersService(prisma as unknown as PrismaService, config),
+      updateMany,
+    };
+  }
+
+  it('verifies the current password and stores only a new hash', async () => {
+    const currentHash = await bcrypt.hash('OldPassword1', 4);
+    const { service, updateMany } = createService({
+      id: 'user-1',
+      password: currentHash,
+      status: 'ACTIVE',
+    });
+
+    await service.changePassword('user-1', 'OldPassword1', 'NewPassword2', 'NewPassword2');
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'user-1',
+        password: currentHash,
+        status: 'ACTIVE',
+      },
+      data: { password: expect.any(String) },
+    });
+    const [{ data }] = updateMany.mock.calls[0];
+    await expect(bcrypt.compare('NewPassword2', data.password)).resolves.toBe(true);
+    expect(data.password).not.toBe(currentHash);
+  });
+
+  it('rejects an incorrect current password without updating the account', async () => {
+    const currentHash = await bcrypt.hash('OldPassword1', 4);
+    const { service, updateMany } = createService({
+      id: 'user-1',
+      password: currentHash,
+      status: 'ACTIVE',
+    });
+
+    await expect(
+      service.changePassword('user-1', 'WrongPassword1', 'NewPassword2', 'NewPassword2'),
+    ).rejects.toThrow('当前密码错误');
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsafe password changes', async () => {
+    const currentHash = await bcrypt.hash('OldPassword1', 4);
+    const { service } = createService({
+      id: 'user-1',
+      password: currentHash,
+      status: 'ACTIVE',
+    });
+
+    await expect(
+      service.changePassword('user-1', 'OldPassword1', 'NewPassword2', 'Different3'),
+    ).rejects.toThrow('两次输入的新密码不一致');
+    await expect(
+      service.changePassword('user-1', 'OldPassword1', 'OldPassword1', 'OldPassword1'),
+    ).rejects.toThrow('新密码不能与当前密码相同');
+  });
+
+  it('does not allow password changes for accounts without a password or inactive accounts', async () => {
+    const noPassword = createService({ id: 'user-1', password: null, status: 'ACTIVE' });
+    await expect(
+      noPassword.service.changePassword('user-1', 'OldPassword1', 'NewPassword2', 'NewPassword2'),
+    ).rejects.toThrow('当前账号尚未设置密码');
+
+    const suspended = createService({
+      id: 'user-1',
+      password: await bcrypt.hash('OldPassword1', 4),
+      status: 'SUSPENDED',
+    });
+    await expect(
+      suspended.service.changePassword('user-1', 'OldPassword1', 'NewPassword2', 'NewPassword2'),
+    ).rejects.toThrow('当前账号不可执行此操作');
+  });
+
+  it('rejects a concurrent update if the password changed after verification', async () => {
+    const currentHash = await bcrypt.hash('OldPassword1', 4);
+    const { service, updateMany } = createService(
+      { id: 'user-1', password: currentHash, status: 'ACTIVE' },
+      jest.fn().mockResolvedValue({ count: 0 }),
+    );
+
+    await expect(
+      service.changePassword('user-1', 'OldPassword1', 'NewPassword2', 'NewPassword2'),
+    ).rejects.toThrow('账号状态已变化');
+    expect(updateMany).toHaveBeenCalledTimes(1);
+  });
+});

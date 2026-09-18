@@ -1,9 +1,18 @@
-import { Controller, Get, UseGuards, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Logger,
+  NotFoundException,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
 import { GetCurrentUserResponse } from '@lumina/shared';
+import { ChangePasswordDto } from './dto/users.dto';
 
 @Controller('users')
 export class UsersController {
@@ -43,5 +52,24 @@ export class UsersController {
           }
         : { id: '', balance: 0 },
     };
+  }
+
+  /**
+   * 修改当前用户密码。
+   */
+  @Patch('me/password')
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @CurrentUser() user: User,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    await this.usersService.changePassword(
+      user.id,
+      dto.currentPassword,
+      dto.newPassword,
+      dto.confirmPassword,
+    );
+
+    return { message: '密码修改成功' };
   }
 }

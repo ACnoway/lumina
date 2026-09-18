@@ -56,6 +56,12 @@ export interface RegisterDto {
   nickname?: string;
 }
 
+export interface ChangePasswordDto {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export interface LoginResponse {
   accessToken: string;
   user: UserInfo;

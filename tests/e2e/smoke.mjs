@@ -174,6 +174,41 @@ async function main() {
   });
   assert(passwordLogin.data.user.id === userLogin.data.user.id, 'password login returned a different user');
 
+  await requestJson('/users/me/password', {
+    method: 'PATCH',
+    body: {
+      currentPassword: 'E2ePassword1',
+      newPassword: 'E2ePassword2',
+      confirmPassword: 'E2ePassword2',
+    },
+  }, [401]);
+  await requestAuth(userToken, '/users/me/password', {
+    method: 'PATCH',
+    body: {
+      currentPassword: 'WrongPassword1',
+      newPassword: 'E2ePassword2',
+      confirmPassword: 'E2ePassword2',
+    },
+  }, [400]);
+  const changedPassword = await requestAuth(userToken, '/users/me/password', {
+    method: 'PATCH',
+    body: {
+      currentPassword: 'E2ePassword1',
+      newPassword: 'E2ePassword2',
+      confirmPassword: 'E2ePassword2',
+    },
+  });
+  assert(changedPassword.data.message === '密码修改成功', 'password change did not succeed');
+  await requestJson('/auth/password-login', {
+    method: 'POST',
+    body: { email: userEmail, password: 'E2ePassword1' },
+  }, [401]);
+  const changedPasswordLogin = await requestJson('/auth/password-login', {
+    method: 'POST',
+    body: { email: userEmail, password: 'E2ePassword2' },
+  });
+  assert(changedPasswordLogin.data.user.id === userLogin.data.user.id, 'new password login failed');
+
   const codeLogin = await sendCodeAndLogin(userEmail);
   assert(codeLogin.data.user.id === userLogin.data.user.id, 'code login returned a different user');
 
