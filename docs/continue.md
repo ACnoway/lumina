@@ -1,15 +1,17 @@
 # Lumina 续开发交接
 
 > 更新日期：2026-09-19
-> 验证提交：个人中心账单功能（基础验证 `5dcc692`，符号修正 `f17399a`，四位小数截断 `8501f98`）
-> 分支状态：个人中心账单已接入钱包流水；本地受 pnpm 版本和依赖目录限制，远程构建、后端测试和完整 E2E 已通过，浏览器专项验收仍待补。
+> 验证提交：Markdown 渲染实现 `b54dfc9`；依赖锁文件和验证记录在本次提交补齐
+> 分支状态：聊天消息 Markdown 已接入；远程构建、后端测试、Markdown 渲染专项检查和完整 E2E 已通过，浏览器视觉专项验收仍待补。
 
 ## 本次模块：聊天消息 Markdown 渲染
 
 - `apps/frontend/src/app/chat/components/MessageList.tsx` 中的用户消息和 AI 消息均通过 `MarkdownContent` 渲染；`MessageInput` 保持纯文本输入，不做预览。
 - 前端使用 `react-markdown`、`remark-gfm`、`remark-breaks` 和 `rehype-sanitize`，支持常用 Markdown/GFM 语法、单换行和安全清理，不渲染原始 HTML。
 - 消息后端协议、数据库字段、SSE 流程和原始消息存储均不变；流式 AI 内容更新时继续实时渲染。
-- 本地无法使用当前 pnpm 11 安装新增依赖，待推送后在 `lch:/root/lumina` 使用仓库要求的 pnpm 8.15.0 生成锁文件并验证。
+- 本地无法使用当前 pnpm 11 安装新增依赖；已在 `lch:/root/lumina` 使用仓库要求的 pnpm 8.15.0 生成并验证锁文件。
+- 远程 `pnpm build`、`pnpm test`（21 个测试套件 / 92 个测试）和隔离 `pnpm e2e:smoke` 均通过；E2E 覆盖聊天 SSE 与历史链路，专用容器、网络和数据卷已清理。本次未新增浏览器自动化用例，Markdown 视觉细节仍建议在真实浏览器中抽样验收。
+- 远程前端工作区的 Markdown 渲染专项检查通过：标题和粗体节点可生成，原始 `<script>` 标签不会输出。
 
 ## 平台光子货币规则
 

@@ -2,14 +2,17 @@
 
 > 以当前源码和可复现验证为准。这里将“代码已实现”和“在完整外部服务环境中已验证”分开记录，避免把页面、接口或模块存在误写成可直接交付。
 
-## 本次模块：聊天消息 Markdown 渲染（代码已实现，远程验证待完成）
+## 本次模块：聊天消息 Markdown 渲染（代码已实现，远程验证通过）
 
 - 聊天页已为用户和 AI 的已发送消息接入 Markdown 渲染；输入框仍保持纯文本输入，不显示 Markdown 预览。
 - 使用 `react-markdown`、`remark-gfm` 和 `remark-breaks`，支持常用 Markdown、GFM 表格/任务列表/删除线以及聊天场景中的单换行。
 - 使用 `rehype-sanitize` 做安全清理，不启用原始 HTML 渲染；消息仍以原始 Markdown 文本保存，未修改后端接口和数据库结构。
 - 流式 AI 回复沿用现有 SSE 和乐观更新逻辑，内容逐段变化时同步重新渲染；加载占位和错误消息保持原有行为。
 - 主要文件：`apps/frontend/src/app/chat/components/MarkdownContent.tsx`、`MessageList.tsx`、`apps/frontend/src/app/globals.css` 和前端依赖配置。
-- 当前本地无法安装新依赖：环境使用 pnpm 11，仓库锁定 pnpm 8.15.0，且 npm registry 不可访问；待推送后在 `lch:/root/lumina` 生成锁文件并完成构建、测试和 E2E 验证。
+- 本地无法安装新依赖：环境使用 pnpm 11，仓库锁定 pnpm 8.15.0，且 npm registry 不可访问；已在 `lch:/root/lumina` 使用 pnpm 8.15.0 生成并验证锁文件。
+- 远程 `pnpm build` 通过；`pnpm test` 通过（21 个测试套件 / 92 个测试）；隔离 `pnpm e2e:smoke` 通过，覆盖聊天 SSE 与历史链路，测试完成后已清理专用容器、网络和数据卷。
+- 在远程前端工作区完成 Markdown 渲染专项检查：标题和粗体节点可生成，原始 `<script>` 标签不会输出。
+- 本次未新增浏览器自动化用例；Markdown 视觉细节仍建议在真实浏览器中抽样验收。
 
 ## 本次模块：生图页余额展示与首页入口卡片间距（代码已实现，远程隔离环境验证通过）
 
