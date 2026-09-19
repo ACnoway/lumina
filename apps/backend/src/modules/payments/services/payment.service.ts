@@ -116,8 +116,11 @@ export class PaymentService {
       );
     } catch (error) {
       const uncertain = error instanceof PaymentChannelError && error.uncertain;
-      await this.prisma.paymentOrder.update({
-        where: { id: order.id },
+      await this.prisma.paymentOrder.updateMany({
+        where: {
+          id: order.id,
+          status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        },
         data: {
           status: uncertain ? PaymentOrderStatus.PENDING : PaymentOrderStatus.FAILED,
           failureCode: error instanceof PaymentChannelError ? error.code : PaymentErrorCode.CHANNEL_REQUEST_FAILED,
@@ -127,16 +130,23 @@ export class PaymentService {
       this.rethrowChannelError(error);
     }
 
-    const updated = await this.prisma.paymentOrder.update({
-      where: { id: order.id },
+    await this.prisma.paymentOrder.updateMany({
+      where: {
+        id: order.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+      },
       data: {
         status: PaymentOrderStatus.PENDING,
         providerTradeNo: result!.providerTradeNo,
         expireAt: result!.expireAt ?? order.expireAt,
         metadata: { action: result!.action } as Prisma.InputJsonValue,
       },
+    });
+    const updated = await this.prisma.paymentOrder.findUnique({
+      where: { id: order.id },
       include: { channel: true },
     });
+    if (!updated) throw new NotFoundException('支付订单不存在');
     this.logger.log(`payment.create.success orderNo=${orderNo} channelId=${order.channelId}`);
     return this.serializeOrder(updated);
   }
@@ -184,7 +194,7 @@ export class PaymentService {
           channelId,
           orderNo: notification.orderNo,
           eventKey: notification.eventId,
-          signatureValid: true,
+          signatureValid: notification.signatureValid !== false,
           payloadHash,
         },
       });
@@ -213,10 +223,12 @@ export class PaymentService {
   }
 
   private async applyPaymentResult(order: PaymentOrder, result: PaymentNotification | PaymentQueryResult): Promise<void> {
-    if (result.amount !== undefined && !new Decimal(result.amount).eq(order.amount)) {
-      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付金额与本地订单不一致');
-    }
     if (result.status === 'SUCCESS') {
+      if (order.status === PaymentOrderStatus.SUCCEEDED) return;
+      if (order.status !== PaymentOrderStatus.CREATED && order.status !== PaymentOrderStatus.PENDING) {
+        throw new PaymentChannelError(PaymentErrorCode.PAYMENT_ALREADY_CLOSED, '支付订单已关闭，不能再次入账');
+      }
+      this.assertConfirmedPayment(order, result);
       await this.processPaymentSuccess(order, result);
       return;
     }
@@ -238,7 +250,7 @@ export class PaymentService {
       `payment:recharge:${order.orderNo}`,
     );
     await this.prisma.paymentOrder.updateMany({
-      where: { id: order.id, status: { not: PaymentOrderStatus.SUCCEEDED } },
+      where: { id: order.id, status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] } },
       data: {
         status: PaymentOrderStatus.SUCCEEDED,
         providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
@@ -248,6 +260,26 @@ export class PaymentService {
         failureMessage: null,
       },
     });
+  }
+
+  private assertConfirmedPayment(order: PaymentOrder, result: PaymentNotification | PaymentQueryResult): void {
+    if (typeof result.amount !== 'string' || !result.amount.trim()) {
+      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付成功结果缺少支付金额');
+    }
+
+    let paidAmount: Decimal;
+    try {
+      paidAmount = new Decimal(result.amount);
+    } catch {
+      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付金额格式不合法');
+    }
+    if (!paidAmount.eq(order.amount)) {
+      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付金额与本地订单不一致');
+    }
+
+    if (typeof result.currency !== 'string' || result.currency.toUpperCase() !== order.currency.toUpperCase()) {
+      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_CURRENCY_MISMATCH, '支付币种与本地订单不一致');
+    }
   }
 
   private async findUserOrder(userId: string, orderNo: string) {
@@ -284,7 +316,9 @@ export class PaymentService {
   }
 
   private publicBaseUrl(): string {
-    return (this.config.get<string>('PAYMENT_NOTIFY_BASE_URL') || this.config.get<string>('CORS_ORIGIN') || 'http://localhost:3000').replace(/\/$/, '');
+    const value = this.config.get<string>('PAYMENT_NOTIFY_BASE_URL')?.trim();
+    if (!value) throw new BadRequestException('支付回调地址未配置');
+    return value.replace(/\/$/, '');
   }
 
   private orderNo(): string {

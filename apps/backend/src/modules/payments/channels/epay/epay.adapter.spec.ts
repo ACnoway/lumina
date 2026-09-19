@@ -46,6 +46,7 @@ describe('EpayPaymentAdapter', () => {
       providerTradeNo: 'T202609190001',
       status: 'SUCCESS',
       amount: '10.00',
+      signatureValid: true,
     });
   });
 
@@ -78,6 +79,7 @@ describe('EpayPaymentAdapter', () => {
       providerTradeNo: 'T202609190001',
       status: 'SUCCESS',
       amount: '10.00',
+      signatureValid: false,
     });
     expect(axios.get).toHaveBeenCalledWith('https://pay.example.com/api.php', {
       params: {
@@ -87,6 +89,39 @@ describe('EpayPaymentAdapter', () => {
         out_trade_no: 'LM202609190000001234',
       },
       timeout: 10000,
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('does not treat a successful query response as a successful payment', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      data: {
+        code: 1,
+        status: 0,
+        trade_no: 'T202609190002',
+        money: '10.00',
+      },
+    } as never);
+
+    await expect(adapter.queryPayment({ orderNo: 'LM202609190000001235' }, config)).resolves.toMatchObject({
+      status: 'PENDING',
+      providerTradeNo: 'T202609190002',
+      amount: '10.00',
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('keeps the payment pending when the query has no explicit order status', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      data: {
+        code: 1,
+        trade_no: 'T202609190003',
+        money: '10.00',
+      },
+    } as never);
+
+    await expect(adapter.queryPayment({ orderNo: 'LM202609190000001236' }, config)).resolves.toMatchObject({
+      status: 'PENDING',
     });
     jest.restoreAllMocks();
   });

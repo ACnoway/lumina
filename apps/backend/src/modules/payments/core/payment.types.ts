@@ -54,6 +54,12 @@ export interface PaymentNotification {
   amount?: string;
   currency?: string;
   paidAt?: Date;
+  /**
+   * Whether the notification itself passed the channel signature check.
+   * A provider-side authenticated query fallback is deliberately marked false
+   * so callback audit records do not claim that an invalid signature was valid.
+   */
+  signatureValid?: boolean;
 }
 
 export interface PaymentNotifyResponse {

@@ -313,7 +313,10 @@ export default function ProfilePage() {
     let cancelled = false;
     const timer = window.setInterval(async () => {
       try {
-        const current = await paymentsApi.syncOrder(paymentOrder.orderNo);
+        // The browser only observes the order. Wallet crediting is performed
+        // by the backend after a verified callback; an automatic client-side
+        // sync must never be the trigger for a balance change.
+        const current = await paymentsApi.getOrder(paymentOrder.orderNo);
         if (cancelled) return;
         setPaymentOrder(current);
         if (current.status === "SUCCEEDED") {

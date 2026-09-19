@@ -857,6 +857,18 @@ PaymentOrder -> PENDING
 返回 PaymentAction
 ```
 
+创建订单只创建支付订单并发起渠道下单，绝不能调用 `WalletService.recharge()`。订单必须经历：
+
+```
+CREATED/PENDING
+  -> 渠道验签成功的支付通知，或服务端可信查单明确返回已支付
+  -> 校验本地订单、渠道、币种和金额
+  -> WalletService.recharge（payment:recharge:<orderNo>）
+  -> SUCCEEDED
+```
+
+前端轮询只能读取订单状态，不得把浏览器请求作为入账触发器。
+
 # 19. 支付成功绝不能依赖前端跳转
 
 必须明确：
@@ -914,6 +926,11 @@ https://lumina.example.com/payment/result
 ```
 /payments/notify/cmxxxxx
 ```
+
+如果前端通过 Nginx 以 `/api/` 代理后端，`PAYMENT_NOTIFY_BASE_URL` 必须配置为包含
+该前缀的公网地址（例如 `https://lumina.example.com/api`），最终回调地址才会是
+`https://lumina.example.com/api/payments/notify/:channelId`。不能使用只指向前端页面
+的裸域名，否则渠道通知会命中前端而不是后端回调控制器。
 
 为什么 URL 包含 `channelId`：
 
@@ -1165,6 +1182,11 @@ sign_type
 ```
 
 V1 常见签名方式是排除 `sign`、`sign_type` 与空值后按参数名 ASCII 排序，将参数拼接后追加商户 KEY，再进行 MD5。异步通知通常通过 `trade_status=TRADE_SUCCESS` 表示成功，并要求商户返回 `success`。不同易支付实现存在一定差异，因此协议细节必须全部收敛在 Adapter 内，而不能泄露到 PaymentService。
+
+易支付查单接口通常同时返回接口调用结果和订单状态。`code=1` 只表示查单请求成功，
+不代表订单已经支付；必须读取 `trade_status` 或供应商明确约定的订单状态字段。只有
+明确的已支付状态才能返回统一 `SUCCESS`，`status=0`、缺失状态和未知状态都必须
+保持 `PENDING`，避免创建订单后的首次轮询误充值。
 
 配置：
 
@@ -1689,6 +1711,11 @@ processPaymentSuccess()
 
 不能另外写一套充值逻辑。
 
+查单响应中的接口级 `code` 只表示查单请求是否成功，不表示订单已经付款。Adapter
+必须只把渠道协议明确的已支付状态（例如 `TRADE_SUCCESS`、`TRADE_FINISHED`，或
+该渠道明确约定的数值已支付状态）映射为 `SUCCESS`；缺失、未知或未支付状态一律
+映射为 `PENDING`。`code=1` 单独出现时绝不能入账。
+
 # 37. 统一支付成功入口
 
 建议：
@@ -1827,6 +1854,8 @@ APIv3 Key 禁止写日志
 
 通知接口必须使用渠道签名验证
 
+通过商户密钥完成的服务端查单兜底必须在审计中标记为“查单确认”，不能记录为签名回调。
+
 金额以服务端 PaymentOrder 为准
 
 客户端不能指定 paidAmount
@@ -1834,6 +1863,8 @@ APIv3 Key 禁止写日志
 return_url 不能改变订单状态
 
 支付成功必须检查金额一致
+
+支付成功必须检查币种一致，且金额和币种字段都必须存在；字段缺失时拒绝入账。
 
 支付成功必须检查 channelId 一致
 
@@ -2009,6 +2040,12 @@ alipay -> type=alipay
 wechat -> type=wxpay
 
 TRADE_SUCCESS
+
+查单 `code=1 + 未支付状态` 保持 `PENDING`
+
+查单缺少订单状态保持 `PENDING`
+
+查单明确已支付状态才返回 `SUCCESS`
 
 notify 返回 success
 ```

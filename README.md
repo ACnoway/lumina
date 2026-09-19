@@ -39,6 +39,8 @@ lumina/
 # 1. 配置环境变量
 cp .env.example .env
 # 编辑 .env，修改密码、JWT_SECRET、SMTP 等
+# 启用支付时必须配置 PAYMENT_CONFIG_ENCRYPTION_KEY 和公网 PAYMENT_NOTIFY_BASE_URL。
+# 若统一入口由 Nginx 代理 /api，回调基础地址应包含 /api，例如 https://example.com/api。
 
 # 2. 构建并启动所有服务
 pnpm docker:up
@@ -68,6 +70,14 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 登录管理后台后，进入“模型与供应商 → 提示词优化模型”，从已经配置并有可用聊天上游的 `CHAT` 平台模型中选择并保存。生图页面的“优化提示词”会通过该模型调用现有聊天适配器，并按实际 token 用量计费。
 
 `.env` 中的 `PROMPT_OPTIMIZER_MODEL` 仅用于后台尚未保存选择时的兼容兜底；它必须对应一个已存在的平台模型，且该模型应配置可用的聊天上游。
+
+### 支付与充值
+
+支付订单创建只会进入 `CREATED/PENDING`，余额仅在渠道验签成功的异步通知或服务端明确确认已付款的查单后入账。`return_url` 和前端订单轮询都不能直接改变余额。
+
+生产环境必须显式设置 `PAYMENT_NOTIFY_BASE_URL`，并确保最终的
+`/payments/notify/:channelId` 能通过公网入口到达后端；支付渠道配置使用
+`PAYMENT_CONFIG_ENCRYPTION_KEY` 加密保存，密钥变更前必须完成配置迁移。
 
 ### 方式二：本地开发
 
@@ -135,6 +145,7 @@ apps/backend/src/
     ├── auth/              # 注册、密码/邮箱验证码登录、JWT
     ├── users/             # 用户管理
     ├── wallet/            # 钱包/账本（预扣-结算-退回 + 幂等键）
+    ├── payments/          # 支付渠道、订单、回调与充值入账
     ├── providers/         # 上游供应商（路由/熔断/限流）
     ├── chat/              # 聊天会话、流式输出
     ├── image/             # 生图任务、异步处理

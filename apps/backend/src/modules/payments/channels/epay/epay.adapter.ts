@@ -136,7 +136,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
     const expected = this.signature(values, config.key);
     if (!signature || signature.toLowerCase() !== expected.toLowerCase()) {
       const fallback = await this.queryAfterInvalidGetSignature(request, payload, config);
-      if (fallback) return fallback;
+      if (fallback) return { ...fallback, signatureValid: false };
       throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调签名无效');
     }
     const status = String(payload.trade_status ?? '').toUpperCase();
@@ -153,6 +153,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       amount: this.optionalString(payload.money),
       currency: 'CNY',
       paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? new Date() : undefined,
+      signatureValid: true,
     };
   }
 
@@ -177,10 +178,16 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
         timeout: config.timeout ?? 10000,
       });
       const data = this.parseResponse(response.data);
-      const status = String(data.trade_status ?? data.status ?? '').toUpperCase();
+      // Epay-compatible gateways commonly return code=1 to indicate that the
+      // query request itself succeeded. It is not a payment state. Only an
+      // explicit provider order status may confirm payment; unknown states
+      // remain PENDING (fail closed).
+      const rawStatus = data.trade_status ?? data.status;
+      const status = String(rawStatus ?? '').toUpperCase();
+      const isSuccess = status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || status === 'SUCCESS' || status === '1';
       return {
         status:
-          status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || String(data.code) === '1'
+          isSuccess
             ? 'SUCCESS'
             : status === 'TRADE_CLOSED'
               ? 'CLOSED'
@@ -221,6 +228,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
         amount: result.amount,
         currency: result.currency ?? 'CNY',
         paidAt: result.status === 'SUCCESS' ? new Date() : undefined,
+        signatureValid: false,
       };
     } catch {
       return undefined;

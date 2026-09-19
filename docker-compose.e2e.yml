@@ -95,7 +95,7 @@ services:
       INITIAL_BALANCE: '10.00'
       CORS_ORIGIN: http://localhost:3000
       PAYMENT_CONFIG_ENCRYPTION_KEY: e2e-payment-encryption-key
-      PAYMENT_NOTIFY_BASE_URL: http://localhost:3000
+      PAYMENT_NOTIFY_BASE_URL: http://localhost:3000/api
       PAYMENT_RETURN_URL: http://localhost:3000/profile
       PROVIDER_DEFAULT_RATE_LIMIT: '1000'
       BACKEND_PORT: 3001
