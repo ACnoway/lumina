@@ -23,6 +23,45 @@ import { paymentsApi } from "@/lib/payments-api";
 
 const passwordPattern = /^(?=.*[A-Za-z])(?=.*\d).+$/;
 
+const profileTabs = [
+  {
+    id: "overview",
+    label: "账户概览",
+    eyebrow: "Overview",
+    description: "集中查看账号状态，常用操作一键进入。",
+  },
+  {
+    id: "wallet",
+    label: "充值与钱包",
+    eyebrow: "Wallet",
+    description: "管理光子余额和充值订单，后续可继续扩展账单能力。",
+  },
+  {
+    id: "security",
+    label: "安全设置",
+    eyebrow: "Security",
+    description: "集中处理密码和后续的登录安全能力。",
+  },
+  {
+    id: "usage",
+    label: "消费记录",
+    eyebrow: "Usage",
+    description: "为余额变动、聊天和生图消费明细预留独立入口。",
+  },
+  {
+    id: "preferences",
+    label: "个性化设置",
+    eyebrow: "Preferences",
+    description: "为昵称、头像和其他个人偏好保留稳定位置。",
+  },
+] as const;
+
+type ProfileTab = (typeof profileTabs)[number]["id"];
+
+function isProfileTab(value: string | null): value is ProfileTab {
+  return profileTabs.some((tab) => tab.id === value);
+}
+
 function formatBalance(value: number): string {
   return formatPhoton(value, 2);
 }
@@ -42,7 +81,7 @@ function InfoItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ExtensionCard({
+function EmptyFeatureState({
   title,
   description,
 }: {
@@ -50,14 +89,12 @@ function ExtensionCard({
   description: string;
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/70 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="font-medium text-gray-700">{title}</h3>
-        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-400 ring-1 ring-gray-100">
-          即将支持
-        </span>
+    <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-8 text-center sm:p-12">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-50 text-xl text-gray-300">
+        ···
       </div>
-      <p className="mt-2 text-sm leading-6 text-gray-400">{description}</p>
+      <h3 className="mt-4 font-medium text-gray-700">{title}即将支持</h3>
+      <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-gray-400">{description}</p>
     </div>
   );
 }
@@ -81,6 +118,7 @@ export default function ProfilePage() {
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrderDto | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
+  const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
 
   const loadPaymentChannels = useCallback(async () => {
     setPaymentError("");
@@ -141,6 +179,24 @@ export default function ProfilePage() {
       window.clearInterval(timer);
     };
   }, [loadProfile, paymentOrder]);
+
+  useEffect(() => {
+    const syncTabFromUrl = () => {
+      const tab = new URLSearchParams(window.location.search).get("tab");
+      setActiveTab(isProfileTab(tab) ? tab : "overview");
+    };
+
+    syncTabFromUrl();
+    window.addEventListener("popstate", syncTabFromUrl);
+    return () => window.removeEventListener("popstate", syncTabFromUrl);
+  }, []);
+
+  function handleTabChange(tab: ProfileTab) {
+    setActiveTab(tab);
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", tab);
+    router.replace(`/profile?${params.toString()}`, { scroll: false });
+  }
 
   async function handleChangePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -227,16 +283,21 @@ export default function ProfilePage() {
     }
   }
 
+  const activeTabInfo = profileTabs.find((tab) => tab.id === activeTab) ?? profileTabs[0];
+
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
       <AppHeader title="个人中心" active="profile" />
 
-      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         {loading && (
-          <>
-            <div className="h-44 animate-pulse rounded-2xl bg-gray-200" />
-            <div className="h-64 animate-pulse rounded-2xl bg-gray-200" />
-          </>
+          <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="h-72 animate-pulse rounded-2xl bg-gray-200" />
+            <div className="space-y-6">
+              <div className="h-44 animate-pulse rounded-2xl bg-gray-200" />
+              <div className="h-64 animate-pulse rounded-2xl bg-gray-200" />
+            </div>
+          </div>
         )}
 
         {!loading && error && (
@@ -253,7 +314,71 @@ export default function ProfilePage() {
         )}
 
         {!loading && !error && profile && (
-          <>
+          <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+            <aside className="hidden h-fit rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:sticky lg:top-6 lg:block">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">
+                Account center
+              </p>
+              <div className="mt-4 border-b border-gray-100 pb-4">
+                <p className="truncate text-sm font-medium text-gray-700">{profile.user.email}</p>
+                <p className="mt-1 text-xs text-gray-400">{roleLabel(profile.user.role)}</p>
+              </div>
+              <nav className="mt-4 space-y-1" aria-label="个人中心分组导航">
+                {profileTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    aria-current={activeTab === tab.id ? "page" : undefined}
+                    onClick={() => handleTabChange(tab.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                      activeTab === tab.id
+                        ? "bg-blue-50 font-medium text-blue-700"
+                        : "text-gray-500 hover:bg-gray-50 hover:text-blue-700"
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    {(tab.id === "usage" || tab.id === "preferences") && (
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-400">
+                        规划中
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+            </aside>
+
+            <div className="min-w-0 space-y-6">
+              <nav
+                className="grid grid-cols-2 gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm sm:grid-cols-3 lg:hidden"
+                aria-label="个人中心分组导航"
+              >
+                {profileTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    aria-current={activeTab === tab.id ? "page" : undefined}
+                    onClick={() => handleTabChange(tab.id)}
+                    className={`rounded-lg px-3 py-2.5 text-sm transition ${
+                      activeTab === tab.id
+                        ? "bg-blue-50 font-medium text-blue-700"
+                        : "text-gray-500 hover:bg-gray-50 hover:text-blue-700"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+
+              <header>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+                  {activeTabInfo.eyebrow}
+                </p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight">{activeTabInfo.label}</h2>
+                <p className="mt-2 text-sm text-gray-400">{activeTabInfo.description}</p>
+              </header>
+
+            {activeTab === "overview" && (
+              <>
             <section className="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-6 shadow-sm sm:p-8">
               <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full bg-blue-100/70 blur-3xl" />
               <div className="relative">
@@ -269,7 +394,11 @@ export default function ProfilePage() {
                 </p>
               </div>
             </section>
+              </>
+            )}
 
+            {activeTab === "wallet" && (
+              <>
             <section className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
@@ -371,7 +500,10 @@ export default function ProfilePage() {
                 </button>
               </form>
             </section>
+              </>
+            )}
 
+            {activeTab === "overview" && (
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
@@ -386,7 +518,9 @@ export default function ProfilePage() {
                 <InfoItem label="钱包编号" value={profile.wallet.id || "未创建"} />
               </div>
             </section>
+            )}
 
+            {activeTab === "security" && (
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
@@ -447,24 +581,23 @@ export default function ProfilePage() {
                 </button>
               </form>
             </section>
+            )}
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="mb-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                  More
-                </p>
-                <h2 className="mt-1 text-xl font-semibold tracking-tight">更多功能</h2>
-                <p className="mt-2 text-sm text-gray-400">
-                  个人中心预留了扩展区域，后续可以继续加入账户和消费相关能力。
-                </p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <ExtensionCard title="消费记录" description="查看余额变动、聊天和生图消费明细。" />
-                <ExtensionCard title="个性化设置" description="管理头像和其他个人偏好。" />
-                <ExtensionCard title="更多充值方式" description="后续可继续扩展套餐、优惠券和账单导出。" />
-              </div>
-            </section>
-          </>
+            {activeTab === "usage" && (
+              <EmptyFeatureState
+                title="消费记录"
+                description="后续可在这里查看充值订单、余额变动、聊天消耗和生图消耗。"
+              />
+            )}
+
+            {activeTab === "preferences" && (
+              <EmptyFeatureState
+                title="个性化设置"
+                description="后续可在这里管理昵称、头像和其他个人偏好。"
+              />
+            )}
+            </div>
+          </div>
         )}
       </div>
     </main>
