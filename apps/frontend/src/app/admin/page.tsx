@@ -91,9 +91,25 @@ const transactionTypeLabels: Record<TransactionType, string> = {
   ADMIN_ADJUST: "管理员调整",
 };
 
-function getDisplayedTransactionAmount(type: TransactionType, amount: number): number {
-  if (type === "CONSUME") return -Math.abs(amount);
-  return amount;
+function getTransactionDisplay(type: TransactionType, amount: number): {
+  amount: number;
+  prefix: "+" | "-";
+  colorClass: string;
+} {
+  if (type === "CONSUME") {
+    return { amount: Math.abs(amount), prefix: "-", colorClass: "text-red-600" };
+  }
+
+  if (type === "RECHARGE" || type === "REFUND") {
+    return { amount: Math.abs(amount), prefix: "+", colorClass: "text-emerald-600" };
+  }
+
+  const isDeduction = amount < 0;
+  return {
+    amount: Math.abs(amount),
+    prefix: isDeduction ? "-" : "+",
+    colorClass: isDeduction ? "text-red-600" : "text-emerald-600",
+  };
 }
 
 function formatModelPricing(model: PlatformModelDto): string {
@@ -1456,32 +1472,23 @@ export default function AdminPage() {
                       </div>
                     ) : transactions?.items.length ? (
                       <div className="mt-3 space-y-3">
-                        {transactions.items.map((transaction) => (
-                          <article
-                            key={transaction.id}
-                            className="rounded-lg bg-gray-50 px-3 py-2.5"
-                          >
+                        {transactions.items.map((transaction) => {
+                          const display = getTransactionDisplay(
+                            transaction.type,
+                            transaction.amount,
+                          );
+
+                          return (
+                            <article
+                              key={transaction.id}
+                              className="rounded-lg bg-gray-50 px-3 py-2.5"
+                            >
                             <div className="flex justify-between gap-3 text-sm">
                               <span className="font-medium text-gray-700">
                                 {transactionTypeLabels[transaction.type]}
                               </span>
-                              <span
-                                className={getDisplayedTransactionAmount(
-                                  transaction.type,
-                                  transaction.amount,
-                                ) < 0 ? "text-red-600" : "text-emerald-600"}
-                              >
-                                {getDisplayedTransactionAmount(transaction.type, transaction.amount) > 0
-                                  ? "+"
-                                  : ""}
-                                {formatMoney(
-                                  Math.abs(
-                                    getDisplayedTransactionAmount(
-                                      transaction.type,
-                                      transaction.amount,
-                                    ),
-                                  ),
-                                )}
+                              <span className={display.colorClass}>
+                                {display.prefix}{formatMoney(display.amount)}
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs text-gray-500">
@@ -1491,8 +1498,9 @@ export default function AdminPage() {
                               余额 {formatMoney(transaction.balance)} ·{" "}
                               {formatDate(transaction.createdAt)}
                             </p>
-                          </article>
-                        ))}
+                            </article>
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="mt-3 text-sm text-gray-400">暂无账本记录</p>

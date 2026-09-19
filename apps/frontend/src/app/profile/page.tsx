@@ -163,9 +163,25 @@ function formatTransactionDate(value: string): string {
   }).format(new Date(value));
 }
 
-function getDisplayedTransactionAmount(transaction: TransactionItem): number {
-  if (transaction.type === "CONSUME") return -Math.abs(transaction.amount);
-  return transaction.amount;
+function getTransactionDisplay(transaction: TransactionItem): {
+  amount: number;
+  prefix: "+" | "-";
+  colorClass: string;
+} {
+  if (transaction.type === "CONSUME") {
+    return { amount: Math.abs(transaction.amount), prefix: "-", colorClass: "text-red-600" };
+  }
+
+  if (transaction.type === "RECHARGE" || transaction.type === "REFUND") {
+    return { amount: Math.abs(transaction.amount), prefix: "+", colorClass: "text-emerald-600" };
+  }
+
+  const isDeduction = transaction.amount < 0;
+  return {
+    amount: Math.abs(transaction.amount),
+    prefix: isDeduction ? "-" : "+",
+    colorClass: isDeduction ? "text-red-600" : "text-emerald-600",
+  };
 }
 
 function roleLabel(role: GetCurrentUserResponse["user"]["role"]): string {
@@ -789,9 +805,7 @@ export default function ProfilePage() {
                   <>
                     <div className="mt-5 space-y-3">
                       {transactions.items.map((transaction) => {
-                        const displayedAmount = getDisplayedTransactionAmount(transaction);
-                        const amountPrefix = displayedAmount > 0 ? "+" : "";
-                        const amountColor = displayedAmount < 0 ? "text-red-600" : "text-emerald-600";
+                        const display = getTransactionDisplay(transaction);
 
                         return (
                           <article
@@ -807,8 +821,8 @@ export default function ProfilePage() {
                                   {transaction.reason}
                                 </p>
                               </div>
-                              <p className={`shrink-0 text-base font-semibold ${amountColor}`}>
-                                {amountPrefix}{formatBalance(Math.abs(displayedAmount))}
+                              <p className={`shrink-0 text-base font-semibold ${display.colorClass}`}>
+                                {display.prefix}{formatBalance(display.amount)}
                               </p>
                             </div>
                             <p className="mt-2 text-xs text-gray-400">
