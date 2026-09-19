@@ -118,7 +118,7 @@ export class WalletService {
           `余额不足: userId=${userId}, balance=${balance}, reserved=${reservedAmount}, required=${amount}`,
         );
         throw new BadRequestException(
-          `余额不足，当前可用余额: ${Math.max(availableBalance, 0).toFixed(2)} 元`,
+          `余额不足，当前可用余额: ${Math.max(availableBalance, 0).toFixed(2)} 光子`,
         );
       }
 
@@ -335,7 +335,7 @@ export class WalletService {
   }
 
   /**
-   * 充值（管理员用）
+   * 充值入账（调用方必须传入已经换算好的光子数量）
    */
   async recharge(
     userId: string,
@@ -344,7 +344,7 @@ export class WalletService {
     idempotencyKey?: string,
   ): Promise<WalletTransaction> {
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new BadRequestException('充值金额必须大于0');
+      throw new BadRequestException('充值光子数量必须大于0');
     }
 
     const key = idempotencyKey || `recharge:${userId}:${Date.now()}`;
@@ -412,7 +412,7 @@ export class WalletService {
     auditContext?: AdminAdjustmentAuditContext,
   ): Promise<WalletTransaction> {
     if (!Number.isFinite(amount) || amount === 0) {
-      throw new BadRequestException('调整金额不能为0');
+      throw new BadRequestException('调整光子数量不能为0');
     }
 
     return this.withWalletLock(userId, async () => {

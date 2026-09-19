@@ -4,6 +4,7 @@ import {
   AdminOverviewResponse,
   AdminUserDto,
   AdminUsersResponse,
+  CurrencySettingsDto,
   GetTransactionsResponse,
   PromptOptimizerSettingDto,
   TransactionItem,
@@ -17,6 +18,7 @@ import {
   AdjustUserBalanceDto,
   ListAdminUsersQueryDto,
   UpdatePromptOptimizerModelDto,
+  UpdateCurrencySettingsDto,
   UpdateUserStatusDto,
 } from './dto/admin.dto';
 
@@ -64,6 +66,33 @@ export class AdminService {
       modelId: model?.id ?? null,
       modelName: model?.name ?? null,
     };
+  }
+
+  async getCurrencySettings(): Promise<CurrencySettingsDto> {
+    return this.settingsService.getCurrencySettings();
+  }
+
+  async updateCurrencySettings(
+    actor: User,
+    dto: UpdateCurrencySettingsDto,
+    context: AuditRequestContext,
+  ): Promise<CurrencySettingsDto> {
+    const before = await this.settingsService.getCurrencySettings();
+    const after = await this.settingsService.setPhotonPerCny(dto.photonPerCny);
+
+    await this.auditService.record({
+      actorId: actor.id,
+      action: 'currency_settings.updated',
+      resource: 'system_config',
+      details: {
+        before: { photonPerCny: before.photonPerCny },
+        after: { photonPerCny: after.photonPerCny },
+        note: '汇率只用于充值换算，消费与已保存价格均使用光子。',
+      },
+      ...context,
+    });
+
+    return after;
   }
 
   async updatePromptOptimizerSetting(

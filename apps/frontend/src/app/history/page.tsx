@@ -10,6 +10,7 @@ import type {
 import { ApiError } from "@/lib/api-client";
 import { chatApi } from "@/lib/chat-api";
 import { imageApi, type ImageTaskResponse } from "@/lib/image-api";
+import { formatPhoton } from "@/lib/model-pricing";
 import AppHeader from "@/components/AppHeader";
 import ImageLightbox, {
   ImageDownloadButton,
@@ -522,7 +523,7 @@ export default function HistoryPage() {
                         </span>
                         {task.cost !== null && (
                           <span className="shrink-0 text-gray-500">
-                            ¥{task.cost.toFixed(4)}
+                            {formatPhoton(task.cost)}
                           </span>
                         )}
                       </div>

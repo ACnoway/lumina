@@ -66,4 +66,35 @@ describe('SettingsService', () => {
       update: { promptOptimizerModelId: 'chat-model-1' },
     });
   });
+
+  it('returns the default photon exchange rate when no config exists', async () => {
+    const { service } = createService();
+
+    await expect(service.getCurrencySettings()).resolves.toEqual({
+      code: 'PHOTON',
+      name: '光子',
+      symbol: '✦',
+      photonPerCny: 10,
+    });
+  });
+
+  it('updates the photon exchange rate and converts recharge amounts only', async () => {
+    const { service, prisma } = createService();
+    prisma.systemConfig.findUnique
+      .mockResolvedValueOnce({ photonPerCny: { toString: () => '100' } })
+      .mockResolvedValueOnce({ photonPerCny: { toString: () => '100' } });
+
+    await expect(service.setPhotonPerCny(100)).resolves.toEqual({
+      code: 'PHOTON',
+      name: '光子',
+      symbol: '✦',
+      photonPerCny: 100,
+    });
+    await expect(service.convertCnyToPhoton(1.25)).resolves.toBe(125);
+    expect(prisma.systemConfig.upsert).toHaveBeenCalledWith({
+      where: { id: 1 },
+      create: { id: 1, photonPerCny: expect.anything() },
+      update: { photonPerCny: expect.anything() },
+    });
+  });
 });

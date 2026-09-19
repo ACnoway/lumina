@@ -391,6 +391,15 @@ async function main() {
     promptOptimizerSetting.data.modelId === chatModel.data.id,
     'admin prompt optimizer model setting did not persist',
   );
+
+  const currencyBefore = await requestAuth(adminToken, '/admin/settings/currency');
+  assert(currencyBefore.data.code === 'PHOTON', 'currency code is not PHOTON');
+  const currencySetting = await requestAuth(adminToken, '/admin/settings/currency', {
+    method: 'PATCH',
+    body: { photonPerCny: 100 },
+  });
+  assert(Number(currencySetting.data.photonPerCny) === 100, 'photon recharge rate did not persist');
+  await requestAuth(userToken, '/admin/settings/currency', {}, [403]);
   const optimizedPrompt = await requestAuth(userToken, '/image/optimize-prompt', {
     method: 'POST',
     body: { prompt: 'a tiny e2e test image' },
@@ -512,6 +521,7 @@ async function main() {
     actions.includes('prompt_optimizer_model.updated'),
     'prompt optimizer setting was not audited',
   );
+  assert(actions.includes('currency_settings.updated'), 'currency setting was not audited');
   const statusAudits = auditLogs.data.items.filter(
     (item) => item.action === 'user.status.updated' && item.details?.targetId === userId,
   );

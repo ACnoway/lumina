@@ -90,7 +90,7 @@ export class UsersService implements OnModuleInit {
   }): Promise<User> {
     const initialBalance = parseFloat(this.config.get<string>('INITIAL_BALANCE', '10.00'));
 
-    this.logger.log(`Creating user ${data.email} with initial balance ${initialBalance}`);
+    this.logger.log(`Creating user ${data.email} with initial photon balance ${initialBalance}`);
 
     // 使用事务确保用户和钱包同时创建
     const user = await this.prisma.user.create({

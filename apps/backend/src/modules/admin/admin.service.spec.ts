@@ -56,6 +56,18 @@ function createService() {
   const settings = {
     getPromptOptimizerModel: jest.fn().mockResolvedValue(null),
     setPromptOptimizerModel: jest.fn().mockResolvedValue(undefined),
+    getCurrencySettings: jest.fn().mockResolvedValue({
+      code: 'PHOTON',
+      name: '光子',
+      symbol: '✦',
+      photonPerCny: 10,
+    }),
+    setPhotonPerCny: jest.fn().mockResolvedValue({
+      code: 'PHOTON',
+      name: '光子',
+      symbol: '✦',
+      photonPerCny: 100,
+    }),
   };
 
   return {
@@ -174,6 +186,30 @@ describe('AdminService', () => {
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'prompt_optimizer_model.updated',
+        resource: 'system_config',
+      }),
+    );
+  });
+
+  it('updates the recharge exchange rate and records the currency audit', async () => {
+    const { service, settings, audit } = createService();
+
+    await expect(
+      service.updateCurrencySettings(
+        admin as never,
+        { photonPerCny: 100 },
+        { ipAddress: '127.0.0.1' },
+      ),
+    ).resolves.toEqual({
+      code: 'PHOTON',
+      name: '光子',
+      symbol: '✦',
+      photonPerCny: 100,
+    });
+    expect(settings.setPhotonPerCny).toHaveBeenCalledWith(100);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'currency_settings.updated',
         resource: 'system_config',
       }),
     );

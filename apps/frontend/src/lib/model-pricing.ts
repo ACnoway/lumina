@@ -1,4 +1,4 @@
-import type { ChatModelPricing, ImageModelPricing } from '@lumina/shared';
+import { PHOTON_SYMBOL, type ChatModelPricing, type ImageModelPricing } from '@lumina/shared';
 
 export function formatModelPrice(value: number): string {
   return Number.isFinite(value)
@@ -6,8 +6,14 @@ export function formatModelPrice(value: number): string {
     : '—';
 }
 
+export function formatPhoton(value: number, fractionDigits = 4): string {
+  return Number.isFinite(value)
+    ? `${PHOTON_SYMBOL}${value.toFixed(fractionDigits).replace(/\.?0+$/, '')}`
+    : `${PHOTON_SYMBOL}—`;
+}
+
 export function formatChatModelPricing(pricing: ChatModelPricing): string {
-  return `输入 ¥${formatModelPrice(pricing.input)} / 千 token · 输出 ¥${formatModelPrice(pricing.output)} / 千 token`;
+  return `输入 ${formatPhoton(pricing.input)} / 千 token · 输出 ${formatPhoton(pricing.output)} / 千 token`;
 }
 
 export function formatImageModelPricing(
@@ -18,8 +24,8 @@ export function formatImageModelPricing(
   const totalPrice = formatModelPrice(pricing.perImage * imageCount);
 
   if (imageCount > 1) {
-    return `生成价格：每张 ¥${unitPrice} · 本次预计 ¥${totalPrice}`;
+    return `生成价格：每张 ${PHOTON_SYMBOL}${unitPrice} · 本次预计 ${PHOTON_SYMBOL}${totalPrice}`;
   }
 
-  return `生成价格：每张 ¥${unitPrice}`;
+  return `生成价格：每张 ${PHOTON_SYMBOL}${unitPrice}`;
 }

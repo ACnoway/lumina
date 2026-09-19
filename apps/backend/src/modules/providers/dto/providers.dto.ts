@@ -147,7 +147,7 @@ export class CreatePlatformModelDto {
 
   @ApiProperty({
     description:
-      '计费标准：CHAT 使用 { input, output }（每千 token），IMAGE 使用 { perImage }（每张图片）',
+      '光子计费标准：CHAT 使用 { input, output }（每千 token），IMAGE 使用 { perImage }（每张图片）',
     example: { input: 0.001, output: 0.002 },
   })
   @IsObject({ message: 'pricing 必须是对象' })

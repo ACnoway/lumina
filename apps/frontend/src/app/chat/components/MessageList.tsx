@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '@/lib/chat-types';
+import { formatPhoton } from '@/lib/model-pricing';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -90,7 +91,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             <div className="mt-1.5 border-t border-gray-200 pt-1 text-xs text-gray-400">
               {message.tokens !== null && `${message.tokens} tokens`}
               {message.tokens !== null && message.cost != null && ' · '}
-              {message.cost != null && `实际费用 ¥${message.cost.toFixed(4)}`}
+              {message.cost != null && `实际费用 ${formatPhoton(message.cost)}`}
             </div>
           )}
       </div>

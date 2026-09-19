@@ -418,15 +418,15 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * 生图不支持 0 元结算；与预扣保持一致，统一使用最低收费。
-   * 这样即使历史任务或旧模型配置缺少 perImage，也不会在上游生成完成后以 0 元结算失败。
+   * 生图不支持 0 光子结算；与预扣保持一致，统一使用最低收费。
+   * 这样即使历史任务或旧模型配置缺少 perImage，也不会在上游生成完成后以 0 光子结算失败。
    */
   private normalizeImagePrice(value: unknown, modelName: string): number {
     const configuredPrice = Number(value);
 
     if (!Number.isFinite(configuredPrice) || configuredPrice <= 0) {
       this.logger.warn(
-        `生图模型未配置有效 perImage: model=${modelName}, ` + `使用最低收费 ${MIN_IMAGE_CHARGE} 元`,
+        `生图模型未配置有效 perImage: model=${modelName}, ` + `使用最低收费 ${MIN_IMAGE_CHARGE} 光子`,
       );
       return MIN_IMAGE_CHARGE;
     }

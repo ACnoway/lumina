@@ -66,3 +66,13 @@ export class UpdatePromptOptimizerModelDto {
   @MaxLength(100, { message: 'modelId 不能超过 100 个字符' })
   modelId!: string;
 }
+
+export class UpdateCurrencySettingsDto {
+  @Type(() => Number)
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false },
+    { message: 'photonPerCny 必须是有限数字' },
+  )
+  @Min(0.000001, { message: 'photonPerCny 必须大于 0' })
+  photonPerCny!: number;
+}

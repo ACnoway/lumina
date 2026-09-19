@@ -12,6 +12,7 @@ import {
   ListAdminUsersQueryDto,
   PaginationQueryDto,
   UpdatePromptOptimizerModelDto,
+  UpdateCurrencySettingsDto,
   UpdateUserStatusDto,
 } from './dto/admin.dto';
 
@@ -43,6 +44,26 @@ export class AdminController {
     @Req() request: Request,
   ) {
     return this.adminService.updatePromptOptimizerSetting(
+      actor,
+      dto,
+      this.auditContext(request),
+    );
+  }
+
+  @Get('settings/currency')
+  @ApiOperation({ summary: '获取平台光子货币设置' })
+  async getCurrencySettings() {
+    return this.adminService.getCurrencySettings();
+  }
+
+  @Patch('settings/currency')
+  @ApiOperation({ summary: '更新人民币充值与光子汇率' })
+  async updateCurrencySettings(
+    @CurrentUser() actor: User,
+    @Body() dto: UpdateCurrencySettingsDto,
+    @Req() request: Request,
+  ) {
+    return this.adminService.updateCurrencySettings(
       actor,
       dto,
       this.auditContext(request),

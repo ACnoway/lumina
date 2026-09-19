@@ -1,7 +1,7 @@
 'use client';
 
 import type { ChatModel } from '@/lib/chat-types';
-import { formatChatModelPricing } from '@/lib/model-pricing';
+import { formatChatModelPricing, formatPhoton } from '@/lib/model-pricing';
 
 interface TopBarProps {
   models: ChatModel[];
@@ -60,7 +60,7 @@ export default function TopBar({
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
             <span className="mr-2 text-xs text-gray-400">余额</span>
             <span className={`font-semibold ${balance < 1 ? 'text-red-500' : 'text-gray-700'}`}>
-              ¥{balance.toFixed(2)}
+              {formatPhoton(balance, 2)}
             </span>
           </div>
         )}

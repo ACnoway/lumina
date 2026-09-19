@@ -7,6 +7,7 @@ import type {
   CreatePlatformModelDto,
   CreateProviderDto,
   CreateUpstreamModelDto,
+  CurrencySettingsDto,
   GetTransactionsResponse,
   ModelType,
   PlatformModelDto,
@@ -84,6 +85,14 @@ export const adminApi = {
 
   updatePromptOptimizerSetting(modelId: string): Promise<PromptOptimizerSettingDto> {
     return apiClient.patch("/admin/settings/prompt-optimizer", { modelId });
+  },
+
+  getCurrencySettings(): Promise<CurrencySettingsDto> {
+    return apiClient.get("/admin/settings/currency");
+  },
+
+  updateCurrencySettings(photonPerCny: number): Promise<CurrencySettingsDto> {
+    return apiClient.patch("/admin/settings/currency", { photonPerCny });
   },
 
   getUsers(options: ListAdminUsersOptions = {}): Promise<AdminUsersResponse> {

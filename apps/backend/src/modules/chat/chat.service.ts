@@ -236,7 +236,7 @@ export class ChatService {
       (estimatedInputTokens / 1000) * inputPrice +
       (estimatedOutputTokens / 1000) * outputPrice;
 
-    // 预扣至少 0.01 元，避免极小金额
+    // 预扣至少 0.01 光子，避免极小金额
     const preDeductAmount = Math.max(estimatedCost, 0.01);
     const idempotencyKey = `chat:${session.id}:${userMessage.id}`;
 

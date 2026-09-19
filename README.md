@@ -25,6 +25,7 @@ lumina/
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + MinIO
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
 - **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
+- **平台货币**：钱包、账本、模型价格和所有消费统一使用光子（符号 `✦`）；后台汇率 `1 人民币 = N 光子` 只用于充值换算，消费不套用汇率
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
 

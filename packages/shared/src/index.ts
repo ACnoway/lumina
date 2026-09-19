@@ -7,6 +7,15 @@ export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED';
 // ==================== 交易类型 ====================
 export type TransactionType = 'RECHARGE' | 'CONSUME' | 'REFUND' | 'ADMIN_ADJUST';
 
+export const PHOTON_SYMBOL = '✦';
+
+export interface CurrencySettingsDto {
+  code: 'PHOTON';
+  name: '光子';
+  symbol: typeof PHOTON_SYMBOL;
+  photonPerCny: number;
+}
+
 // ==================== 消息角色 ====================
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 

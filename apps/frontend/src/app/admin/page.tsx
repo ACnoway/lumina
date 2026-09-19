@@ -7,6 +7,7 @@ import type {
   AdminUserDto,
   ApiFormat,
   AuditLogDto,
+  CurrencySettingsDto,
   ModelType,
   PlatformModelDto,
   ProviderDto,
@@ -17,6 +18,7 @@ import type {
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
+import { formatPhoton } from "@/lib/model-pricing";
 import AppHeader from "@/components/AppHeader";
 
 const PAGE_SIZE = 20;
@@ -76,20 +78,14 @@ function formatDate(value: string): string {
 }
 
 function formatMoney(value: number): string {
-  return `¥${value.toFixed(2)}`;
-}
-
-function formatPrice(value: number): string {
-  return Number.isFinite(value)
-    ? value.toFixed(4).replace(/\.?(0+)$/, "")
-    : "—";
+  return formatPhoton(value, 2);
 }
 
 function formatModelPricing(model: PlatformModelDto): string {
   if (model.type === "CHAT") {
-    return `输入 ¥${formatPrice(model.pricing.input)} / 千 token · 输出 ¥${formatPrice(model.pricing.output)} / 千 token`;
+    return `输入 ${formatPhoton(model.pricing.input)} / 千 token · 输出 ${formatPhoton(model.pricing.output)} / 千 token`;
   }
-  return `¥${formatPrice(model.pricing.perImage)} / 张`;
+  return `${formatPhoton(model.pricing.perImage)} / 张`;
 }
 
 function formatProviderConfig(provider: ProviderDto): string {
@@ -277,6 +273,8 @@ export default function AdminPage() {
 
   const [models, setModels] = useState<PlatformModelDto[]>([]);
   const [providers, setProviders] = useState<ProviderDto[]>([]);
+  const [currencySettings, setCurrencySettings] = useState<CurrencySettingsDto | null>(null);
+  const [photonPerCny, setPhotonPerCny] = useState("10");
   const [promptOptimizerModelId, setPromptOptimizerModelId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [upstreams, setUpstreams] = useState<UpstreamModelDto[]>([]);
@@ -375,13 +373,16 @@ export default function AdminPage() {
   const loadConfig = useCallback(async () => {
     setLoadingConfig(true);
     try {
-      const [nextModels, nextProviders, promptOptimizerSetting] = await Promise.all([
+      const [nextModels, nextProviders, promptOptimizerSetting, nextCurrencySettings] = await Promise.all([
         adminApi.getModels(),
         adminApi.getProviders(),
         adminApi.getPromptOptimizerSetting(),
+        adminApi.getCurrencySettings(),
       ]);
       setModels(nextModels);
       setProviders(nextProviders);
+      setCurrencySettings(nextCurrencySettings);
+      setPhotonPerCny(String(nextCurrencySettings.photonPerCny));
       setPromptOptimizerModelId(promptOptimizerSetting.modelId ?? "");
       setSelectedModelId((current) =>
         nextModels.some((model) => model.id === current)
@@ -735,6 +736,27 @@ export default function AdminPage() {
       await loadConfig();
     } catch (formError) {
       setError(getErrorMessage(formError, "保存提示词优化模型失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function submitCurrencySettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const rate = Number(photonPerCny);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setError("汇率必须是大于 0 的数字");
+      return;
+    }
+
+    setMutatingResource("currency");
+    try {
+      const updated = await adminApi.updateCurrencySettings(rate);
+      setCurrencySettings(updated);
+      setPhotonPerCny(String(updated.photonPerCny));
+      setNotice("充值汇率已更新；消费价格和已有余额不会改变");
+    } catch (currencyError) {
+      setError(getErrorMessage(currencyError, "保存充值汇率失败"));
     } finally {
       setMutatingResource("");
     }
@@ -1302,7 +1324,7 @@ export default function AdminPage() {
                     className="mt-5 space-y-3 border-y border-gray-100 py-5"
                     onSubmit={submitAdjustment}
                   >
-                    <h3 className="text-sm font-semibold">调整余额</h3>
+                    <h3 className="text-sm font-semibold">调整光子余额</h3>
                     <input
                       value={adjustmentAmount}
                       onChange={(event) =>
@@ -1310,7 +1332,7 @@ export default function AdminPage() {
                       }
                       type="number"
                       step="0.01"
-                      placeholder="金额，例如 10 或 -5"
+                      placeholder="光子数量，例如 10 或 -5"
                       className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
                     />
                     <textarea
@@ -1405,6 +1427,42 @@ export default function AdminPage() {
                 {loadingConfig ? "刷新中…" : "刷新配置"}
               </button>
             </div>
+            <section className="rounded-2xl border border-amber-100 bg-amber-50/50 p-5 shadow-sm sm:p-6">
+              <div className="mb-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">
+                  Platform Currency
+                </p>
+                <h3 className="mt-1 font-semibold text-gray-800">光子充值汇率</h3>
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  当前平台消费和模型价格均直接使用光子；此汇率只用于充值时将人民币换算为光子。
+                </p>
+              </div>
+              <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={submitCurrencySettings}>
+                <label className="flex-1 space-y-1 text-xs text-gray-500">
+                  <span className="block font-medium text-gray-700">1 人民币兑换光子数量</span>
+                  <input
+                    value={photonPerCny}
+                    onChange={(event) => setPhotonPerCny(event.target.value)}
+                    type="number"
+                    min="0.000001"
+                    step="0.000001"
+                    required
+                    disabled={loadingConfig || mutatingResource === "currency"}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                  />
+                </label>
+                <div className="text-sm text-gray-500">
+                  1 人民币 = {currencySettings?.photonPerCny ?? photonPerCny} 光子
+                </div>
+                <button
+                  type="submit"
+                  disabled={loadingConfig || mutatingResource === "currency"}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {mutatingResource === "currency" ? "保存中…" : "保存汇率"}
+                </button>
+              </form>
+            </section>
             <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5 shadow-sm sm:p-6">
               <div className="mb-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-500">
@@ -1534,7 +1592,7 @@ export default function AdminPage() {
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs text-gray-500">
                           <span className="block font-medium text-gray-700">
-                            输入价格（元 / 千 token）
+                            输入价格（光子 / 千 token）
                           </span>
                           <input
                             value={modelForm.pricing.input}
@@ -1556,7 +1614,7 @@ export default function AdminPage() {
                         </label>
                         <label className="space-y-1 text-xs text-gray-500">
                           <span className="block font-medium text-gray-700">
-                            输出价格（元 / 千 token）
+                            输出价格（光子 / 千 token）
                           </span>
                           <input
                             value={modelForm.pricing.output}
@@ -1580,7 +1638,7 @@ export default function AdminPage() {
                     ) : (
                       <label className="block space-y-1 text-xs text-gray-500">
                         <span className="block font-medium text-gray-700">
-                          生图价格（元 / 张）
+                          生图价格（光子 / 张）
                         </span>
                         <input
                           value={modelForm.pricing.perImage}

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { ImageStatus, ImageTaskDto, PlatformModelDto } from '@lumina/shared';
 import { ApiError } from '@/lib/api-client';
 import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
-import { formatImageModelPricing } from '@/lib/model-pricing';
+import { formatImageModelPricing, formatPhoton } from '@/lib/model-pricing';
 import AppHeader from '@/components/AppHeader';
 import ImageLightbox, {
   ImageDownloadButton,
@@ -303,7 +303,7 @@ export default function ImagePage() {
       const response = await imageApi.optimizePrompt(input);
       setOriginalPrompt(input);
       setPrompt(response.optimizedPrompt);
-      setNotice(`提示词已优化，本次费用 ¥${response.cost.toFixed(4)}`);
+      setNotice(`提示词已优化，本次费用 ${formatPhoton(response.cost)}`);
     } catch (optimizeError) {
       setError(getErrorMessage(optimizeError, '提示词优化失败'));
     } finally {
@@ -654,7 +654,7 @@ export default function ImagePage() {
               {task.cost !== null && (
                 <div className="flex justify-between gap-4">
                   <span>费用</span>
-                  <span className="font-medium text-gray-700">¥{task.cost.toFixed(4)}</span>
+                  <span className="font-medium text-gray-700">{formatPhoton(task.cost)}</span>
                 </div>
               )}
               <div className="space-y-3 pt-2">

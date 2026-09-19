@@ -4,6 +4,13 @@
 > 验证提交：`6ee5917 test: account for prompt optimizer rate limit`
 > 分支状态：提示词优化模型配置改造已完成；本地 `main` 与远程 `origin/main` 已同步，远程隔离 E2E 已通过。
 
+## 平台光子货币规则
+
+- 所有平台消费和模型价格统一使用光子，展示符号为 `✦`；管理员设置模型价格时直接填写光子数量。
+- 现有模型价格、钱包余额和历史费用按数值 1:1 视为光子，不套用充值汇率。
+- 后台汇率定义为 `1 人民币 = N 光子`，只在充值/支付成功入账前换算；汇率修改不影响既有余额、历史账单或消费价格。
+- 后台货币接口为 `GET/PATCH /admin/settings/currency`，修改会写入审计日志；支付模块应使用 `SettingsService.convertCnyToPhoton()` 后再调用 `WalletService.recharge()`。
+
 ## 先读这份文档
 
 Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、NestJS 后端、Prisma/PostgreSQL、Redis、MinIO，以及 OpenAI/Anthropic 兼容的聊天与生图上游。
@@ -25,7 +32,7 @@ Lumina 是一个 pnpm + Turborepo 单体仓库：Next.js App Router 前端、Nes
 - 生图恢复重试已向 OpenAI Images、OpenAI-compatible 和 Stability Image 请求透传稳定的 `Idempotency-Key: image:<taskId>`；mock Provider 会按键复用响应。
 - 历史页已接入用户自己的聊天会话与生图任务，支持分页、加载、空状态和错误重试。
 - 管理后台已接入概览、用户/账本、余额调整、模型、供应商、上游映射与审计日志；管理员可看到停用模型，普通用户仍只能看到启用模型。服务启动时会按 `ADMIN_EMAIL` 幂等初始化管理员账户。
-- 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示结构化计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
+- 管理后台平台模型已改为按 `CHAT/IMAGE` 类型展示光子计费表单；聊天模型填写 `input/output`，生图模型填写 `perImage`，前后端均拒绝不匹配或负数配置。
 - 提示词优化模型配置使用已有的 `CHAT` 平台模型，后台选择写入 `system_configs`；`PROMPT_OPTIMIZER_MODEL` 只作为未保存后台配置时的兼容兜底。
 - 管理后台供应商已改为 API Key、Base URL、请求超时和限流输入框；前后端均校验配置格式，列表和审计不暴露 API Key。
 - 已建立独立 API/E2E Compose 环境，包含 PostgreSQL、Redis、MinIO、MailHog、mock Provider、backend 和 frontend；认证、RBAC、管理端用户状态启停/余额账本/审计、聊天、生图和管理配置旅程已在远程通过。

@@ -12,15 +12,12 @@ import {
 } from "@/components/AuthLayout";
 import { apiClient } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
+import { formatPhoton } from "@/lib/model-pricing";
 
 const passwordPattern = /^(?=.*[A-Za-z])(?=.*\d).+$/;
 
 function formatBalance(value: number): string {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: 2,
-  }).format(value);
+  return formatPhoton(value, 2);
 }
 
 function roleLabel(role: GetCurrentUserResponse["user"]["role"]): string {
