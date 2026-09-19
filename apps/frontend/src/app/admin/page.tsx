@@ -21,7 +21,7 @@ import type {
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
-import { formatPhoton } from "@/lib/model-pricing";
+import { formatPhoton, formatPhotonTruncated } from "@/lib/model-pricing";
 import AppHeader from "@/components/AppHeader";
 
 const PAGE_SIZE = 20;
@@ -82,6 +82,10 @@ function formatDate(value: string): string {
 
 function formatMoney(value: number): string {
   return formatPhoton(value, 2);
+}
+
+function formatBillAmount(value: number): string {
+  return formatPhotonTruncated(value, 4);
 }
 
 const transactionTypeLabels: Record<TransactionType, string> = {
@@ -1488,14 +1492,14 @@ export default function AdminPage() {
                                 {transactionTypeLabels[transaction.type]}
                               </span>
                               <span className={display.colorClass}>
-                                {display.prefix}{formatMoney(display.amount)}
+                                {display.prefix}{formatBillAmount(display.amount)}
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs text-gray-500">
                               {transaction.reason}
                             </p>
                             <p className="mt-1 text-xs text-gray-400">
-                              余额 {formatMoney(transaction.balance)} ·{" "}
+                              余额 {formatBillAmount(transaction.balance)} ·{" "}
                               {formatDate(transaction.createdAt)}
                             </p>
                             </article>

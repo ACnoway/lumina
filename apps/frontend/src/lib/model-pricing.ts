@@ -12,6 +12,25 @@ export function formatPhoton(value: number, fractionDigits = 4): string {
     : `${PHOTON_SYMBOL}—`;
 }
 
+/**
+ * Format a photon amount for billing without rounding beyond the displayed precision.
+ * Wallet values are stored with up to six decimal places, so formatting them to six
+ * places first avoids binary floating-point artifacts before truncating the display.
+ */
+export function formatPhotonTruncated(value: number, fractionDigits = 4): string {
+  if (!Number.isFinite(value)) {
+    return `${PHOTON_SYMBOL}—`;
+  }
+
+  const precision = Math.max(fractionDigits, 6);
+  const [integerPart, fractionPart = ''] = Math.abs(value).toFixed(precision).split('.');
+  const truncatedFraction = fractionPart.slice(0, fractionDigits).replace(/0+$/, '');
+  const sign = value < 0 ? '-' : '';
+  const decimalPart = truncatedFraction ? `.${truncatedFraction}` : '';
+
+  return `${PHOTON_SYMBOL}${sign}${integerPart}${decimalPart}`;
+}
+
 export function formatChatModelPricing(pricing: ChatModelPricing): string {
   return `输入 ${formatPhoton(pricing.input)} / 千 token · 输出 ${formatPhoton(pricing.output)} / 千 token`;
 }

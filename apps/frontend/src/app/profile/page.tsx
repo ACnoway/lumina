@@ -21,7 +21,7 @@ import {
 } from "@/components/AuthLayout";
 import { apiClient } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
-import { formatPhoton } from "@/lib/model-pricing";
+import { formatPhoton, formatPhotonTruncated } from "@/lib/model-pricing";
 import { paymentsApi } from "@/lib/payments-api";
 import { walletApi } from "@/lib/wallet-api";
 
@@ -134,6 +134,10 @@ function ProfileIcon({
 
 function formatBalance(value: number): string {
   return formatPhoton(value, 2);
+}
+
+function formatBillAmount(value: number): string {
+  return formatPhotonTruncated(value, 4);
 }
 
 const transactionTypeLabels: Record<TransactionType, string> = {
@@ -759,7 +763,7 @@ export default function ProfilePage() {
                   <div className="rounded-xl bg-blue-50 px-4 py-3 text-right">
                     <p className="text-xs text-blue-500">当前余额</p>
                     <p className="mt-1 text-lg font-semibold text-blue-700">
-                      {formatBalance(profile.wallet.balance)}
+                      {formatBillAmount(profile.wallet.balance)}
                     </p>
                   </div>
                 </div>
@@ -822,11 +826,11 @@ export default function ProfilePage() {
                                 </p>
                               </div>
                               <p className={`shrink-0 text-base font-semibold ${display.colorClass}`}>
-                                {display.prefix}{formatBalance(display.amount)}
+                                {display.prefix}{formatBillAmount(display.amount)}
                               </p>
                             </div>
                             <p className="mt-2 text-xs text-gray-400">
-                              余额 {formatBalance(transaction.balance)} · {formatTransactionDate(transaction.createdAt)}
+                              余额 {formatBillAmount(transaction.balance)} · {formatTransactionDate(transaction.createdAt)}
                             </p>
                           </article>
                         );
