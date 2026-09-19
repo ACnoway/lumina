@@ -85,6 +85,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change_this_password}
       INITIAL_BALANCE: ${INITIAL_BALANCE:-10.00}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      PAYMENT_CONFIG_ENCRYPTION_KEY: ${PAYMENT_CONFIG_ENCRYPTION_KEY:?PAYMENT_CONFIG_ENCRYPTION_KEY must be set}
+      PAYMENT_NOTIFY_BASE_URL: ${PAYMENT_NOTIFY_BASE_URL:-http://localhost:3000}
+      PAYMENT_RETURN_URL: ${PAYMENT_RETURN_URL:-http://localhost:3000/profile}
       BACKEND_PORT: 3001
     # ports:
     #   - '3001:3001'  # 如需直接访问 API / Swagger，取消注释

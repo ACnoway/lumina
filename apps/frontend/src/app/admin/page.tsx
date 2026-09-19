@@ -9,6 +9,8 @@ import type {
   AuditLogDto,
   CurrencySettingsDto,
   ModelType,
+  PaymentChannelDto,
+  PaymentChannelMetadata,
   PlatformModelDto,
   ProviderDto,
   UpstreamModelDto,
@@ -57,7 +59,7 @@ const PROVIDER_DEFAULTS: Record<
   },
 };
 
-type Tab = "overview" | "users" | "config" | "audit";
+type Tab = "overview" | "users" | "config" | "payments" | "audit";
 type AccessState = "checking" | "allowed" | "forbidden" | "expired";
 type ResourceType = "model" | "provider" | "upstream";
 type DeleteTarget = {
@@ -340,6 +342,16 @@ export default function AdminPage() {
     resource: "",
   });
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [paymentAdapters, setPaymentAdapters] = useState<PaymentChannelMetadata[]>([]);
+  const [paymentChannels, setPaymentChannels] = useState<PaymentChannelDto[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [showPaymentChannelForm, setShowPaymentChannelForm] = useState(false);
+  const [paymentChannelForm, setPaymentChannelForm] = useState({
+    name: "",
+    type: "EPAY" as PaymentChannelDto["type"],
+    config: '{\n  "baseUrl": "https://pay.example.com",\n  "pid": "",\n  "key": ""\n}',
+    isActive: true,
+  });
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -436,6 +448,22 @@ export default function AdminPage() {
     }
   }, [auditFilters, auditPage]);
 
+  const loadPayments = useCallback(async () => {
+    setLoadingPayments(true);
+    try {
+      const [adapters, channels] = await Promise.all([
+        adminApi.getPaymentAdapters(),
+        adminApi.getPaymentChannels(),
+      ]);
+      setPaymentAdapters(adapters);
+      setPaymentChannels(channels);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, "加载支付渠道失败"));
+    } finally {
+      setLoadingPayments(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function verifyAccess() {
@@ -475,6 +503,10 @@ export default function AdminPage() {
   useEffect(() => {
     if (accessState === "allowed" && tab === "audit") void loadAudit();
   }, [accessState, loadAudit, tab]);
+
+  useEffect(() => {
+    if (accessState === "allowed" && tab === "payments") void loadPayments();
+  }, [accessState, loadPayments, tab]);
 
   async function selectUser(user: AdminUserDto) {
     setSelectedUser(user);
@@ -937,6 +969,50 @@ export default function AdminPage() {
     });
   }
 
+  async function submitPaymentChannel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const config = parseObject(paymentChannelForm.config, "支付渠道配置");
+      const channel = await adminApi.createPaymentChannel({
+        name: paymentChannelForm.name.trim(),
+        type: paymentChannelForm.type,
+        config,
+        isActive: paymentChannelForm.isActive,
+      });
+      setNotice(`已创建支付渠道“${channel.name}”`);
+      setShowPaymentChannelForm(false);
+      setPaymentChannelForm((current) => ({ ...current, name: "" }));
+      await loadPayments();
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, "创建支付渠道失败"));
+    }
+  }
+
+  async function togglePaymentChannel(channel: PaymentChannelDto) {
+    setMutatingResource(`payment:${channel.id}`);
+    try {
+      await adminApi.setPaymentChannelActive(channel.id, !channel.isActive);
+      setNotice(`已${channel.isActive ? "停用" : "启用"}支付渠道“${channel.name}”`);
+      await loadPayments();
+    } catch (toggleError) {
+      setError(getErrorMessage(toggleError, "更新支付渠道状态失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function testPaymentChannel(channel: PaymentChannelDto) {
+    setMutatingResource(`test-payment:${channel.id}`);
+    try {
+      await adminApi.testPaymentChannel(channel.id);
+      setNotice(`支付渠道“${channel.name}”配置验证通过`);
+    } catch (testError) {
+      setError(getErrorMessage(testError, "支付渠道配置验证失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
   if (accessState === "checking") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f7f7f5] text-sm text-gray-500">
@@ -999,11 +1075,12 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         <div className="mb-6 flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
           {(
-            [
-              ["overview", "概览"],
-              ["users", "用户与余额"],
-              ["config", "模型与供应商"],
-              ["audit", "审计日志"],
+              [
+                ["overview", "概览"],
+                ["users", "用户与余额"],
+                ["config", "模型与供应商"],
+                ["payments", "支付渠道"],
+                ["audit", "审计日志"],
             ] as Array<[Tab, string]>
           ).map(([value, label]) => (
             <button
@@ -2271,6 +2348,123 @@ export default function AdminPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </section>
+          </section>
+        )}
+
+        {tab === "payments" && (
+          <section className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                  Payment Channels
+                </p>
+                <h2 className="mt-1 text-2xl font-semibold">支付渠道</h2>
+                <p className="mt-2 text-sm text-gray-500">
+                  渠道实例由管理员配置，前台展示启用渠道并由用户自行选择；这里不设置优先级或权重。
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={loadingPayments}
+                  onClick={() => void loadPayments()}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
+                >
+                  {loadingPayments ? "刷新中…" : "刷新渠道"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentChannelForm((current) => !current)}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {showPaymentChannelForm ? "取消" : "新增渠道"}
+                </button>
+              </div>
+            </div>
+
+            {showPaymentChannelForm && (
+              <form className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-5" onSubmit={submitPaymentChannel}>
+                <h3 className="font-semibold text-gray-800">新增支付渠道实例</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">渠道名称</span>
+                    <input
+                      value={paymentChannelForm.name}
+                      onChange={(event) => setPaymentChannelForm((current) => ({ ...current, name: event.target.value }))}
+                      required
+                      placeholder="例如：易支付主通道"
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Adapter 类型</span>
+                    <select
+                      value={paymentChannelForm.type}
+                      onChange={(event) => setPaymentChannelForm((current) => ({ ...current, type: event.target.value as PaymentChannelDto["type"] }))}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      {paymentAdapters.map((adapter) => (
+                        <option key={adapter.type} value={adapter.type}>{adapter.name}（{adapter.type}）</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label className="block space-y-1 text-xs text-gray-500">
+                  <span className="block font-medium text-gray-700">渠道配置 JSON</span>
+                  <textarea
+                    value={paymentChannelForm.config}
+                    onChange={(event) => setPaymentChannelForm((current) => ({ ...current, config: event.target.value }))}
+                    rows={8}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs"
+                  />
+                  <span className="block text-gray-400">提交后密钥会在服务端加密保存，列表只展示脱敏摘要。</span>
+                </label>
+                <button type="submit" disabled={loadingPayments} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  保存支付渠道
+                </button>
+              </form>
+            )}
+
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">已配置渠道</h3>
+                  <p className="mt-1 text-xs text-gray-400">启用后的渠道会根据支付方式和场景展示给用户。</p>
+                </div>
+                <span className="text-sm text-gray-400">共 {paymentChannels.length} 个</span>
+              </div>
+              {paymentChannels.length === 0 ? (
+                <p className="rounded-lg bg-gray-50 px-3 py-4 text-sm text-gray-400">暂无支付渠道配置。</p>
+              ) : (
+                <div className="space-y-3">
+                  {paymentChannels.map((channel) => (
+                    <div key={channel.id} className="flex flex-col gap-3 rounded-xl border border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-gray-800">{channel.name}</p>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">{channel.type}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] ${channel.isActive ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"}`}>
+                            {channel.isActive ? "已启用" : "已停用"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">
+                          支付方式：{channel.metadata?.methods.join("、") || "—"} · 场景：{channel.metadata?.scenes.join("、") || "—"}
+                        </p>
+                        <p className="mt-1 break-all text-xs text-gray-400">{channel.publicConfig ? JSON.stringify(channel.publicConfig) : "无公开配置摘要"}</p>
+                      </div>
+                      <div className="flex shrink-0 gap-3 text-sm">
+                        <button type="button" disabled={mutatingResource !== ""} onClick={() => void testPaymentChannel(channel)} className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                          {mutatingResource === `test-payment:${channel.id}` ? "验证中…" : "验证配置"}
+                        </button>
+                        <button type="button" disabled={mutatingResource !== ""} onClick={() => void togglePaymentChannel(channel)} className="text-gray-600 hover:text-gray-800 disabled:opacity-50">
+                          {channel.isActive ? "停用" : "启用"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </section>

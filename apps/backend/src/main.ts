@@ -4,7 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // 全局验证管道
   app.useGlobalPipes(
@@ -33,6 +33,7 @@ async function bootstrap() {
     .addTag('chat', '聊天功能')
     .addTag('image', '生图功能')
     .addTag('admin', '管理端')
+    .addTag('payments', '支付与充值')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

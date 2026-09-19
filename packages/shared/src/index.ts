@@ -16,6 +16,65 @@ export interface CurrencySettingsDto {
   photonPerCny: number;
 }
 
+// ==================== 支付相关类型 ====================
+export type PaymentChannelType = 'EPAY' | 'ALIPAY' | 'WECHAT';
+export type PaymentMethod = 'ALIPAY' | 'WECHAT';
+export type PaymentScene = 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
+export type PaymentOrderStatus =
+  | 'CREATED'
+  | 'PENDING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CLOSED'
+  | 'EXPIRED'
+  | 'REFUNDED';
+
+export interface PaymentChannelMetadata {
+  type: PaymentChannelType;
+  name: string;
+  methods: PaymentMethod[];
+  scenes: PaymentScene[];
+  capabilities: {
+    query: boolean;
+    close: boolean;
+    refund: boolean;
+  };
+}
+
+export interface PaymentChannelDto {
+  id: string;
+  name: string;
+  type: PaymentChannelType;
+  isActive: boolean;
+  publicConfig?: Record<string, unknown> | null;
+  metadata?: PaymentChannelMetadata;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PaymentAction {
+  type: 'REDIRECT_URL' | 'HTML_FORM' | 'QR_CODE' | 'JSAPI' | 'NONE';
+  url?: string;
+  html?: string;
+  content?: string;
+  params?: Record<string, string>;
+}
+
+export interface PaymentOrderDto {
+  orderNo: string;
+  amount: string;
+  currency: string;
+  photonAmount: string;
+  status: PaymentOrderStatus;
+  paymentMethod: PaymentMethod;
+  scene: PaymentScene;
+  channel: Pick<PaymentChannelDto, 'id' | 'name' | 'type'>;
+  action?: PaymentAction;
+  expireAt: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
 // ==================== 消息角色 ====================
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 

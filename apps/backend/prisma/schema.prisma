@@ -28,6 +28,9 @@ model User {
   
   // 生图记录
   imageGenerations ImageGeneration[]
+
+  // 支付订单
+  paymentOrders PaymentOrder[]
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -176,6 +179,112 @@ model ImageGeneration {
   @@index([status])
   @@index([createdAt])
   @@map("image_generations")
+}
+
+// ==================== 支付 ====================
+enum PaymentChannelType {
+  EPAY
+  ALIPAY
+  WECHAT
+}
+
+enum PaymentMethod {
+  ALIPAY
+  WECHAT
+}
+
+enum PaymentScene {
+  WEB
+  H5
+  QR
+  JSAPI
+  APP
+}
+
+enum PaymentOrderStatus {
+  CREATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CLOSED
+  EXPIRED
+  REFUNDED
+}
+
+model PaymentChannel {
+  id              String             @id @default(cuid())
+  name            String
+  type            PaymentChannelType
+  isActive        Boolean            @default(true)
+  publicConfig    Json?
+  configEncrypted String             @db.Text
+  configVersion   Int                @default(1)
+
+  orders  PaymentOrder[]
+  events  PaymentCallbackEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@map("payment_channels")
+}
+
+model PaymentOrder {
+  id                String             @id @default(cuid())
+  orderNo           String             @unique
+  userId            String
+  user              User               @relation(fields: [userId], references: [id])
+  channelId         String
+  channel           PaymentChannel     @relation(fields: [channelId], references: [id])
+  channelType       PaymentChannelType
+  paymentMethod     PaymentMethod
+  scene             PaymentScene
+  amount            Decimal            @db.Decimal(10, 2)
+  currency          String             @default("CNY")
+  photonAmount      Decimal            @db.Decimal(18, 6)
+  photonPerCny      Decimal            @db.Decimal(18, 6)
+  subject           String
+  status            PaymentOrderStatus @default(CREATED)
+  providerTradeNo   String?
+  paidAmount        Decimal?           @db.Decimal(10, 2)
+  paidAt            DateTime?
+  expireAt          DateTime?
+  clientIp          String?
+  idempotencyKey    String?
+  metadata          Json?
+  failureCode       String?
+  failureMessage    String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId])
+  @@index([channelId])
+  @@index([status])
+  @@index([providerTradeNo])
+  @@index([createdAt])
+  @@map("payment_orders")
+}
+
+model PaymentCallbackEvent {
+  id             String   @id @default(cuid())
+  channelId      String
+  channel        PaymentChannel @relation(fields: [channelId], references: [id])
+  orderNo        String?
+  eventKey       String
+  signatureValid Boolean
+  processed      Boolean  @default(false)
+  payloadHash    String
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+  processedAt    DateTime?
+
+  @@unique([channelId, eventKey])
+  @@index([orderNo])
+  @@index([createdAt])
+  @@map("payment_callback_events")
 }
 
 model ImageGenerationImage {

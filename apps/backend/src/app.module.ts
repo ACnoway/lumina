@@ -14,6 +14,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { ImageModule } from './modules/image/image.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AuditModule } from './modules/audit/audit.module';
     ImageModule,
     AdminModule,
     AuditModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

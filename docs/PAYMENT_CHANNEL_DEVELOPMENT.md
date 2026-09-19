@@ -13,7 +13,7 @@ Lumina 当前后端采用 NestJS + TypeScript + Prisma + PostgreSQL，业务代�
 
 Lumina 的内部平台货币是光子，钱包、账本、模型售价、聊天费用和生图费用全部使用光子。人民币只存在于外部充值/支付订单：支付订单记录用户实际支付的人民币金额，创建订单时读取后台汇率 `1 人民币 = N 光子` 并保存本次应入账的光子快照。支付成功回调不能重新读取最新汇率，也不能把人民币金额直接传给钱包；必须使用订单快照调用 `WalletService.recharge()`。
 
-项目现有 `providers` 模块已经有一个值得支付模块直接借鉴的机制：数据库中的供应商和上游映射可以同时存在多个实例，通过 `priority`、`weight`、`isActive` 控制选择，上层业务只调用统一的路由逻辑。
+项目现有 `providers` 模块支持多实例路由，但支付渠道采用不同策略：渠道实例可以同时存在，启用后展示给用户，由用户明确选择具体渠道，不做支付渠道的自动优先级或权重路由。
 
 支付模块应沿用这一思想，但不要把支付代码直接写入 `wallet` 模块。职责应明确区分：
 
@@ -443,9 +443,6 @@ model PaymentChannel {
 
   isActive    Boolean            @default(true)
 
-  priority    Int                @default(1)
-  weight      Int                @default(1)
-
   // 非敏感配置
   publicConfig Json?
 
@@ -461,7 +458,6 @@ model PaymentChannel {
 
   @@index([type])
   @@index([isActive])
-  @@index([priority])
   @@map("payment_channels")
 }
 ```
@@ -726,27 +722,11 @@ fenToYuan(amount: number): Decimal
 
 并强制金额最多两位小数。
 
-# 15. 支付渠道路由
+# 15. 支付渠道选择
 
-Lumina 现有 Providers 模块已经使用：
+支付渠道不使用 `priority` 或 `weight`，也不由后端自动选择。多个启用的渠道实例会展示给用户，用户在前台选择具体的 `channelId`。
 
-```
-priority
-weight
-isActive
-```
-
-进行多供应商路由，可以直接复用这一设计思想。
-
-PaymentChannel 也拥有：
-
-```
-priority
-weight
-isActive
-```
-
-但支付和 AI 上游有一个非常重要的区别：
+支付和 AI 上游还有一个非常重要的区别：
 
 **支付创建订单以后不能随意自动故障转移。**
 
@@ -772,15 +752,11 @@ Lumina 不知道支付宝到底有没有创建成功
 
 用户可能重复付款。
 
-因此 PaymentRouter 只负责：
-
-**在创建订单之前选择渠道。**
-
-渠道请求一旦发送出去，对“不确定结果”的请求禁止透明 failover。
+因此支付订单创建接口必须收到明确的 `channelId`。后端只负责校验渠道存在、已启用、支持请求的支付方式和场景；渠道请求一旦发送出去，对“不确定结果”的请求禁止透明 failover。
 
 # 16. 渠道选择逻辑
 
-用户可以显式指定：
+用户必须显式指定：
 
 ```
 {
@@ -788,60 +764,13 @@ Lumina 不知道支付宝到底有没有创建成功
 }
 ```
 
-或者只指定：
+前端先调用：
 
 ```
-{
-  "paymentMethod": "ALIPAY",
-  "scene": "QR"
-}
+GET /payments/channels?paymentMethod=ALIPAY&scene=QR
 ```
 
-由系统选择渠道。
-
-推荐逻辑：
-
-```
-获取所有 isActive=true 渠道
-        ↓
-过滤 Adapter 是否支持 method
-        ↓
-过滤 Adapter 是否支持 scene
-        ↓
-按 priority 分组
-        ↓
-选择最低 priority
-        ↓
-同 priority 根据 weight 加权选择
-```
-
-这样可以支持：
-
-```
-支付宝官方
-priority = 1
-weight = 10
-
-易支付支付宝
-priority = 2
-weight = 10
-```
-
-意味着优先使用官方支付宝。
-
-也可以：
-
-```
-易支付A
-priority = 1
-weight = 80
-
-易支付B
-priority = 1
-weight = 20
-```
-
-实现流量比例分配。
+接口只返回启用且支持该方式/场景的渠道实例，前端展示名称并让用户选择。
 
 # 17. 创建支付 API
 
@@ -860,7 +789,7 @@ Idempotency-Key: xxx
   "amount": "50.00",
   "paymentMethod": "ALIPAY",
   "scene": "QR",
-  "channelId": null
+  "channelId": "channel-instance-id"
 }
 ```
 
@@ -901,11 +830,9 @@ PaymentService.createPayment()
   ├─ 校验 Idempotency-Key
   │
   ▼
-PaymentRouter
+PaymentChannelService
   │
-  ├─ 指定 channelId
-  │      OR
-  └─ 自动选择 Channel
+  └─ 校验指定 channelId、支付方式和场景
   │
   ▼
 创建 PaymentOrder(CREATED)
@@ -2157,7 +2084,6 @@ SUCCESS
 
   providers: [
     PaymentService,
-    PaymentRouterService,
     PaymentChannelService,
     PaymentAdapterRegistry,
     PaymentConfigCryptoService,
@@ -2264,7 +2190,7 @@ PaymentChannelAdapter
 
 PaymentAdapterRegistry
 
-PaymentRouter
+PaymentChannelService
 
 PaymentService
 
@@ -2340,7 +2266,7 @@ PaymentChannelAdapter
 PaymentAdapterRegistry
 Payment Types
 Payment Errors
-PaymentRouter
+PaymentChannelService
 ```
 
 先写 FakePaymentAdapter 做单元测试。
@@ -2590,11 +2516,11 @@ Wallet
                        │   PaymentService    │
                        └─────┬────────┬──────┘
                              │        │
-                         route        │ success
+                       selected       │ success
                              │        │
                              ▼        ▼
-                ┌────────────────┐  ┌──────────────┐
-                │ PaymentRouter  │  │ WalletService│
+                ┌────────────────────┐  ┌──────────────┐
+                │ PaymentChannelSvc │  │ WalletService│
                 └───────┬────────┘  └──────┬───────┘
                         │                  │
                         ▼                  ▼
@@ -2633,7 +2559,7 @@ Wallet 幂等入账
 
 然后易支付、支付宝、微信只是这套 Core 上的三种 Adapter 实现。
 
-设计上可以借鉴 new-api 的统一 Adapter 思路，同时直接复用 Lumina 现有 Providers 模块已经采用的 `isActive + priority + weight` 多实例思想。不同之处在于支付系统必须更加保守：第三方下单一旦存在“不确定是否成功”的情况，不允许像普通上游请求一样自动切换渠道重试。
+设计上可以借鉴 new-api 的统一 Adapter 思路，同时复用 Lumina 现有 Providers 模块的多实例思想，但支付渠道由用户明确选择具体实例，不使用 `priority` 或 `weight` 自动路由。支付系统必须更加保守：第三方下单一旦存在“不确定是否成功”的情况，不允许自动切换渠道重试。
 
 首批建议完成：
 

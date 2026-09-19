@@ -12,6 +12,8 @@ import type {
   ModelType,
   PlatformModelDto,
   PlatformModelPricing,
+  PaymentChannelDto,
+  PaymentChannelMetadata,
   PromptOptimizerSettingDto,
   ProviderDto,
   UpstreamModelDto,
@@ -93,6 +95,31 @@ export const adminApi = {
 
   updateCurrencySettings(photonPerCny: number): Promise<CurrencySettingsDto> {
     return apiClient.patch("/admin/settings/currency", { photonPerCny });
+  },
+
+  getPaymentAdapters(): Promise<PaymentChannelMetadata[]> {
+    return apiClient.get('/admin/payment-channels/adapters');
+  },
+
+  getPaymentChannels(): Promise<PaymentChannelDto[]> {
+    return apiClient.get('/admin/payment-channels');
+  },
+
+  createPaymentChannel(data: {
+    name: string;
+    type: PaymentChannelDto['type'];
+    config: Record<string, unknown>;
+    isActive: boolean;
+  }): Promise<PaymentChannelDto> {
+    return apiClient.post('/admin/payment-channels', data);
+  },
+
+  setPaymentChannelActive(id: string, isActive: boolean): Promise<PaymentChannelDto> {
+    return apiClient.post(`/admin/payment-channels/${encodeURIComponent(id)}/${isActive ? 'enable' : 'disable'}`);
+  },
+
+  testPaymentChannel(id: string): Promise<{ ok: true; metadata: PaymentChannelMetadata }> {
+    return apiClient.post(`/admin/payment-channels/${encodeURIComponent(id)}/test`);
   },
 
   getUsers(options: ListAdminUsersOptions = {}): Promise<AdminUsersResponse> {
