@@ -81,7 +81,7 @@ export default function Home() {
               <Link
                 key={card.href}
                 href={card.href}
-                className={`group overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-br ${card.accent} p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 sm:p-7`}
+                className={`group overflow-hidden rounded-2xl border border-gray-200 bg-gradient-to-br ${card.accent} p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 sm:p-6`}
               >
                 <div className="flex items-start justify-between gap-4">
                   <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{card.eyebrow}</span>
@@ -89,9 +89,9 @@ export default function Home() {
                     {card.symbol}
                   </span>
                 </div>
-                <h3 className="mt-6 text-2xl font-semibold tracking-tight text-gray-900">{card.title}</h3>
+                <h3 className="mt-4 text-2xl font-semibold tracking-tight text-gray-900">{card.title}</h3>
                 <p className="mt-3 max-w-md text-sm leading-6 text-gray-500">{card.description}</p>
-                <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
+                <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
                   {card.action}
                   <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">→</span>
                 </span>
