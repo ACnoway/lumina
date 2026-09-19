@@ -1,4 +1,5 @@
-import { IsInt, Min, IsOptional } from 'class-validator';
+import { TransactionType } from '@prisma/client';
+import { IsEnum, IsInt, Min, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -16,4 +17,13 @@ export class GetTransactionsQueryDto {
   @IsInt({ message: '每页条数必须是整数' })
   @Min(1, { message: '每页条数必须大于0' })
   limit?: number = 20;
+
+  @ApiProperty({
+    description: '交易类型',
+    enum: TransactionType,
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(TransactionType, { message: '交易类型不合法' })
+  type?: TransactionType;
 }

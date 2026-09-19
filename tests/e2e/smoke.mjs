@@ -289,6 +289,20 @@ async function main() {
     'admin wallet adjustment reason mismatch',
   );
 
+  const userTransactions = await requestAuth(
+    userToken,
+    `/wallet/transactions?type=ADMIN_ADJUST&limit=10`,
+  );
+  assert(
+    userTransactions.data.items.some(
+      (item) =>
+        item.type === 'ADMIN_ADJUST' &&
+        item.reason === adjustmentReason &&
+        Number(item.balance) === 12.5,
+    ),
+    'user wallet ledger did not expose the administrator balance adjustment',
+  );
+
   const adminUserAfter = await requestAuth(adminToken, `/admin/users/${userId}`);
   assert(
     Number(adminUserAfter.data.wallet?.balance) === 12.5,
@@ -511,6 +525,14 @@ async function main() {
   assert(historyImage.prompt === 'a tiny e2e test image', 'positive prompt was not preserved');
   assert(historyImage.negativePrompt === 'blurry, watermark', 'negative prompt was not preserved');
   assert(historyImage.images?.length === 4, 'image history did not include all four images');
+
+  const userLedgerAfterUsage = await requestAuth(userToken, '/wallet/transactions?limit=50');
+  assert(
+    userLedgerAfterUsage.data.items.some(
+      (item) => item.type === 'CONSUME' && Number(item.amount) > 0,
+    ),
+    'user wallet ledger did not contain the chat/image consumption record',
+  );
 
   const auditLogs = await requestAuth(adminToken, '/admin/audit-logs?limit=100');
   const actions = auditLogs.data.items.map((item) => item.action);

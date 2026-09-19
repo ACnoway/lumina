@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { AuditService } from '../audit/audit.service';
 import { Decimal } from '@prisma/client/runtime/library';
-import { Wallet, WalletTransaction } from '@prisma/client';
+import { TransactionType, Wallet, WalletTransaction } from '@prisma/client';
 
 interface PreDeductResult {
   success: boolean;
@@ -316,18 +316,22 @@ export class WalletService {
     userId: string,
     page: number = 1,
     limit: number = 20,
+    type?: TransactionType,
   ): Promise<{ transactions: WalletTransaction[]; total: number }> {
     const wallet = await this.getWallet(userId);
+    const where = type
+      ? { walletId: wallet.id, type }
+      : { walletId: wallet.id };
 
     const [transactions, total] = await Promise.all([
       this.prisma.walletTransaction.findMany({
-        where: { walletId: wallet.id },
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.walletTransaction.count({
-        where: { walletId: wallet.id },
+        where,
       }),
     ]);
 

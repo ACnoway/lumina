@@ -13,6 +13,7 @@ import type {
   PaymentChannelMetadata,
   PlatformModelDto,
   ProviderDto,
+  TransactionType,
   UpstreamModelDto,
   UserRole,
   UserStatus,
@@ -81,6 +82,18 @@ function formatDate(value: string): string {
 
 function formatMoney(value: number): string {
   return formatPhoton(value, 2);
+}
+
+const transactionTypeLabels: Record<TransactionType, string> = {
+  RECHARGE: "充值",
+  CONSUME: "消费",
+  REFUND: "退款",
+  ADMIN_ADJUST: "管理员调整",
+};
+
+function getDisplayedTransactionAmount(type: TransactionType, amount: number): number {
+  if (type === "CONSUME") return -Math.abs(amount);
+  return amount;
 }
 
 function formatModelPricing(model: PlatformModelDto): string {
@@ -1450,17 +1463,25 @@ export default function AdminPage() {
                           >
                             <div className="flex justify-between gap-3 text-sm">
                               <span className="font-medium text-gray-700">
-                                {transaction.type}
+                                {transactionTypeLabels[transaction.type]}
                               </span>
                               <span
-                                className={
-                                  transaction.amount >= 0
-                                    ? "text-emerald-600"
-                                    : "text-red-600"
-                                }
+                                className={getDisplayedTransactionAmount(
+                                  transaction.type,
+                                  transaction.amount,
+                                ) < 0 ? "text-red-600" : "text-emerald-600"}
                               >
-                                {transaction.amount >= 0 ? "+" : ""}
-                                {formatMoney(transaction.amount)}
+                                {getDisplayedTransactionAmount(transaction.type, transaction.amount) > 0
+                                  ? "+"
+                                  : ""}
+                                {formatMoney(
+                                  Math.abs(
+                                    getDisplayedTransactionAmount(
+                                      transaction.type,
+                                      transaction.amount,
+                                    ),
+                                  ),
+                                )}
                               </span>
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs text-gray-500">

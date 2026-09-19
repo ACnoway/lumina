@@ -56,6 +56,7 @@ export class WalletController {
   @ApiOperation({ summary: '分页查询交易记录' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({ name: 'type', required: false, enum: ['RECHARGE', 'CONSUME', 'REFUND', 'ADMIN_ADJUST'] })
   async getTransactions(
     @CurrentUser() user: User,
     @Query() query: GetTransactionsQueryDto,
@@ -68,6 +69,7 @@ export class WalletController {
       user.id,
       query.page || 1,
       query.limit || 20,
+      query.type,
     );
 
     const items: TransactionItem[] = transactions.map((tx) => ({

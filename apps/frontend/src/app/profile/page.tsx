@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  GetTransactionsResponse,
   GetCurrentUserResponse,
   PaymentChannelDto,
   PaymentMethod,
   PaymentOrderDto,
   PaymentScene,
+  TransactionItem,
+  TransactionType,
 } from "@lumina/shared";
 import AppHeader from "@/components/AppHeader";
 import {
@@ -20,6 +23,7 @@ import { apiClient } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
 import { formatPhoton } from "@/lib/model-pricing";
 import { paymentsApi } from "@/lib/payments-api";
+import { walletApi } from "@/lib/wallet-api";
 
 const passwordPattern = /^(?=.*[A-Za-z])(?=.*\d).+$/;
 
@@ -47,10 +51,10 @@ const profileTabs = [
   },
   {
     id: "usage",
-    label: "消费记录",
+    label: "账单",
     icon: "usage",
     eyebrow: "Usage",
-    description: "为余额变动、聊天和生图消费明细预留独立入口。",
+    description: "查看充值、消费和其他余额变化。",
   },
   {
     id: "preferences",
@@ -132,6 +136,38 @@ function formatBalance(value: number): string {
   return formatPhoton(value, 2);
 }
 
+const transactionTypeLabels: Record<TransactionType, string> = {
+  RECHARGE: "充值",
+  CONSUME: "消费",
+  REFUND: "退款",
+  ADMIN_ADJUST: "管理员调整",
+};
+
+type TransactionFilter = "ALL" | TransactionType;
+
+const transactionFilters: Array<{ value: TransactionFilter; label: string }> = [
+  { value: "ALL", label: "全部" },
+  { value: "RECHARGE", label: "充值" },
+  { value: "CONSUME", label: "消费" },
+  { value: "REFUND", label: "退款" },
+  { value: "ADMIN_ADJUST", label: "管理员调整" },
+];
+
+function formatTransactionDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function getDisplayedTransactionAmount(transaction: TransactionItem): number {
+  if (transaction.type === "CONSUME") return -Math.abs(transaction.amount);
+  return transaction.amount;
+}
+
 function roleLabel(role: GetCurrentUserResponse["user"]["role"]): string {
   if (role === "SUPER_ADMIN") return "超级管理员";
   if (role === "ADMIN") return "管理员";
@@ -185,6 +221,11 @@ export default function ProfilePage() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
+  const [transactions, setTransactions] = useState<GetTransactionsResponse | null>(null);
+  const [transactionFilter, setTransactionFilter] = useState<TransactionFilter>("ALL");
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [transactionsError, setTransactionsError] = useState("");
 
   const loadPaymentChannels = useCallback(async () => {
     setPaymentError("");
@@ -216,6 +257,25 @@ export default function ProfilePage() {
     }
   }, [router]);
 
+  const loadTransactions = useCallback(async () => {
+    if (!profile || activeTab !== "usage") return;
+
+    setTransactionsLoading(true);
+    setTransactionsError("");
+    try {
+      const response = await walletApi.getTransactions({
+        page: transactionPage,
+        limit: 10,
+        type: transactionFilter === "ALL" ? undefined : transactionFilter,
+      });
+      setTransactions(response);
+    } catch (err: unknown) {
+      setTransactionsError(err instanceof Error ? err.message : "账单加载失败，请稍后重试");
+    } finally {
+      setTransactionsLoading(false);
+    }
+  }, [activeTab, profile, transactionFilter, transactionPage]);
+
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
@@ -223,6 +283,10 @@ export default function ProfilePage() {
   useEffect(() => {
     if (profile) void loadPaymentChannels();
   }, [loadPaymentChannels, profile]);
+
+  useEffect(() => {
+    void loadTransactions();
+  }, [loadTransactions]);
 
   useEffect(() => {
     if (!paymentOrder || paymentOrder.status !== "PENDING") return;
@@ -406,7 +470,7 @@ export default function ProfilePage() {
                       <ProfileIcon name={tab.icon} className="h-4 w-4 shrink-0" />
                       <span className="truncate">{tab.label}</span>
                     </span>
-                    {(tab.id === "usage" || tab.id === "preferences") && (
+                    {tab.id === "preferences" && (
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-400">
                         规划中
                       </span>
@@ -665,10 +729,129 @@ export default function ProfilePage() {
             )}
 
             {activeTab === "usage" && (
-              <EmptyFeatureState
-                title="消费记录"
-                description="后续可在这里查看充值订单、余额变动、聊天消耗和生图消耗。"
-              />
+              <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+                      Billing
+                    </p>
+                    <h2 className="mt-1 text-xl font-semibold tracking-tight">账单</h2>
+                    <p className="mt-2 text-sm text-gray-400">
+                      查看充值、消费、退款和管理员调整带来的全部余额变化。
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-blue-50 px-4 py-3 text-right">
+                    <p className="text-xs text-blue-500">当前余额</p>
+                    <p className="mt-1 text-lg font-semibold text-blue-700">
+                      {formatBalance(profile.wallet.balance)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2" aria-label="账单类型筛选">
+                  {transactionFilters.map((filter) => (
+                    <button
+                      key={filter.value}
+                      type="button"
+                      onClick={() => {
+                        setTransactionFilter(filter.value);
+                        setTransactionPage(1);
+                      }}
+                      className={`rounded-full px-3 py-1.5 text-xs transition ${
+                        transactionFilter === filter.value
+                          ? "bg-blue-600 font-medium text-white"
+                          : "bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-700"
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+
+                {transactionsLoading ? (
+                  <div className="mt-5 space-y-3">
+                    {[1, 2, 3].map((item) => (
+                      <div key={item} className="h-20 animate-pulse rounded-xl bg-gray-100" />
+                    ))}
+                  </div>
+                ) : transactionsError ? (
+                  <div className="mt-5 rounded-xl border border-red-100 bg-red-50 p-4">
+                    <p className="text-sm text-red-600">{transactionsError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void loadTransactions()}
+                      className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      重新加载
+                    </button>
+                  </div>
+                ) : transactions?.items.length ? (
+                  <>
+                    <div className="mt-5 space-y-3">
+                      {transactions.items.map((transaction) => {
+                        const displayedAmount = getDisplayedTransactionAmount(transaction);
+                        const amountPrefix = displayedAmount > 0 ? "+" : "";
+                        const amountColor = displayedAmount < 0 ? "text-red-600" : "text-emerald-600";
+
+                        return (
+                          <article
+                            key={transaction.id}
+                            className="rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3"
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <p className="font-medium text-gray-700">
+                                  {transactionTypeLabels[transaction.type]}
+                                </p>
+                                <p className="mt-1 line-clamp-2 text-sm text-gray-500">
+                                  {transaction.reason}
+                                </p>
+                              </div>
+                              <p className={`shrink-0 text-base font-semibold ${amountColor}`}>
+                                {amountPrefix}{formatBalance(Math.abs(displayedAmount))}
+                              </p>
+                            </div>
+                            <p className="mt-2 text-xs text-gray-400">
+                              余额 {formatBalance(transaction.balance)} · {formatTransactionDate(transaction.createdAt)}
+                            </p>
+                          </article>
+                        );
+                      })}
+                    </div>
+
+                    {transactions.totalPages > 1 && (
+                      <div className="mt-5 flex items-center justify-between gap-3 text-sm text-gray-500">
+                        <span>
+                          第 {transactions.page} / {transactions.totalPages} 页
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={transactions.page <= 1}
+                            onClick={() => setTransactionPage((page) => Math.max(1, page - 1))}
+                            className="rounded-lg border border-gray-200 px-3 py-1.5 hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            上一页
+                          </button>
+                          <button
+                            type="button"
+                            disabled={transactions.page >= transactions.totalPages}
+                            onClick={() => setTransactionPage((page) => page + 1)}
+                            className="rounded-lg border border-gray-200 px-3 py-1.5 hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            下一页
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="mt-5 rounded-xl border border-dashed border-gray-200 px-4 py-10 text-center">
+                    <p className="text-sm font-medium text-gray-500">暂无账单记录</p>
+                    <p className="mt-1 text-xs text-gray-400">充值或使用服务后，余额变化会显示在这里。</p>
+                  </div>
+                )}
+              </section>
             )}
 
             {activeTab === "preferences" && (

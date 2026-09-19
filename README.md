@@ -153,6 +153,7 @@ apps/frontend/src/app/
 ├── chat/                  # 聊天页
 ├── image/                 # 生图页
 ├── history/               # 历史记录
+├── profile/               # 个人中心（充值、钱包和账单）
 └── admin/                 # 管理后台
 ```
 
