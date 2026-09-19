@@ -105,6 +105,14 @@ data: {"type":"error","message":"错误信息"}\n\n
   - 余额显示
   - 刷新余额按钮
 
+### 5-4-3a. 已发送消息 Markdown 渲染
+
+- 用户消息和 AI 消息在 `MessageList` 中使用独立的 `MarkdownContent` 组件渲染。
+- 输入框只负责输入和提交原始文本，不显示 Markdown 预览。
+- 使用 `react-markdown` + `remark-gfm` + `remark-breaks` 支持 Markdown、GFM 和聊天中的单换行；使用 `rehype-sanitize` 清理危险节点，不启用原始 HTML。
+- 流式 AI 回复继续复用现有 SSE 状态更新，消息内容变化时同步更新 Markdown 视图。
+- Markdown 样式覆盖标题、段落、列表、引用、链接、行内代码、代码块、表格和任务列表，并适配用户/AI 两种气泡颜色。
+
 ### 5-4-4. SSE 流式解析
 
 在 `chat-api.ts` 的 `sendMessageStream` 中实现：
@@ -185,6 +193,10 @@ async function* sendMessageStream(...): AsyncGenerator<SSEEvent> {
 - [ ] 错误处理（网络断开、余额不足等）
 - [ ] 回车发送、Shift+回车换行
 - [ ] 自动滚动到底部
+- [ ] 用户消息和 AI 消息均正确渲染 Markdown
+- [ ] 表格、任务列表、代码块和单换行显示正常
+- [ ] 输入框不显示 Markdown 预览
+- [ ] 原始 HTML 不执行，恶意内容不会注入页面
 
 ## 实现顺序建议
 

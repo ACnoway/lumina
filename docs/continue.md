@@ -4,6 +4,13 @@
 > 验证提交：个人中心账单功能（基础验证 `5dcc692`，符号修正 `f17399a`，四位小数截断 `8501f98`）
 > 分支状态：个人中心账单已接入钱包流水；本地受 pnpm 版本和依赖目录限制，远程构建、后端测试和完整 E2E 已通过，浏览器专项验收仍待补。
 
+## 本次模块：聊天消息 Markdown 渲染
+
+- `apps/frontend/src/app/chat/components/MessageList.tsx` 中的用户消息和 AI 消息均通过 `MarkdownContent` 渲染；`MessageInput` 保持纯文本输入，不做预览。
+- 前端使用 `react-markdown`、`remark-gfm`、`remark-breaks` 和 `rehype-sanitize`，支持常用 Markdown/GFM 语法、单换行和安全清理，不渲染原始 HTML。
+- 消息后端协议、数据库字段、SSE 流程和原始消息存储均不变；流式 AI 内容更新时继续实时渲染。
+- 本地无法使用当前 pnpm 11 安装新增依赖，待推送后在 `lch:/root/lumina` 使用仓库要求的 pnpm 8.15.0 生成锁文件并验证。
+
 ## 平台光子货币规则
 
 - 所有平台消费和模型价格统一使用光子，展示符号为 `✦`；管理员设置模型价格时直接填写光子数量。

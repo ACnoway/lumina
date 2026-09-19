@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '@/lib/chat-types';
 import { formatPhoton } from '@/lib/model-pricing';
+import MarkdownContent from './MarkdownContent';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -59,7 +60,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-3 text-white shadow-sm">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+          <MarkdownContent content={message.content} />
         </div>
       </div>
     );
@@ -82,7 +83,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
           </div>
         ) : (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+          <MarkdownContent content={message.content} />
         )}
         {/* token 和本次实际费用 */}
         {!isPending &&
