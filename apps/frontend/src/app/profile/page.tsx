@@ -125,7 +125,7 @@ export default function ProfilePage() {
     let cancelled = false;
     const timer = window.setInterval(async () => {
       try {
-        const current = await paymentsApi.getOrder(paymentOrder.orderNo);
+        const current = await paymentsApi.syncOrder(paymentOrder.orderNo);
         if (cancelled) return;
         setPaymentOrder(current);
         if (current.status === "SUCCEEDED") {

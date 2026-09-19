@@ -27,6 +27,7 @@ export class PaymentNotifyController {
         request.originalUrl?.split('?')[1] ??
           new URLSearchParams(query as Record<string, string>).toString(),
       ),
+      request.method,
     );
   }
 
@@ -37,7 +38,14 @@ export class PaymentNotifyController {
     @Req() request: RawBodyRequest,
     @Res() response: Response,
   ) {
-    return this.handleNotification(channelId, request, response, request.body, request.rawBody);
+    return this.handleNotification(
+      channelId,
+      request,
+      response,
+      request.body,
+      request.rawBody,
+      request.method,
+    );
   }
 
   private async handleNotification(
@@ -46,11 +54,13 @@ export class PaymentNotifyController {
     response: Response,
     body: unknown,
     rawBody?: Buffer,
+    method?: string,
   ) {
     const result = await this.paymentService.processNotification(channelId, {
       headers: request.headers,
       rawBody: rawBody ?? Buffer.from(JSON.stringify(body ?? {})),
       body,
+      method,
     });
     response.type(result.contentType ?? 'application/json').send(result.body);
   }

@@ -1,8 +1,4 @@
-import {
-  PaymentChannelType,
-  PaymentMethod,
-  PaymentScene,
-} from '@prisma/client';
+import { PaymentChannelType, PaymentMethod, PaymentScene } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export type PaymentAction =
@@ -45,6 +41,7 @@ export interface PaymentNotificationRequest {
   headers: Record<string, string | string[] | undefined>;
   rawBody: Buffer;
   body: unknown;
+  method?: string;
 }
 
 export type PaymentNotificationStatus = 'SUCCESS' | 'PENDING' | 'CLOSED' | 'FAILED';
@@ -92,8 +89,5 @@ export interface PaymentChannelAdapter<TConfig = unknown> {
     config: TConfig,
   ): Promise<PaymentNotification>;
   buildNotificationResponse(success: boolean): PaymentNotifyResponse;
-  queryPayment?(
-    request: PaymentQueryRequest,
-    config: TConfig,
-  ): Promise<PaymentQueryResult>;
+  queryPayment?(request: PaymentQueryRequest, config: TConfig): Promise<PaymentQueryResult>;
 }

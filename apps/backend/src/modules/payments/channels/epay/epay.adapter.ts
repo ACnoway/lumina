@@ -42,10 +42,16 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
 
   async validateConfig(config: EpayConfig): Promise<void> {
     if (!config || typeof config.baseUrl !== 'string' || !/^https?:\/\//i.test(config.baseUrl)) {
-      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '易支付 baseUrl 不合法');
+      throw new PaymentChannelError(
+        PaymentErrorCode.INVALID_CHANNEL_CONFIG,
+        '易支付 baseUrl 不合法',
+      );
     }
     if (!config.pid?.trim() || !config.key?.trim()) {
-      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '易支付 pid 和 key 不能为空');
+      throw new PaymentChannelError(
+        PaymentErrorCode.INVALID_CHANNEL_CONFIG,
+        '易支付 pid 和 key 不能为空',
+      );
     }
   }
 
@@ -82,13 +88,24 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       const response = await axios.post(
         `${config.baseUrl.replace(/\/$/, '')}/mapi.php`,
         new URLSearchParams({ ...signed, sign_type: config.signType ?? 'MD5' }).toString(),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: config.timeout ?? 15000 },
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: config.timeout ?? 15000,
+        },
       );
       const data = this.parseResponse(response.data);
       const qr = this.firstString(data, ['qrcode', 'qr_code', 'code_url', 'payurl']);
-      if (qr) return { action: { type: 'QR_CODE', content: qr }, providerTradeNo: this.firstString(data, ['trade_no']) };
+      if (qr)
+        return {
+          action: { type: 'QR_CODE', content: qr },
+          providerTradeNo: this.firstString(data, ['trade_no']),
+        };
       const url = this.firstString(data, ['url', 'pay_url', 'redirect_url']);
-      if (url) return { action: { type: 'REDIRECT_URL', url }, providerTradeNo: this.firstString(data, ['trade_no']) };
+      if (url)
+        return {
+          action: { type: 'REDIRECT_URL', url },
+          providerTradeNo: this.firstString(data, ['trade_no']),
+        };
       if (typeof response.data === 'string' && /<form[\s>]/i.test(response.data)) {
         return { action: { type: 'HTML_FORM', html: response.data } };
       }
@@ -118,6 +135,8 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
     delete values.sign_type;
     const expected = this.signature(values, config.key);
     if (!signature || signature.toLowerCase() !== expected.toLowerCase()) {
+      const fallback = await this.queryAfterInvalidGetSignature(request, payload, config);
+      if (fallback) return fallback;
       throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调签名无效');
     }
     const status = String(payload.trade_status ?? '').toUpperCase();
@@ -125,7 +144,12 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       eventId: String(payload.trade_no ?? `${payload.out_trade_no}:${status}`),
       orderNo: String(payload.out_trade_no ?? ''),
       providerTradeNo: this.optionalString(payload.trade_no),
-      status: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? 'SUCCESS' : status === 'TRADE_CLOSED' ? 'CLOSED' : 'PENDING',
+      status:
+        status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED'
+          ? 'SUCCESS'
+          : status === 'TRADE_CLOSED'
+            ? 'CLOSED'
+            : 'PENDING',
       amount: this.optionalString(payload.money),
       currency: 'CNY',
       paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? new Date() : undefined,
@@ -136,28 +160,70 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
     return { body: success ? 'success' : 'fail', contentType: 'text/plain; charset=utf-8' };
   }
 
-  async queryPayment(request: PaymentQueryRequest, config: EpayConfig): Promise<PaymentQueryResult> {
+  async queryPayment(
+    request: PaymentQueryRequest,
+    config: EpayConfig,
+  ): Promise<PaymentQueryResult> {
     await this.validateConfig(config);
-    const params = this.withSignature({
+    const params = {
       act: 'order',
       pid: config.pid,
+      key: config.key,
       out_trade_no: request.orderNo,
-    }, config.key);
+    };
     try {
       const response = await axios.get(`${config.baseUrl.replace(/\/$/, '')}/api.php`, {
-        params: { ...params, sign_type: config.signType ?? 'MD5' },
+        params,
         timeout: config.timeout ?? 10000,
       });
       const data = this.parseResponse(response.data);
       const status = String(data.trade_status ?? data.status ?? '').toUpperCase();
       return {
-        status: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || String(data.code) === '1' ? 'SUCCESS' : status === 'TRADE_CLOSED' ? 'CLOSED' : 'PENDING',
+        status:
+          status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || String(data.code) === '1'
+            ? 'SUCCESS'
+            : status === 'TRADE_CLOSED'
+              ? 'CLOSED'
+              : 'PENDING',
         providerTradeNo: this.firstString(data, ['trade_no']),
         amount: this.firstString(data, ['money', 'amount']),
         currency: 'CNY',
       };
     } catch (error) {
-      throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '易支付订单查询失败', false, error);
+      throw new PaymentChannelError(
+        PaymentErrorCode.CHANNEL_REQUEST_FAILED,
+        '易支付订单查询失败',
+        false,
+        error,
+      );
+    }
+  }
+
+  private async queryAfterInvalidGetSignature(
+    request: PaymentNotificationRequest,
+    payload: Record<string, unknown>,
+    config: EpayConfig,
+  ): Promise<PaymentNotification | undefined> {
+    if (
+      request.method !== 'GET' ||
+      typeof payload.out_trade_no !== 'string' ||
+      !payload.out_trade_no
+    )
+      return undefined;
+    try {
+      const result = await this.queryPayment({ orderNo: payload.out_trade_no }, config);
+      if (result.status !== 'SUCCESS' && result.status !== 'CLOSED') return undefined;
+      return {
+        eventId: result.providerTradeNo ?? `${payload.out_trade_no}:${result.status}`,
+        orderNo: payload.out_trade_no,
+        providerTradeNo: result.providerTradeNo,
+        status: result.status,
+        amount: result.amount,
+        currency: result.currency ?? 'CNY',
+        paidAt: result.status === 'SUCCESS' ? new Date() : undefined,
+      };
+    } catch {
+      return undefined;
     }
   }
 
@@ -167,7 +233,13 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
 
   private signature(values: Record<string, unknown>, key: string): string {
     const content = Object.keys(values)
-      .filter((name) => name !== 'sign' && name !== 'sign_type' && values[name] !== undefined && values[name] !== '')
+      .filter(
+        (name) =>
+          name !== 'sign' &&
+          name !== 'sign_type' &&
+          values[name] !== undefined &&
+          values[name] !== '',
+      )
       .sort()
       .map((name) => `${name}=${String(values[name])}`)
       .join('&');
@@ -175,16 +247,19 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   }
 
   private bodyAsRecord(body: unknown, raw: Buffer): Record<string, unknown> {
-    if (body && typeof body === 'object' && !Array.isArray(body)) return body as Record<string, unknown>;
+    if (body && typeof body === 'object' && !Array.isArray(body))
+      return body as Record<string, unknown>;
     return Object.fromEntries(new URLSearchParams(raw.toString('utf8')).entries());
   }
 
   private parseResponse(value: unknown): Record<string, unknown> {
-    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+    if (value && typeof value === 'object' && !Array.isArray(value))
+      return value as Record<string, unknown>;
     if (typeof value === 'string') {
       try {
         const parsed: unknown = JSON.parse(value);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+          return parsed as Record<string, unknown>;
       } catch {
         return { url: value.trim() };
       }
@@ -193,7 +268,8 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   }
 
   private firstString(value: Record<string, unknown>, keys: string[]): string | undefined {
-    for (const key of keys) if (typeof value[key] === 'string' && value[key]) return value[key] as string;
+    for (const key of keys)
+      if (typeof value[key] === 'string' && value[key]) return value[key] as string;
     return undefined;
   }
 

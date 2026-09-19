@@ -21,6 +21,7 @@ describe('PaymentNotifyController', () => {
       },
       originalUrl:
         '/payments/notify/channel-1?out_trade_no=LM-test&trade_status=TRADE_SUCCESS&sign=signature',
+      method: 'GET',
     };
 
     await controller.notifyGet('channel-1', request as never, response as never);
@@ -29,6 +30,7 @@ describe('PaymentNotifyController', () => {
       headers: request.headers,
       rawBody: Buffer.from('out_trade_no=LM-test&trade_status=TRADE_SUCCESS&sign=signature'),
       body: request.query,
+      method: 'GET',
     });
     expect(response.type).toHaveBeenCalledWith('text/plain');
     expect(response.send).toHaveBeenCalledWith('success');
@@ -54,6 +56,7 @@ describe('PaymentNotifyController', () => {
       headers: request.headers,
       rawBody,
       body: request.body,
+      method: undefined,
     });
   });
 });
