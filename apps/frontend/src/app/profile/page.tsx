@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
   GetCurrentUserResponse,
@@ -27,39 +27,105 @@ const profileTabs = [
   {
     id: "overview",
     label: "账户概览",
+    icon: "overview",
     eyebrow: "Overview",
     description: "集中查看账号状态，常用操作一键进入。",
   },
   {
     id: "wallet",
     label: "充值与钱包",
+    icon: "wallet",
     eyebrow: "Wallet",
     description: "管理光子余额和充值订单，后续可继续扩展账单能力。",
   },
   {
     id: "security",
     label: "安全设置",
+    icon: "security",
     eyebrow: "Security",
     description: "集中处理密码和后续的登录安全能力。",
   },
   {
     id: "usage",
     label: "消费记录",
+    icon: "usage",
     eyebrow: "Usage",
     description: "为余额变动、聊天和生图消费明细预留独立入口。",
   },
   {
     id: "preferences",
     label: "个性化设置",
+    icon: "preferences",
     eyebrow: "Preferences",
     description: "为昵称、头像和其他个人偏好保留稳定位置。",
   },
 ] as const;
 
 type ProfileTab = (typeof profileTabs)[number]["id"];
+type ProfileIconName = (typeof profileTabs)[number]["icon"] | "arrow-right";
 
 function isProfileTab(value: string | null): value is ProfileTab {
   return profileTabs.some((tab) => tab.id === value);
+}
+
+function ProfileIcon({
+  name,
+  className = "h-4 w-4",
+}: {
+  name: ProfileIconName;
+  className?: string;
+}) {
+  const paths: Record<ProfileIconName, ReactNode> = {
+    overview: (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </>
+    ),
+    wallet: (
+      <>
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H19a1 1 0 0 1 1 1v3H7a3 3 0 0 0 0 6h13v5a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 1 4 17.5z" />
+        <path d="M7 8h13v6H7a3 3 0 0 1 0-6Z" />
+        <path d="M16 11h.01" />
+      </>
+    ),
+    security: (
+      <>
+        <path d="M12 3 20 6v5c0 5.1-3.4 8.7-8 10-4.6-1.3-8-4.9-8-10V6z" />
+        <path d="m8.5 12 2.2 2.2 4.8-4.8" />
+      </>
+    ),
+    usage: (
+      <>
+        <path d="M6 3h9l4 4v14H6z" />
+        <path d="M14 3v5h5M9 12h6M9 16h6" />
+      </>
+    ),
+    preferences: (
+      <>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <path d="M8 4v4M16 10v4M11 16v4" />
+      </>
+    ),
+    "arrow-right": <path d="M5 12h14m-6-6 6 6-6 6" />,
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths[name]}
+    </svg>
+  );
 }
 
 function formatBalance(value: number): string {
@@ -336,7 +402,10 @@ export default function ProfilePage() {
                         : "text-gray-500 hover:bg-gray-50 hover:text-blue-700"
                     }`}
                   >
-                    <span>{tab.label}</span>
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <ProfileIcon name={tab.icon} className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{tab.label}</span>
+                    </span>
                     {(tab.id === "usage" || tab.id === "preferences") && (
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-400">
                         规划中
@@ -358,13 +427,14 @@ export default function ProfilePage() {
                     type="button"
                     aria-current={activeTab === tab.id ? "page" : undefined}
                     onClick={() => handleTabChange(tab.id)}
-                    className={`rounded-lg px-3 py-2.5 text-sm transition ${
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm transition ${
                       activeTab === tab.id
                         ? "bg-blue-50 font-medium text-blue-700"
                         : "text-gray-500 hover:bg-gray-50 hover:text-blue-700"
                     }`}
                   >
-                    {tab.label}
+                    <ProfileIcon name={tab.icon} className="h-4 w-4 shrink-0" />
+                    <span>{tab.label}</span>
                   </button>
                 ))}
               </nav>
@@ -392,6 +462,17 @@ export default function ProfilePage() {
                 <p className="mt-3 text-sm text-gray-400">
                   余额将用于 AI 聊天和生图服务，可通过下方充值中心补充光子。
                 </p>
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange("wallet")}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2"
+                  >
+                    去充值
+                    <ProfileIcon name="arrow-right" className="h-4 w-4" />
+                  </button>
+                  <span className="text-xs text-gray-400">进入充值与钱包</span>
+                </div>
               </div>
             </section>
               </>
