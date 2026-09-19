@@ -1,4 +1,5 @@
 import type {
+  GetBalanceResponse,
   GetTransactionsResponse,
   TransactionType,
 } from '@lumina/shared';
@@ -11,6 +12,10 @@ export interface GetWalletTransactionsOptions {
 }
 
 export const walletApi = {
+  getBalance(): Promise<GetBalanceResponse> {
+    return apiClient.get('/wallet/balance');
+  },
+
   getTransactions(
     options: GetWalletTransactionsOptions = {},
   ): Promise<GetTransactionsResponse> {

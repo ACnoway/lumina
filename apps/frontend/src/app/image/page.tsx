@@ -6,6 +6,7 @@ import type { ImageStatus, ImageTaskDto, PlatformModelDto } from '@lumina/shared
 import { ApiError } from '@/lib/api-client';
 import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
 import { formatImageModelPricing, formatPhoton } from '@/lib/model-pricing';
+import { walletApi } from '@/lib/wallet-api';
 import AppHeader from '@/components/AppHeader';
 import ImageLightbox, {
   ImageDownloadButton,
@@ -175,6 +176,8 @@ export default function ImagePage() {
   const [history, setHistory] = useState<ImageTask[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [balanceLoaded, setBalanceLoaded] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -184,6 +187,17 @@ export default function ImagePage() {
   const [lightboxImage, setLightboxImage] = useState<PreviewImage | null>(null);
   const pollRunRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadBalance = useCallback(async () => {
+    try {
+      const response = await walletApi.getBalance();
+      setBalance(response.balance);
+    } catch {
+      // 余额展示失败不阻塞生图流程；保留已有余额，首次加载时显示不可用状态。
+    } finally {
+      setBalanceLoaded(true);
+    }
+  }, []);
 
   const loadHistory = useCallback(async () => {
     setLoadingHistory(true);
@@ -217,6 +231,7 @@ export default function ImagePage() {
             localStorage.removeItem(ACTIVE_TASK_STORAGE_KEY);
             setNotice('图片生成完成');
             setPolling(false);
+            void loadBalance();
             void loadHistory();
             return;
           }
@@ -225,6 +240,7 @@ export default function ImagePage() {
             localStorage.removeItem(ACTIVE_TASK_STORAGE_KEY);
             setError(currentTask.errorMessage || '图片生成失败，请稍后重试');
             setPolling(false);
+            void loadBalance();
             void loadHistory();
             return;
           }
@@ -246,7 +262,7 @@ export default function ImagePage() {
         setPolling(false);
       }
     },
-    [loadHistory],
+    [loadBalance, loadHistory],
   );
 
   useEffect(() => {
@@ -273,6 +289,7 @@ export default function ImagePage() {
     }
 
     void loadModels();
+    void loadBalance();
     void loadHistory();
 
     const activeTaskId = localStorage.getItem(ACTIVE_TASK_STORAGE_KEY);
@@ -285,7 +302,7 @@ export default function ImagePage() {
       pollRunRef.current += 1;
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [loadHistory, pollTask]);
+  }, [loadBalance, loadHistory, pollTask]);
 
   function handleModelChange(modelName: string) {
     setSelectedModel(modelName);
@@ -304,6 +321,7 @@ export default function ImagePage() {
       setOriginalPrompt(input);
       setPrompt(response.optimizedPrompt);
       setNotice(`提示词已优化，本次费用 ${formatPhoton(response.cost)}`);
+      void loadBalance();
     } catch (optimizeError) {
       setError(getErrorMessage(optimizeError, '提示词优化失败'));
     } finally {
@@ -331,6 +349,7 @@ export default function ImagePage() {
       );
       setTask(createdTask);
       localStorage.setItem(ACTIVE_TASK_STORAGE_KEY, createdTask.id);
+      void loadBalance();
       await pollTask(createdTask.id);
     } catch (generateError) {
       setError(getErrorMessage(generateError, '创建生图任务失败'));
@@ -374,9 +393,25 @@ export default function ImagePage() {
 
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-6">
-            <p className="text-sm text-gray-500">Describe a scene and let Lumina make it real.</p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">创作一张新图片</h2>
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-500">Describe a scene and let Lumina make it real.</p>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight">创作一张新图片</h2>
+            </div>
+            <div className="shrink-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-right">
+              <p className="text-xs text-gray-400">当前余额</p>
+              <p
+                className={`mt-1 text-sm font-semibold ${
+                  balance !== null && balance < 1 ? 'text-red-500' : 'text-gray-700'
+                }`}
+              >
+                {balanceLoaded
+                  ? balance === null
+                    ? '暂不可用'
+                    : formatPhoton(balance, 2)
+                  : '加载中…'}
+              </p>
+            </div>
           </div>
 
           {error && (

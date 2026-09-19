@@ -89,9 +89,9 @@ export default function Home() {
                     {card.symbol}
                   </span>
                 </div>
-                <h3 className="mt-10 text-2xl font-semibold tracking-tight text-gray-900">{card.title}</h3>
+                <h3 className="mt-6 text-2xl font-semibold tracking-tight text-gray-900">{card.title}</h3>
                 <p className="mt-3 max-w-md text-sm leading-6 text-gray-500">{card.description}</p>
-                <span className="mt-7 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
+                <span className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
                   {card.action}
                   <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">→</span>
                 </span>
