@@ -988,25 +988,49 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       this.prisma.imageGeneration.count({ where }),
     ]);
 
-    return { items: items.map((item) => this.serializeTask(item)), total, page, limit };
+    return {
+      items: await Promise.all(items.map((item) => this.serializeTask(item))),
+      total,
+      page,
+      limit,
+    };
   }
 
-  private serializeTask(task: any) {
+  private async serializeTask(task: any) {
+    const signedUrlByKey = new Map<string, Promise<string>>();
+    const resolveImageUrl = async (
+      imageKey: unknown,
+      storedUrl: unknown,
+    ): Promise<string | null> => {
+      if (typeof imageKey === 'string' && imageKey.trim()) {
+        let signedUrl = signedUrlByKey.get(imageKey);
+        if (!signedUrl) {
+          signedUrl = this.minioService.getPresignedUrl(imageKey);
+          signedUrlByKey.set(imageKey, signedUrl);
+        }
+        return signedUrl;
+      }
+
+      return typeof storedUrl === 'string' && storedUrl ? storedUrl : null;
+    };
+
     const storedImages = Array.isArray(task.images) ? task.images : [];
     const images = storedImages.length
-      ? storedImages.map((image: any) => ({
-          id: image.id,
-          sequence: image.sequence,
-          status: image.status,
-          width: image.width,
-          height: image.height,
-          imageUrl: image.imageUrl,
-          cost: image.cost,
-          errorMessage: image.errorMessage,
-          createdAt: image.createdAt,
-          updatedAt: image.updatedAt,
-        }))
-      : task.imageUrl
+      ? await Promise.all(
+          storedImages.map(async (image: any) => ({
+            id: image.id,
+            sequence: image.sequence,
+            status: image.status,
+            width: image.width,
+            height: image.height,
+            imageUrl: await resolveImageUrl(image.imageKey, image.imageUrl),
+            cost: image.cost,
+            errorMessage: image.errorMessage,
+            createdAt: image.createdAt,
+            updatedAt: image.updatedAt,
+          })),
+        )
+      : task.imageUrl || task.imageKey
         ? [
             {
               id: `${task.id}:legacy:0`,
@@ -1014,7 +1038,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
               status: task.status,
               width: task.width,
               height: task.height,
-              imageUrl: task.imageUrl,
+              imageUrl: await resolveImageUrl(task.imageKey, task.imageUrl),
               cost: task.cost,
               errorMessage: task.errorMessage,
               createdAt: task.createdAt,
@@ -1023,6 +1047,10 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           ]
         : [];
 
-    return { ...task, images };
+    return {
+      ...task,
+      imageUrl: await resolveImageUrl(task.imageKey, task.imageUrl),
+      images,
+    };
   }
 }

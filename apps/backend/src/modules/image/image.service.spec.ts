@@ -34,6 +34,8 @@ const queuedTask = {
   model: 'image-model',
   provider: '',
   status: 'PENDING',
+  imageUrl: null,
+  imageKey: null,
   parameters: {
     aspectRatio: '1:1',
     perImagePrice: 0.5,
@@ -215,6 +217,47 @@ describe('ImageService durable queue integration', () => {
       }),
     );
     expect(queue.enqueue).toHaveBeenCalledWith('task-1');
+  });
+
+  it('refreshes expired image URLs from object keys when loading history', async () => {
+    const { service, prisma, minio } = createService();
+    const historyTask = {
+      ...queuedTask,
+      status: 'SUCCESS',
+      imageUrl: 'https://minio.test/expired-url',
+      imageKey: 'images/task-1/0.png',
+      images: [
+        {
+          id: 'image-1',
+          sequence: 0,
+          status: 'SUCCESS',
+          width: 1024,
+          height: 1024,
+          imageUrl: 'https://minio.test/expired-url',
+          imageKey: 'images/task-1/0.png',
+          cost: 0.5,
+          errorMessage: null,
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T00:00:00.000Z',
+        },
+      ],
+    };
+    prisma.imageGeneration.findMany.mockResolvedValue([historyTask]);
+    prisma.imageGeneration.count.mockResolvedValue(1);
+    minio.getPresignedUrl.mockImplementation(async (imageKey: string) =>
+      `https://minio.test/${imageKey}?fresh=true`,
+    );
+
+    const result = await service.getHistory('user-1');
+
+    expect(result.items[0].imageUrl).toBe(
+      'https://minio.test/images/task-1/0.png?fresh=true',
+    );
+    expect(result.items[0].images[0].imageUrl).toBe(
+      'https://minio.test/images/task-1/0.png?fresh=true',
+    );
+    expect(minio.getPresignedUrl).toHaveBeenCalledTimes(1);
+    expect(minio.getPresignedUrl).toHaveBeenCalledWith('images/task-1/0.png');
   });
 
   it('does not process a duplicate queue message that cannot claim the task', async () => {
