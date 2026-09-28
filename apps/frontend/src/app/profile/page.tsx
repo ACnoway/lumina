@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import type {
   GetTransactionsResponse,
   GetCurrentUserResponse,
-  PaymentChannelDto,
+  CurrencySettingsDto,
   PaymentMethod,
   PaymentOrderDto,
-  PaymentScene,
   TransactionItem,
   TransactionType,
 } from "@lumina/shared";
@@ -233,10 +232,9 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordInfo, setPasswordInfo] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("ALIPAY");
-  const [paymentScene, setPaymentScene] = useState<PaymentScene>("QR");
   const [paymentAmount, setPaymentAmount] = useState("10.00");
-  const [paymentChannels, setPaymentChannels] = useState<PaymentChannelDto[]>([]);
-  const [selectedPaymentChannelId, setSelectedPaymentChannelId] = useState("");
+  const [currencySettings, setCurrencySettings] = useState<CurrencySettingsDto | null>(null);
+  const [rechargeSettingsLoading, setRechargeSettingsLoading] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrderDto | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
@@ -247,18 +245,18 @@ export default function ProfilePage() {
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [transactionsError, setTransactionsError] = useState("");
 
-  const loadPaymentChannels = useCallback(async () => {
+  const loadRechargeSettings = useCallback(async () => {
+    setRechargeSettingsLoading(true);
     setPaymentError("");
     try {
-      const channels = await paymentsApi.getChannels(paymentMethod, paymentScene);
-      setPaymentChannels(channels);
-      setSelectedPaymentChannelId((current) =>
-        channels.some((channel) => channel.id === current) ? current : channels[0]?.id || "",
-      );
+      const settings = await paymentsApi.getRechargeSettings();
+      setCurrencySettings(settings);
     } catch (err: unknown) {
-      setPaymentError(err instanceof Error ? err.message : "支付渠道加载失败");
+      setPaymentError(err instanceof Error ? err.message : "充值汇率加载失败，请稍后重试");
+    } finally {
+      setRechargeSettingsLoading(false);
     }
-  }, [paymentMethod, paymentScene]);
+  }, []);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -301,8 +299,8 @@ export default function ProfilePage() {
   }, [loadProfile]);
 
   useEffect(() => {
-    if (profile) void loadPaymentChannels();
-  }, [loadPaymentChannels, profile]);
+    if (profile) void loadRechargeSettings();
+  }, [loadRechargeSettings, profile]);
 
   useEffect(() => {
     void loadTransactions();
@@ -398,12 +396,12 @@ export default function ProfilePage() {
     event.preventDefault();
     setPaymentError("");
     setPaymentOrder(null);
-    if (!selectedPaymentChannelId) {
-      setPaymentError("请选择支付渠道");
+    if (!currencySettings) {
+      setPaymentError("充值汇率加载中，请稍后重试");
       return;
     }
-    if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(paymentAmount) || Number(paymentAmount) < 0.01) {
-      setPaymentError("请输入有效的充值金额，最低 0.01 元");
+    if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(paymentAmount) || Number(paymentAmount) < 0.1) {
+      setPaymentError("请输入有效的充值金额，最低 0.1 元");
       return;
     }
     setPaymentLoading(true);
@@ -412,8 +410,6 @@ export default function ProfilePage() {
         {
           amount: paymentAmount,
           paymentMethod,
-          scene: paymentScene,
-          channelId: selectedPaymentChannelId,
         },
         crypto.randomUUID(),
       );
@@ -574,11 +570,11 @@ export default function ProfilePage() {
                 </p>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight">充值中心</h2>
                 <p className="mt-2 text-sm text-gray-400">
-                  请选择支付方式、场景和具体渠道。支付成功以服务端回调或订单同步结果为准。
+                  选择支付方式并填写充值金额，支付成功以服务端回调或订单同步结果为准。
                 </p>
               </div>
               <form onSubmit={handleCreatePayment} className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs text-gray-500">
                     <span className="block font-medium text-gray-700">支付方式</span>
                     <select
@@ -592,59 +588,27 @@ export default function ProfilePage() {
                     </select>
                   </label>
                   <label className="space-y-1 text-xs text-gray-500">
-                    <span className="block font-medium text-gray-700">支付场景</span>
-                    <select
-                      value={paymentScene}
-                      onChange={(event) => setPaymentScene(event.target.value as PaymentScene)}
-                      disabled={paymentLoading}
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                    >
-                      <option value="QR">二维码</option>
-                      <option value="WEB">电脑网站</option>
-                      <option value="H5">H5</option>
-                      {paymentMethod === "WECHAT" && <option value="JSAPI">公众号/小程序</option>}
-                    </select>
-                  </label>
-                  <label className="space-y-1 text-xs text-gray-500">
                     <span className="block font-medium text-gray-700">充值金额（人民币）</span>
                     <input
+                      type="number"
                       value={paymentAmount}
                       onChange={(event) => setPaymentAmount(event.target.value)}
                       inputMode="decimal"
+                      min="0.1"
+                      step="0.01"
                       placeholder="10.00"
                       disabled={paymentLoading}
                       className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
                     />
                   </label>
                 </div>
-                <div>
-                  <p className="mb-2 text-xs font-medium text-gray-700">选择具体支付渠道</p>
-                  {paymentChannels.length === 0 ? (
-                    <p className="rounded-lg bg-gray-50 px-3 py-3 text-sm text-gray-400">
-                      当前支付方式和场景暂无可用渠道，请联系管理员配置。
-                    </p>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {paymentChannels.map((channel) => (
-                        <label
-                          key={channel.id}
-                          className={`cursor-pointer rounded-xl border p-4 transition ${selectedPaymentChannelId === channel.id ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
-                        >
-                          <input
-                            type="radio"
-                            name="payment-channel"
-                            value={channel.id}
-                            checked={selectedPaymentChannelId === channel.id}
-                            onChange={() => setSelectedPaymentChannelId(channel.id)}
-                            className="sr-only"
-                          />
-                          <p className="font-medium text-gray-800">{channel.name}</p>
-                          <p className="mt-1 text-xs text-gray-400">{channel.type}</p>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                  {currencySettings
+                    ? `当前汇率：1 人民币 = ${currencySettings.photonPerCny} 光子`
+                    : rechargeSettingsLoading
+                      ? "正在加载充值汇率…"
+                      : "充值汇率暂时不可用"}
+                </p>
                 {paymentError && <p className="text-sm text-red-600">{paymentError}</p>}
                 {paymentOrder?.action?.type === "QR_CODE" && paymentOrder.action.content && (
                   <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm">
@@ -661,10 +625,10 @@ export default function ProfilePage() {
                 )}
                 <button
                   type="submit"
-                  disabled={paymentLoading || paymentChannels.length === 0}
+                  disabled={paymentLoading || rechargeSettingsLoading || !currencySettings}
                   className={authPrimaryButtonClassName}
                 >
-                  {paymentLoading ? "创建订单中…" : "创建充值订单"}
+                  {paymentLoading ? "创建订单中…" : rechargeSettingsLoading ? "加载配置中…" : "创建充值订单"}
                 </button>
               </form>
             </section>

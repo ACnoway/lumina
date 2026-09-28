@@ -20,6 +20,12 @@ export class PaymentsController {
     return this.paymentService.listChannels(query);
   }
 
+  @Get('recharge-settings')
+  @ApiOperation({ summary: '获取充值汇率设置' })
+  getRechargeSettings() {
+    return this.paymentService.getRechargeSettings();
+  }
+
   @Post('orders')
   @ApiOperation({ summary: '创建支付订单' })
   createOrder(

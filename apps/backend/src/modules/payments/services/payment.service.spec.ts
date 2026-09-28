@@ -97,6 +97,19 @@ describe('PaymentService', () => {
     expect(prisma.paymentOrder.updateMany).not.toHaveBeenCalled();
   });
 
+  it('rejects recharge amounts below 0.1 yuan before selecting a channel', async () => {
+    const { service, prisma } = createService();
+    prisma.paymentOrder.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createPayment(
+        { id: 'user-1' } as never,
+        { amount: '0.09', paymentMethod: 'ALIPAY' },
+        'payment-idempotency-2',
+      ),
+    ).rejects.toThrow('充值金额必须在 0.1 至 100000 元之间');
+  });
+
   it('requires an exact amount and currency before crediting a successful payment', async () => {
     const { service, prisma, walletService, adapter } = createService();
     const order = makeOrder();

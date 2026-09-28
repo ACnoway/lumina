@@ -140,6 +140,39 @@ export class PaymentChannelService {
     return { channel, adapter, config: this.decrypt(channel) };
   }
 
+  async getUsableChannelForMethod(
+    paymentMethod: PaymentMethod,
+    scene: PaymentScene,
+  ): Promise<{
+    channel: PaymentChannel;
+    adapter: ReturnType<PaymentAdapterRegistry['get']>;
+    config: Record<string, unknown>;
+  }> {
+    const channels = await this.prisma.paymentChannel.findMany({
+      where: { isActive: true },
+      orderBy: [{ type: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const preferredType = paymentMethod === PaymentMethod.ALIPAY
+      ? PaymentChannelType.ALIPAY
+      : PaymentChannelType.WECHAT;
+    const matchingChannels = channels.filter((channel) => {
+      const adapter = this.registry.get(channel.type);
+      const metadata = adapter.getMetadata();
+      return metadata.methods.includes(paymentMethod) && metadata.scenes.includes(scene);
+    });
+    const selectedChannel = matchingChannels.find((channel) => channel.type === preferredType) ?? matchingChannels[0];
+    if (selectedChannel) {
+      const adapter = this.registry.get(selectedChannel.type);
+      return { channel: selectedChannel, adapter, config: this.decrypt(selectedChannel) };
+    }
+
+    throw new PaymentChannelError(
+      PaymentErrorCode.CHANNEL_NOT_FOUND,
+      '当前支付方式暂无可用渠道，请联系管理员配置',
+    );
+  }
+
   async getById(id: string): Promise<{ channel: PaymentChannel; adapter: ReturnType<PaymentAdapterRegistry['get']>; config: Record<string, unknown> }> {
     const channel = await this.findById(id);
     return { channel, adapter: this.registry.get(channel.type), config: this.decrypt(channel) };

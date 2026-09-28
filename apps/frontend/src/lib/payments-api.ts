@@ -1,26 +1,19 @@
 import type {
-  PaymentChannelDto,
+  CurrencySettingsDto,
   PaymentMethod,
   PaymentOrderDto,
-  PaymentScene,
 } from '@lumina/shared';
 import { apiClient } from './api-client';
 
 export const paymentsApi = {
-  getChannels(paymentMethod?: PaymentMethod, scene?: PaymentScene): Promise<PaymentChannelDto[]> {
-    const params = new URLSearchParams();
-    if (paymentMethod) params.set('paymentMethod', paymentMethod);
-    if (scene) params.set('scene', scene);
-    const query = params.toString();
-    return apiClient.get(`/payments/channels${query ? `?${query}` : ''}`);
+  getRechargeSettings(): Promise<CurrencySettingsDto> {
+    return apiClient.get('/payments/recharge-settings');
   },
 
   createOrder(
     data: {
       amount: string;
       paymentMethod: PaymentMethod;
-      scene: PaymentScene;
-      channelId: string;
     },
     idempotencyKey: string,
   ): Promise<PaymentOrderDto> {

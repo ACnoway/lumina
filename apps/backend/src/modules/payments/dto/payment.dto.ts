@@ -19,13 +19,6 @@ export class CreatePaymentOrderDto {
   @IsIn(['ALIPAY', 'WECHAT'], { message: 'paymentMethod 不合法' })
   paymentMethod!: 'ALIPAY' | 'WECHAT';
 
-  @IsIn(['WEB', 'H5', 'QR', 'JSAPI', 'APP'], { message: 'scene 不合法' })
-  scene!: 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
-
-  @IsString({ message: 'channelId 必须是字符串' })
-  @IsNotEmpty({ message: '请选择支付渠道' })
-  channelId!: string;
-
   @IsOptional()
   @IsString({ message: 'subject 必须是字符串' })
   @MaxLength(128, { message: 'subject 不能超过 128 个字符' })

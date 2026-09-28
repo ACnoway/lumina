@@ -73,6 +73,11 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 ### 支付与充值
 
+个人中心的充值页面只需要选择支付方式并填写人民币金额，不再让普通用户选择支付场景或具体支付渠道。系统使用二维码场景，并根据支付方式从已启用的渠道中自动选择可用配置。最低充值金额为 0.1 元，页面会展示当前 `1 人民币 = N 光子` 的充值汇率。
+
+充值汇率可通过登录用户接口 `GET /payments/recharge-settings` 读取；管理员仍通过
+`GET/PATCH /admin/settings/currency` 配置汇率。
+
 支付订单创建只会进入 `CREATED/PENDING`，余额仅在渠道验签成功的异步通知或服务端明确确认已付款的查单后入账。`return_url` 和前端订单轮询都不能直接改变余额。
 
 生产环境必须显式设置 `PAYMENT_NOTIFY_BASE_URL`，并确保最终的

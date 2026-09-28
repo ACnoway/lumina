@@ -47,6 +47,10 @@ export class PaymentService {
     return this.channels.listPublic(query);
   }
 
+  getRechargeSettings() {
+    return this.settingsService.getCurrencySettings();
+  }
+
   async createPayment(
     user: User,
     dto: CreatePaymentOrderDto,
@@ -68,15 +72,15 @@ export class PaymentService {
     } catch {
       throw new BadRequestException('充值金额格式不合法');
     }
-    if (amount.lessThan('0.01') || amount.greaterThan('100000')) {
-      throw new BadRequestException('充值金额必须在 0.01 至 100000 元之间');
+    if (amount.lessThan('0.1') || amount.greaterThan('100000')) {
+      throw new BadRequestException('充值金额必须在 0.1 至 100000 元之间');
     }
 
     const paymentMethod = dto.paymentMethod as PaymentMethod;
-    const scene = dto.scene as PaymentScene;
+    const scene = PaymentScene.QR;
     let usable: Awaited<ReturnType<PaymentChannelService['getUsableChannel']>>;
     try {
-      usable = await this.channels.getUsableChannel(dto.channelId, paymentMethod, scene);
+      usable = await this.channels.getUsableChannelForMethod(paymentMethod, scene);
     } catch (error) {
       this.rethrowChannelError(error);
     }
