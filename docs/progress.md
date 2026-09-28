@@ -49,6 +49,13 @@
 - 本地 TypeScript 检查（`tsc --noEmit --incremental false`）和页面 ESLint 检查已通过；本机 `pnpm --filter frontend build` 受 pnpm 11 与仓库 pnpm 8 lockfile 不兼容影响未执行完成，直接 Next 构建长时间无输出后停止。
 - 远程 `lch:/root/lumina` 已拉取本次提交；前端生产构建、隔离 Compose 构建和完整 `pnpm e2e:smoke` 均通过。浏览器验收覆盖登录后概览、充值与钱包、安全设置、消费记录占位、侧边栏切换和刷新后保留 `/profile?tab=...`；测试完成后已清理隔离容器、网络和卷。
 
+## 本次模块：充值界面简化（代码与远程验证通过）
+
+- 提交 `074f6e2` 已推送并在 `lch:/root/lumina` 拉取验证。
+- 前台充值只保留支付方式和金额，展示充值汇率；支付场景固定为二维码，具体渠道由后端按支付方式自动选择；最低充值金额为 0.1 元。
+- 远程后端测试通过 23 个套件/102 个测试，生产构建和隔离 `pnpm e2e:smoke` 通过；验证后已清理隔离容器、网络和卷。
+- 真实支付宝、微信支付或易支付交易仍需配置对应商户凭据和公网回调后联调。
+
 ## 本次模块：模块化支付渠道 V1（代码已实现，隔离环境验证通过，真实商户联调待补）
 
 - 新增 `PaymentChannel`、`PaymentOrder`、`PaymentCallbackEvent` 及 Prisma migration。
