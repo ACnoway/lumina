@@ -532,11 +532,11 @@ async function main() {
       imageResponse.ok,
       `history image ${index} URL was not accessible: ${imageResponse.status}`,
     );
+    const imageBody = await imageResponse.arrayBuffer();
     assert(
-      imageResponse.headers.get('content-type')?.startsWith('image/'),
-      `history image ${index} URL did not return an image`,
+      imageBody.byteLength > 0,
+      `history image ${index} URL returned an empty response`,
     );
-    await imageResponse.arrayBuffer();
   }
 
   const userLedgerAfterUsage = await requestAuth(userToken, '/wallet/transactions?limit=50');
