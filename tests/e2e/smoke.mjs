@@ -525,6 +525,19 @@ async function main() {
   assert(historyImage.prompt === 'a tiny e2e test image', 'positive prompt was not preserved');
   assert(historyImage.negativePrompt === 'blurry, watermark', 'negative prompt was not preserved');
   assert(historyImage.images?.length === 4, 'image history did not include all four images');
+  for (const [index, image] of historyImage.images.entries()) {
+    assert(image.imageUrl, `history image ${index} did not include a signed URL`);
+    const imageResponse = await fetch(image.imageUrl);
+    assert(
+      imageResponse.ok,
+      `history image ${index} URL was not accessible: ${imageResponse.status}`,
+    );
+    assert(
+      imageResponse.headers.get('content-type')?.startsWith('image/'),
+      `history image ${index} URL did not return an image`,
+    );
+    await imageResponse.arrayBuffer();
+  }
 
   const userLedgerAfterUsage = await requestAuth(userToken, '/wallet/transactions?limit=50');
   assert(
