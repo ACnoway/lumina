@@ -103,6 +103,7 @@ function createService() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       update: jest.fn(),
       findMany: jest.fn(),
+      count: jest.fn(),
     },
     imageGenerationImage,
   };
