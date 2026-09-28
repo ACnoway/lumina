@@ -430,6 +430,10 @@ async function main() {
     visibleModels.data.some((model) => model.name === chatModel.data.name),
     'active chat model is not visible to regular user',
   );
+  assert(
+    visibleModels.data.some((model) => model.displayName === chatModel.data.displayName),
+    'chat model display name is not visible to regular user',
+  );
 
   const providerList = await requestAuth(adminToken, '/providers');
   const visibleProvider = providerList.data.find((item) => item.id === providerId);
@@ -509,6 +513,11 @@ async function main() {
       imageCount: 4,
     },
   });
+  assert(
+    imageTask.data.modelDisplayName === imageModel.data.displayName,
+    'image task did not return the user-facing model display name',
+  );
+  assert(!Object.hasOwn(imageTask.data, 'model'), 'image task leaked the platform model name');
   const completedImage = await pollImageTask(userToken, imageTask.data.id);
   assert(completedImage.imageKey, 'successful image task did not store an object key');
   assert(completedImage.imageUrl, 'successful image task did not return a signed URL');
@@ -525,6 +534,11 @@ async function main() {
   assert(historyImage.prompt === 'a tiny e2e test image', 'positive prompt was not preserved');
   assert(historyImage.negativePrompt === 'blurry, watermark', 'negative prompt was not preserved');
   assert(historyImage.images?.length === 4, 'image history did not include all four images');
+  assert(
+    historyImage.modelDisplayName === imageModel.data.displayName,
+    'image history did not return the user-facing model display name',
+  );
+  assert(!Object.hasOwn(historyImage, 'model'), 'image history leaked the platform model name');
   for (const [index, image] of historyImage.images.entries()) {
     assert(image.imageUrl, `history image ${index} did not include a signed URL`);
     const imageResponse = await fetch(image.imageUrl);
@@ -545,6 +559,36 @@ async function main() {
       (item) => item.type === 'CONSUME' && Number(item.amount) > 0,
     ),
     'user wallet ledger did not contain the chat/image consumption record',
+  );
+  assert(
+    userLedgerAfterUsage.data.items.some(
+      (item) => item.reason === `聊天: ${chatModel.data.displayName}`,
+    ),
+    'user wallet ledger did not use the chat model display name',
+  );
+  assert(
+    userLedgerAfterUsage.data.items.some(
+      (item) => item.reason === `生图: ${imageModel.data.displayName}`,
+    ),
+    'user wallet ledger did not use the image model display name',
+  );
+  for (const item of userLedgerAfterUsage.data.items) {
+    const serializedItem = JSON.stringify(item);
+    assert(
+      !serializedItem.includes(chatModel.data.name) && !serializedItem.includes(imageModel.data.name),
+      'user wallet ledger leaked a platform model name',
+    );
+  }
+
+  const adminUsageLedger = await requestAuth(
+    adminToken,
+    `/admin/users/${userId}/transactions?limit=50`,
+  );
+  assert(
+    adminUsageLedger.data.items.some(
+      (item) => item.reason === `聊天: ${chatModel.data.name}`,
+    ),
+    'admin wallet ledger no longer contains the platform model name',
   );
 
   const auditLogs = await requestAuth(adminToken, '/admin/audit-logs?limit=100');

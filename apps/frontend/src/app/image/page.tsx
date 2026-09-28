@@ -684,7 +684,7 @@ export default function ImagePage() {
             <div className="mt-4 space-y-2 text-xs text-gray-500">
               <div className="flex justify-between gap-4">
                 <span>模型</span>
-                <span className="font-medium text-gray-700">{task.model}</span>
+                <span className="font-medium text-gray-700">{task.modelDisplayName}</span>
               </div>
               {task.cost !== null && (
                 <div className="flex justify-between gap-4">
@@ -770,7 +770,7 @@ export default function ImagePage() {
                   <div className="p-3">
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate font-medium text-gray-700">
-                        {historyTask.model}
+                        {historyTask.modelDisplayName}
                       </span>
                       <span className="shrink-0 text-gray-400">
                         {formatDate(historyTask.createdAt)}

@@ -65,7 +65,7 @@ export class WalletController {
       `查询交易记录: userId=${user.id}, page=${query.page}, limit=${query.limit}`,
     );
 
-    const { transactions, total } = await this.walletService.getTransactions(
+    const { transactions, total } = await this.walletService.getUserTransactions(
       user.id,
       query.page || 1,
       query.limit || 20,

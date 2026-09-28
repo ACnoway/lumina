@@ -12,6 +12,7 @@ import axios from 'axios';
 const imageModel = {
   id: 'model-1',
   name: 'image-model',
+  displayName: '图片模型',
   type: 'IMAGE',
   isActive: true,
   pricing: { perImage: 0.5 },
@@ -20,6 +21,7 @@ const imageModel = {
 const promptOptimizerModel = {
   id: 'model-chat-1',
   name: 'chat-model',
+  displayName: '聊天模型',
   type: 'CHAT',
   isActive: true,
   pricing: { input: 0.01, output: 0.02 },
@@ -97,6 +99,9 @@ function createService() {
     }),
   };
   const prisma = {
+    platformModel: {
+      findMany: jest.fn().mockResolvedValue([imageModel]),
+    },
     imageGeneration: {
       create: jest.fn().mockResolvedValue(queuedTask),
       findUnique: jest.fn().mockResolvedValue(queuedTask),
@@ -195,6 +200,8 @@ describe('ImageService durable queue integration', () => {
 
   it('stores a pricing snapshot and enqueues only after the task has been created', async () => {
     const { service, prisma, queue } = createService();
+    const publicTask: Record<string, unknown> = { ...queuedTask };
+    delete publicTask.model;
 
     await expect(
       service.createImageTask('user-1', {
@@ -202,7 +209,10 @@ describe('ImageService durable queue integration', () => {
         model: 'image-model',
         aspectRatio: '16:9',
       }),
-    ).resolves.toEqual(queuedTask);
+    ).resolves.toEqual({
+      ...publicTask,
+      modelDisplayName: '图片模型',
+    });
 
     expect(prisma.imageGeneration.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -257,6 +267,7 @@ describe('ImageService durable queue integration', () => {
     expect(result.items[0].images[0].imageUrl).toBe(
       'https://minio.test/images/task-1/0.png?fresh=true',
     );
+    expect(result.items[0].modelDisplayName).toBe('图片模型');
     expect(minio.getPresignedUrl).toHaveBeenCalledTimes(1);
     expect(minio.getPresignedUrl).toHaveBeenCalledWith('images/task-1/0.png');
   });

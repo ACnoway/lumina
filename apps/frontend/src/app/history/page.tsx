@@ -519,7 +519,7 @@ export default function HistoryPage() {
                       )}
                       <div className="mt-3 flex items-center justify-between gap-3 text-xs">
                         <span className="truncate text-gray-400">
-                          {task.model}
+                          {task.modelDisplayName}
                         </span>
                         {task.cost !== null && (
                           <span className="shrink-0 text-gray-500">

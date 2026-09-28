@@ -237,4 +237,55 @@ describe('WalletService reservations', () => {
       expect.anything(),
     );
   });
+
+  it('converts model names in user-visible transactions without changing admin data', async () => {
+    const transaction = {
+      id: 'transaction-1',
+      walletId: 'wallet-1',
+      type: 'CONSUME',
+      amount: new Decimal('0.5'),
+      balance: new Decimal('9.5'),
+      reason: '聊天: internal-chat-model',
+      metadata: {
+        model: 'internal-chat-model',
+        sessionId: 'session-1',
+      },
+      idempotencyKey: 'chat:session-1:message-1',
+      createdAt: new Date('2026-09-28T00:00:00.000Z'),
+    };
+    const prisma = {
+      wallet: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }),
+      },
+      walletTransaction: {
+        findMany: jest.fn().mockResolvedValue([transaction]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      platformModel: {
+        findMany: jest.fn().mockResolvedValue([
+          { name: 'internal-chat-model', displayName: '用户聊天模型' },
+        ]),
+      },
+    };
+    const service = new WalletService(
+      prisma as unknown as PrismaService,
+      {} as RedisService,
+      {} as AuditService,
+    );
+
+    const result = await service.getUserTransactions('user-1');
+
+    expect(result.transactions[0]).toEqual({
+      ...transaction,
+      reason: '聊天: 用户聊天模型',
+      metadata: {
+        model: '用户聊天模型',
+        sessionId: 'session-1',
+      },
+    });
+    expect(prisma.platformModel.findMany).toHaveBeenCalledWith({
+      where: { name: { in: ['internal-chat-model'] } },
+      select: { name: true, displayName: true },
+    });
+  });
 });

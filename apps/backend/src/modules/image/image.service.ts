@@ -252,7 +252,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     this.logger.log(`生图任务已入队: userId=${userId}, taskId=${task.id}, model=${data.model}`);
 
-    return this.serializeTask(task);
+    return this.serializeTask(task, platformModel.displayName);
   }
 
   private async runWorker(): Promise<void> {
@@ -964,7 +964,8 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // 如果图片 URL 是预签名的，可能需要刷新（7天过期）
     // 这里简单返回，前端可以缓存
-    return this.serializeTask(task);
+    const modelDisplayNames = await this.getModelDisplayNames([task.model]);
+    return this.serializeTask(task, modelDisplayNames.get(task.model));
   }
 
   /**
@@ -988,15 +989,31 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       this.prisma.imageGeneration.count({ where }),
     ]);
 
+    const modelDisplayNames = await this.getModelDisplayNames(items.map((item) => item.model));
+
     return {
-      items: await Promise.all(items.map((item) => this.serializeTask(item))),
+      items: await Promise.all(
+        items.map((item) => this.serializeTask(item, modelDisplayNames.get(item.model))),
+      ),
       total,
       page,
       limit,
     };
   }
 
-  private async serializeTask(task: any) {
+  private async getModelDisplayNames(modelNames: string[]): Promise<Map<string, string>> {
+    const names = [...new Set(modelNames.filter((name) => typeof name === 'string' && name))];
+    if (names.length === 0) return new Map();
+
+    const models = await this.prisma.platformModel.findMany({
+      where: { name: { in: names } },
+      select: { name: true, displayName: true },
+    });
+
+    return new Map(models.map((model) => [model.name, model.displayName]));
+  }
+
+  private async serializeTask(task: any, modelDisplayName?: string) {
     const signedUrlByKey = new Map<string, Promise<string>>();
     const resolveImageUrl = async (
       imageKey: unknown,
@@ -1047,8 +1064,12 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           ]
         : [];
 
+    const publicTask = { ...task };
+    delete publicTask.model;
+
     return {
-      ...task,
+      ...publicTask,
+      modelDisplayName: modelDisplayName || '已下线模型',
       imageUrl: await resolveImageUrl(task.imageKey, task.imageUrl),
       images,
     };

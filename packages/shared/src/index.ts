@@ -260,7 +260,7 @@ export interface ImageTaskDto {
   prompt: string;
   originalPrompt: string | null;
   negativePrompt: string | null;
-  model: string;
+  modelDisplayName: string;
   status: ImageStatus;
   imageUrl: string | null;
   images: ImageTaskImageDto[];

@@ -339,6 +339,110 @@ export class WalletService {
   }
 
   /**
+   * 查询用户可见的交易记录。
+   *
+   * 钱包流水内部仍保存平台模型名，方便管理员审计和服务端排查；
+   * 用户侧响应则统一转换为模型展示名，并避免泄露内部模型名。
+   */
+  async getUserTransactions(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    type?: TransactionType,
+  ): Promise<{
+    transactions: Array<
+      Omit<WalletTransaction, 'reason' | 'metadata'> & {
+        reason: string;
+        metadata: WalletTransaction['metadata'];
+      }
+    >;
+    total: number;
+  }> {
+    const { transactions, total } = await this.getTransactions(userId, page, limit, type);
+    const modelDisplayNames = await this.getModelDisplayNames(transactions);
+
+    return {
+      transactions: transactions.map((transaction) =>
+        this.serializeUserTransaction(transaction, modelDisplayNames),
+      ),
+      total,
+    };
+  }
+
+  private async getModelDisplayNames(
+    transactions: WalletTransaction[],
+  ): Promise<Map<string, string>> {
+    const modelNames = new Set<string>();
+
+    for (const transaction of transactions) {
+      const metadataModel = this.getMetadataModelName(transaction.metadata);
+      const reasonModel = this.getReasonModelName(transaction.reason)?.modelName;
+      if (metadataModel) modelNames.add(metadataModel);
+      if (reasonModel) modelNames.add(reasonModel);
+    }
+
+    if (modelNames.size === 0) return new Map();
+
+    const models = await this.prisma.platformModel.findMany({
+      where: { name: { in: [...modelNames] } },
+      select: { name: true, displayName: true },
+    });
+
+    return new Map(models.map((model) => [model.name, model.displayName]));
+  }
+
+  private serializeUserTransaction(
+    transaction: WalletTransaction,
+    modelDisplayNames: Map<string, string>,
+  ): Omit<WalletTransaction, 'reason' | 'metadata'> & {
+    reason: string;
+    metadata: WalletTransaction['metadata'];
+  } {
+    const metadataModel = this.getMetadataModelName(transaction.metadata);
+    const reasonModel = this.getReasonModelName(transaction.reason);
+    const modelName = metadataModel || reasonModel?.modelName;
+    const displayName = modelName
+      ? modelDisplayNames.get(modelName) || '已下线模型'
+      : null;
+
+    let metadata = transaction.metadata;
+    if (metadataModel && metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+      metadata = {
+        ...(metadata as Record<string, unknown>),
+        model: displayName,
+      } as WalletTransaction['metadata'];
+    }
+
+    return {
+      ...transaction,
+      reason:
+        displayName && reasonModel
+          ? `${reasonModel.prefix}: ${displayName}`
+          : transaction.reason,
+      metadata,
+    };
+  }
+
+  private getMetadataModelName(metadata: WalletTransaction['metadata']): string | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+
+    const model = (metadata as Record<string, unknown>).model;
+    return typeof model === 'string' && model.trim() ? model.trim() : null;
+  }
+
+  private getReasonModelName(
+    reason: string,
+  ): { prefix: string; modelName: string } | null {
+    const match = /^(聊天|生图|提示词优化)\s*[:：]\s*(.+)$/.exec(reason.trim());
+    if (!match) return null;
+
+    return {
+      prefix: match[1],
+      modelName: match[2].trim(),
+    };
+  }
+
+  /**
    * 充值入账（调用方必须传入已经换算好的光子数量）
    */
   async recharge(
