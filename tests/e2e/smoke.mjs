@@ -415,6 +415,25 @@ async function main() {
   assert(Number(currencySetting.data.photonPerCny) === 100, 'photon recharge rate did not persist');
   await requestAuth(userToken, '/admin/settings/currency', {}, [403]);
 
+  await requestAuth(
+    adminToken,
+    '/admin/settings/object-storage/test',
+    {
+      method: 'POST',
+      body: {
+        endpoint: 'http://minio:9000',
+        publicEndpoint: 'http://127.0.0.1:9000',
+        region: 'us-east-1',
+        bucket: 'lumina-images',
+        forcePathStyle: true,
+        accessKey: 'wrong-access-key',
+        secretKey: 'wrong-secret-key',
+        isActive: true,
+      },
+    },
+    [400],
+  );
+
   const objectStorageTest = await requestAuth(adminToken, '/admin/settings/object-storage/test', {
     method: 'POST',
     body: {
