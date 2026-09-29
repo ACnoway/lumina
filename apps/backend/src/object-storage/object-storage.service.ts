@@ -93,9 +93,9 @@ export class ObjectStorageService implements OnModuleInit {
     let accessKeyMasked: string | null = null;
     let credentialsConfigured = false;
     if (record.objectStorageCredentialsEncrypted) {
-      credentialsConfigured = true;
       try {
         const credentials = this.decryptCredentials(record.objectStorageCredentialsEncrypted);
+        credentialsConfigured = true;
         accessKeyMasked = this.maskSecret(credentials.accessKey);
       } catch (error) {
         this.logger.warn(`对象存储密钥无法解密: ${this.describeError(error)}`);
