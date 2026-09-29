@@ -445,7 +445,7 @@ export default function HistoryPage() {
                           }
                           aria-label="查看图片大图"
                         >
-                          {/* imageUrl is a signed MinIO URL returned by the authenticated history API. */}
+                          {/* imageUrl is a signed S3 URL returned by the authenticated history API. */}
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={

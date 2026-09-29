@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsBoolean,
   Max,
   MaxLength,
   Min,
@@ -75,4 +76,42 @@ export class UpdateCurrencySettingsDto {
   )
   @Min(0.000001, { message: 'photonPerCny 必须大于 0' })
   photonPerCny!: number;
+}
+
+export class UpdateObjectStorageConfigDto {
+  @IsString({ message: 'endpoint 必须是字符串' })
+  @IsNotEmpty({ message: 'endpoint 不能为空' })
+  @MaxLength(2048, { message: 'endpoint 不能超过 2048 个字符' })
+  endpoint!: string;
+
+  @IsOptional()
+  @IsString({ message: 'publicEndpoint 必须是字符串' })
+  @MaxLength(2048, { message: 'publicEndpoint 不能超过 2048 个字符' })
+  publicEndpoint?: string;
+
+  @IsString({ message: 'region 必须是字符串' })
+  @IsNotEmpty({ message: 'region 不能为空' })
+  @MaxLength(128, { message: 'region 不能超过 128 个字符' })
+  region!: string;
+
+  @IsString({ message: 'bucket 必须是字符串' })
+  @IsNotEmpty({ message: 'bucket 不能为空' })
+  @MaxLength(63, { message: 'bucket 不能超过 63 个字符' })
+  bucket!: string;
+
+  @IsBoolean({ message: 'forcePathStyle 必须是布尔值' })
+  forcePathStyle!: boolean;
+
+  @IsOptional()
+  @IsString({ message: 'accessKey 必须是字符串' })
+  @MaxLength(1024, { message: 'accessKey 不能超过 1024 个字符' })
+  accessKey?: string;
+
+  @IsOptional()
+  @IsString({ message: 'secretKey 必须是字符串' })
+  @MaxLength(2048, { message: 'secretKey 不能超过 2048 个字符' })
+  secretKey?: string;
+
+  @IsBoolean({ message: 'isActive 必须是布尔值' })
+  isActive!: boolean;
 }

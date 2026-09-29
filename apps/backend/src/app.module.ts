@@ -5,7 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
-import { MinioModule } from './minio/minio.module';
+import { ObjectStorageModule } from './object-storage/object-storage.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -35,7 +35,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     // 基础设施模块
     PrismaModule,
     RedisModule,
-    MinioModule,
+    ObjectStorageModule,
 
     // 业务模块
     AuthModule,

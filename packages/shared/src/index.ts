@@ -396,6 +396,25 @@ export interface PromptOptimizerSettingDto {
   modelName: string | null;
 }
 
+export interface ObjectStorageConfigDto {
+  configured: boolean;
+  enabled: boolean;
+  endpoint: string | null;
+  publicEndpoint: string | null;
+  region: string | null;
+  bucket: string | null;
+  forcePathStyle: boolean;
+  accessKeyMasked: string | null;
+  secretKeyMasked: string | null;
+  updatedAt: string | null;
+}
+
+export interface ObjectStorageTestResponse {
+  ok: true;
+  bucket: string;
+  message: string;
+}
+
 // ==================== 供应商/模型相关类型 ====================
 export type ApiFormat =
   'openai_chat' | 'openai_compatible' | 'anthropic_messages' | 'openai_image' | 'stability_image';

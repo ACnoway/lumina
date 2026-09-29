@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ProvidersService } from '../providers/providers.service';
 import { AdapterFactory } from '../chat/adapters/adapter-factory';
-import { MinioService } from '../../minio/minio.service';
+import { ObjectStorageService } from '../../object-storage/object-storage.service';
 import { ImageQueueService } from './image-queue.service';
 import { ImageService } from './image.service';
 import { SettingsService } from '../settings/settings.service';
@@ -143,7 +143,7 @@ function createService() {
     wallet as unknown as WalletService,
     providers as unknown as ProvidersService,
     adapterFactory as unknown as AdapterFactory,
-    minio as unknown as MinioService,
+    minio as unknown as ObjectStorageService,
     queue as unknown as ImageQueueService,
     settings as unknown as SettingsService,
   );
@@ -558,7 +558,7 @@ describe('ImageService durable queue integration', () => {
     );
   });
 
-  it('keeps the processing stage when MinIO returns an empty error message', async () => {
+  it('keeps the processing stage when object storage returns an empty error message', async () => {
     const { service, prisma, wallet, providers, minio, queue, imageRecords } = createService();
     const recordResult = jest.fn().mockResolvedValue(undefined);
     providers.resolveUpstream.mockResolvedValue({
@@ -595,13 +595,13 @@ describe('ImageService durable queue integration', () => {
     );
     expect(imageRecords[0]).toMatchObject({ status: 'PENDING', retryCount: 1 });
     expect(imageRecords[0].errorMessage).toContain(
-      '阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
+      '阶段=对象存储生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
     );
     expect(queue.enqueue).toHaveBeenCalledWith('task-1');
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',
       'image:task-1:0',
-      '生图失败: 阶段=MinIO 生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
+      '生图失败: 阶段=对象存储生成预签名 URL; S3Error: 未提供错误消息, code=NotFound',
     );
     expect(recordResult).not.toHaveBeenCalledWith(false);
   });

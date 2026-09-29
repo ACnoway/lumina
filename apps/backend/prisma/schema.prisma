@@ -367,10 +367,18 @@ model PlatformModel {
 
 // ==================== 系统配置 ====================
 model SystemConfig {
-  id                    Int           @id @default(1)
-  promptOptimizerModelId String?
-  promptOptimizerModel  PlatformModel? @relation(fields: [promptOptimizerModelId], references: [id], onDelete: SetNull)
-  photonPerCny          Decimal       @default(10) @db.Decimal(18, 6)
+  id                              Int           @id @default(1)
+  promptOptimizerModelId         String?
+  promptOptimizerModel            PlatformModel? @relation(fields: [promptOptimizerModelId], references: [id], onDelete: SetNull)
+  photonPerCny                    Decimal       @default(10) @db.Decimal(18, 6)
+  objectStorageEndpoint           String?
+  objectStoragePublicEndpoint     String?
+  objectStorageRegion             String?
+  objectStorageBucket             String?
+  objectStorageForcePathStyle     Boolean       @default(true)
+  objectStorageCredentialsEncrypted String?     @db.Text
+  objectStorageIsActive            Boolean       @default(false)
+  objectStorageConfigVersion      Int           @default(1)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

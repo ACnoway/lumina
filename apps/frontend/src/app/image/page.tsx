@@ -623,7 +623,7 @@ export default function ImagePage() {
                         }}
                         aria-label={`查看第 ${image.sequence + 1} 张图片大图`}
                       >
-                        {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
+                        {/* imageUrl is a dynamic, signed S3 URL; it is not a static Next Image host. */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={image.imageUrl}

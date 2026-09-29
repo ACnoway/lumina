@@ -6,6 +6,8 @@ import {
   AdminUsersResponse,
   CurrencySettingsDto,
   GetTransactionsResponse,
+  ObjectStorageConfigDto,
+  ObjectStorageTestResponse,
   PromptOptimizerSettingDto,
   TransactionItem,
   WalletTransactionDto,
@@ -15,10 +17,15 @@ import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
 import { SettingsService } from '../settings/settings.service';
 import {
+  ObjectStorageConfigInput,
+  ObjectStorageService,
+} from '../../object-storage/object-storage.service';
+import {
   AdjustUserBalanceDto,
   ListAdminUsersQueryDto,
   UpdatePromptOptimizerModelDto,
   UpdateCurrencySettingsDto,
+  UpdateObjectStorageConfigDto,
   UpdateUserStatusDto,
 } from './dto/admin.dto';
 
@@ -57,6 +64,7 @@ export class AdminService {
     private readonly walletService: WalletService,
     private readonly auditService: AuditService,
     private readonly settingsService: SettingsService,
+    private readonly objectStorageService: ObjectStorageService,
   ) {}
 
   async getPromptOptimizerSetting(): Promise<PromptOptimizerSettingDto> {
@@ -70,6 +78,40 @@ export class AdminService {
 
   async getCurrencySettings(): Promise<CurrencySettingsDto> {
     return this.settingsService.getCurrencySettings();
+  }
+
+  async getObjectStorageConfig(): Promise<ObjectStorageConfigDto> {
+    return this.objectStorageService.getAdminConfig();
+  }
+
+  async testObjectStorageConfig(
+    dto: UpdateObjectStorageConfigDto,
+  ): Promise<ObjectStorageTestResponse> {
+    return this.objectStorageService.testConnection(this.toObjectStorageInput(dto));
+  }
+
+  async updateObjectStorageConfig(
+    actor: User,
+    dto: UpdateObjectStorageConfigDto,
+    context: AuditRequestContext,
+  ): Promise<ObjectStorageConfigDto> {
+    const before = await this.objectStorageService.getAdminConfig();
+    const result = await this.objectStorageService.saveConfig(this.toObjectStorageInput(dto));
+
+    await this.auditService.record({
+      actorId: actor.id,
+      action: 'object_storage.updated',
+      resource: 'system_config',
+      details: {
+        before: this.auditObjectStorageConfig(before),
+        after: this.auditObjectStorageConfig(result.config),
+        credentialsUpdated: Boolean(dto.accessKey?.trim() || dto.secretKey?.trim()),
+        migratedObjectCount: result.migratedObjectCount,
+      },
+      ...context,
+    });
+
+    return result.config;
   }
 
   async updateCurrencySettings(
@@ -347,6 +389,33 @@ export class AdminService {
         : null,
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
+    };
+  }
+
+  private toObjectStorageInput(dto: UpdateObjectStorageConfigDto): ObjectStorageConfigInput {
+    return {
+      endpoint: dto.endpoint,
+      publicEndpoint: dto.publicEndpoint,
+      region: dto.region,
+      bucket: dto.bucket,
+      forcePathStyle: dto.forcePathStyle,
+      accessKey: dto.accessKey,
+      secretKey: dto.secretKey,
+      isActive: dto.isActive,
+    };
+  }
+
+  private auditObjectStorageConfig(config: ObjectStorageConfigDto) {
+    return {
+      configured: config.configured,
+      enabled: config.enabled,
+      endpoint: config.endpoint,
+      publicEndpoint: config.publicEndpoint,
+      region: config.region,
+      bucket: config.bucket,
+      forcePathStyle: config.forcePathStyle,
+      accessKeyMasked: config.accessKeyMasked,
+      secretKeyConfigured: Boolean(config.secretKeyMasked),
     };
   }
 }

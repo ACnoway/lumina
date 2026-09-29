@@ -44,6 +44,16 @@ services:
     volumes:
       - lumina_e2e_minio:/data
 
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ['/bin/sh', '-c']
+    command: >-
+      "until mc alias set local http://minio:9000 lumina_e2e_minio lumina_e2e_minio_secret; do sleep 1; done;
+      mc mb --ignore-existing local/lumina-images"
+
   mailhog:
     image: mailhog/mailhog:v1.0.1
     ports:
@@ -64,8 +74,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
       mailhog:
         condition: service_started
       mock-provider:
@@ -75,13 +85,7 @@ services:
       NODE_ENV: test
       DATABASE_URL: postgresql://lumina_e2e:lumina_e2e_password@postgres:5432/lumina_e2e?schema=public
       REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: 9000
-      MINIO_USE_SSL: 'false'
-      MINIO_ACCESS_KEY: lumina_e2e_minio
-      MINIO_SECRET_KEY: lumina_e2e_minio_secret
-      MINIO_BUCKET: lumina-images
-      MINIO_PUBLIC_URL: http://localhost:9000
+      OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY: e2e-object-storage-encryption-key
       JWT_SECRET: lumina-e2e-jwt-secret
       JWT_EXPIRES_IN: 1h
       SMTP_HOST: mailhog

@@ -36,19 +36,6 @@ services:
     networks:
       - lumina
 
-  minio:
-    image: minio/minio:latest
-    container_name: lumina-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-lumina_minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-lumina_minio_secret}
-    volumes:
-      - ./minio_data:/data
-    networks:
-      - lumina
-
   backend:
     build:
       context: .
@@ -60,19 +47,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-lumina}:${POSTGRES_PASSWORD:-lumina_password}@postgres:5432/${POSTGRES_DB:-lumina}?schema=public
       REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: 9000
-      MINIO_USE_SSL: 'false'
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-lumina_minio}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-lumina_minio_secret}
-      MINIO_BUCKET: ${MINIO_BUCKET:-lumina-images}
-      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:3000}
+      OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY: ${OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY:?OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY must be set}
       JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
@@ -116,7 +95,6 @@ services:
     depends_on:
       - backend
       - frontend
-      - minio
     ports:
       - '${FRONTEND_PORT:-3000}:80'
     networks:

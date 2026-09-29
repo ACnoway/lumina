@@ -14,6 +14,8 @@ import type {
   PlatformModelPricing,
   PaymentChannelDto,
   PaymentChannelMetadata,
+  ObjectStorageConfigDto,
+  ObjectStorageTestResponse,
   PromptOptimizerSettingDto,
   ProviderDto,
   UpstreamModelDto,
@@ -95,6 +97,18 @@ export const adminApi = {
 
   updateCurrencySettings(photonPerCny: number): Promise<CurrencySettingsDto> {
     return apiClient.patch("/admin/settings/currency", { photonPerCny });
+  },
+
+  getObjectStorageConfig(): Promise<ObjectStorageConfigDto> {
+    return apiClient.get("/admin/settings/object-storage");
+  },
+
+  testObjectStorageConfig(data: ObjectStorageConfigPayload): Promise<ObjectStorageTestResponse> {
+    return apiClient.post("/admin/settings/object-storage/test", data);
+  },
+
+  updateObjectStorageConfig(data: ObjectStorageConfigPayload): Promise<ObjectStorageConfigDto> {
+    return apiClient.patch("/admin/settings/object-storage", data);
   },
 
   getPaymentAdapters(): Promise<PaymentChannelMetadata[]> {
@@ -247,3 +261,14 @@ export const adminApi = {
     return apiClient.delete(`/providers/upstreams/${encodeURIComponent(id)}`);
   },
 };
+
+export interface ObjectStorageConfigPayload {
+  endpoint: string;
+  publicEndpoint?: string;
+  region: string;
+  bucket: string;
+  forcePathStyle: boolean;
+  accessKey?: string;
+  secretKey?: string;
+  isActive: boolean;
+}

@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ProvidersService } from '../providers/providers.service';
 import { AdapterFactory } from '../chat/adapters/adapter-factory';
-import { MinioService } from '../../minio/minio.service';
+import { ObjectStorageService } from '../../object-storage/object-storage.service';
 import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { ImageQueueService } from './image-queue.service';
@@ -68,7 +68,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly walletService: WalletService,
     private readonly providersService: ProvidersService,
     private readonly adapterFactory: AdapterFactory,
-    private readonly minioService: MinioService,
+    private readonly objectStorageService: ObjectStorageService,
     private readonly imageQueueService: ImageQueueService,
     private readonly settingsService: SettingsService,
   ) {}
@@ -704,12 +704,12 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           throw new BadRequestException(`apiFormat "${resolved.provider.apiFormat}" 不支持生图`);
       }
 
-      processingStage = 'MinIO 上传';
+      processingStage = '对象存储上传';
       const objectName = `images/${taskId}/${sequence}.png`;
-      await this.minioService.upload(objectName, imageBuffer, imageBuffer.length);
+      await this.objectStorageService.upload(objectName, imageBuffer, imageBuffer.length);
 
-      processingStage = 'MinIO 生成预签名 URL';
-      const presignedUrl = await this.minioService.getPresignedUrl(objectName);
+      processingStage = '对象存储生成预签名 URL';
+      const presignedUrl = await this.objectStorageService.getPresignedUrl(objectName);
 
       processingStage = '钱包结算';
       await this.walletService.settle(userId, chargeAmount, idempotencyKey, `生图: ${modelName}`, {
@@ -879,7 +879,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     // 如果返回 base64
     if (imageData.b64_json) {
       return {
-        imageUrl: '', // 没有 URL，用 MinIO 的
+        imageUrl: '', // 没有 URL，使用对象存储的预签名地址
         imageBuffer: Buffer.from(imageData.b64_json, 'base64'),
       };
     }
@@ -1028,7 +1028,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       if (typeof imageKey === 'string' && imageKey.trim()) {
         let signedUrl = signedUrlByKey.get(imageKey);
         if (!signedUrl) {
-          signedUrl = this.minioService.getPresignedUrl(imageKey);
+          signedUrl = this.objectStorageService.getPresignedUrl(imageKey);
           signedUrlByKey.set(imageKey, signedUrl);
         }
         return signedUrl;

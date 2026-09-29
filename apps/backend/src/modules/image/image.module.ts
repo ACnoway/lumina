@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ImageService } from './image.service';
 import { ImageController } from './image.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { MinioModule } from '../../minio/minio.module';
+import { ObjectStorageModule } from '../../object-storage/object-storage.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { AdaptersModule } from '../chat/adapters/adapters.module';
@@ -13,7 +13,7 @@ import { SettingsModule } from '../settings/settings.module';
 @Module({
   imports: [
     PrismaModule,
-    MinioModule,
+    ObjectStorageModule,
     WalletModule,
     ProvidersModule,
     AdaptersModule,

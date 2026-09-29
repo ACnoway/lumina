@@ -22,7 +22,7 @@ lumina/
 
 ## 技术栈
 
-- **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + MinIO
+- **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + S3 兼容对象存储
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
 - **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
 - **平台货币**：钱包、账本、模型价格和所有消费统一使用光子（符号 `✦`）；后台汇率 `1 人民币 = N 光子` 只用于充值换算，消费不套用汇率
@@ -33,7 +33,7 @@ lumina/
 
 ### 方式一：Docker 部署（推荐）
 
-全部服务容器化，数据库/Redis/MinIO/前后端走内网，仅通过 Nginx 暴露一个统一入口端口。
+全部服务容器化，数据库/Redis/前后端走内网，仅通过 Nginx 暴露一个统一入口端口；生产 Compose 不再绑定本地 MinIO。
 
 ```bash
 # 1. 配置环境变量
@@ -60,9 +60,9 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 **端口暴露说明：**
 - 默认只暴露 Nginx 的 `3000` 端口
-- `/api/` 转发到后端，`/lumina-images/` 转发到 MinIO，其他路径转发到前端
-- 后端 API、PostgreSQL、Redis、MinIO、前端都不单独对外暴露
-- Docker Compose 本地部署可使用默认的 `http://localhost:3000`；使用自有域名时将 `MINIO_PUBLIC_URL` 填为该统一入口，例如 `https://example.com`
+- `/api/` 转发到后端，其他路径转发到前端；图片通过后台配置的 S3 兼容服务预签名访问
+- 后端 API、PostgreSQL、Redis、前端都不单独对外暴露
+- 登录 `/admin` 的“模型与供应商”配置页，在“对象存储（S3 兼容）”中填写 Endpoint、对外 Endpoint、Region、Bucket、Path-style 和密钥；保存前会验证已有 Bucket，不会自动创建
 - 数据库结构由 `apps/backend/prisma/migrations/` 版本化管理；旧 `db push` 数据库若与当前 schema 有差异，backend 会拒绝启动而不会自动改表
 
 ### 提示词优化模型
@@ -92,7 +92,7 @@ Lumina 订单号和支付平台订单号。历史流水会通过已有支付订�
 ### 方式二：本地开发
 
 ```bash
-# 1. 启动基础设施（PostgreSQL + Redis + MinIO，暴露端口）
+# 1. 启动基础设施（PostgreSQL + Redis + 本地 MinIO S3 测试服务，暴露端口）
 pnpm docker:dev
 
 # 2. 安装依赖
@@ -129,17 +129,16 @@ pnpm frontend:dev   # 前端 http://localhost:3000
 外部访问 ──→ [nginx:80]
               ├─ /              ──→ [frontend:3000]
               ├─ /api/*         ──→ [backend:3001]
-              ├─ /lumina-images ──→ [minio:9000]
               └─ /health        ──→ [backend:3001]
 
 [backend:3001] ──→ [postgres:5432]
                   [redis:6379]
-                  [minio:9000]
+                  [S3 兼容对象存储]
 ```
 
 - `lumina-network` 内部网络
-- Docker 部署由 Nginx 按路径将统一域名分发到前端、后端和 MinIO；本地开发仍可使用 Next.js rewrites
-- 后端通过内网连接 PostgreSQL、Redis、MinIO
+- Docker 部署由 Nginx 将统一域名分发到前端和后端；对象存储由管理员配置，预签名 URL 直接指向其对外 Endpoint
+- 本地开发和 E2E 仍使用 MinIO 作为 S3 兼容测试服务，但 Bucket 需预先创建
 
 ## 后端模块结构
 
@@ -150,7 +149,7 @@ apps/backend/src/
 ├── app.controller.ts      # 健康检查
 ├── prisma/                # Prisma 数据库连接
 ├── redis/                 # Redis 连接
-├── minio/                 # MinIO 对象存储
+├── object-storage/        # S3 兼容对象存储客户端与热刷新
 └── modules/
     ├── auth/              # 注册、密码/邮箱验证码登录、JWT
     ├── users/             # 用户管理

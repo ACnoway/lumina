@@ -13,6 +13,7 @@ import {
   PaginationQueryDto,
   UpdatePromptOptimizerModelDto,
   UpdateCurrencySettingsDto,
+  UpdateObjectStorageConfigDto,
   UpdateUserStatusDto,
 } from './dto/admin.dto';
 
@@ -64,6 +65,32 @@ export class AdminController {
     @Req() request: Request,
   ) {
     return this.adminService.updateCurrencySettings(
+      actor,
+      dto,
+      this.auditContext(request),
+    );
+  }
+
+  @Get('settings/object-storage')
+  @ApiOperation({ summary: '获取对象存储配置（脱敏）' })
+  async getObjectStorageConfig() {
+    return this.adminService.getObjectStorageConfig();
+  }
+
+  @Post('settings/object-storage/test')
+  @ApiOperation({ summary: '测试对象存储连接' })
+  async testObjectStorageConfig(@Body() dto: UpdateObjectStorageConfigDto) {
+    return this.adminService.testObjectStorageConfig(dto);
+  }
+
+  @Patch('settings/object-storage')
+  @ApiOperation({ summary: '保存对象存储配置' })
+  async updateObjectStorageConfig(
+    @CurrentUser() actor: User,
+    @Body() dto: UpdateObjectStorageConfigDto,
+    @Req() request: Request,
+  ) {
+    return this.adminService.updateObjectStorageConfig(
       actor,
       dto,
       this.auditContext(request),

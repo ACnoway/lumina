@@ -13,6 +13,7 @@ import type {
   PaymentChannelMetadata,
   PlatformModelDto,
   ProviderDto,
+  ObjectStorageConfigDto,
   TransactionType,
   UpstreamModelDto,
   UserRole,
@@ -310,6 +311,17 @@ export default function AdminPage() {
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [currencySettings, setCurrencySettings] = useState<CurrencySettingsDto | null>(null);
   const [photonPerCny, setPhotonPerCny] = useState("10");
+  const [objectStorage, setObjectStorage] = useState<ObjectStorageConfigDto | null>(null);
+  const [objectStorageForm, setObjectStorageForm] = useState({
+    endpoint: "http://localhost:9000",
+    publicEndpoint: "http://localhost:9000",
+    region: "us-east-1",
+    bucket: "lumina-images",
+    forcePathStyle: true,
+    accessKey: "",
+    secretKey: "",
+    isActive: true,
+  });
   const [promptOptimizerModelId, setPromptOptimizerModelId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [upstreams, setUpstreams] = useState<UpstreamModelDto[]>([]);
@@ -418,16 +430,29 @@ export default function AdminPage() {
   const loadConfig = useCallback(async () => {
     setLoadingConfig(true);
     try {
-      const [nextModels, nextProviders, promptOptimizerSetting, nextCurrencySettings] = await Promise.all([
+      const [nextModels, nextProviders, promptOptimizerSetting, nextCurrencySettings, nextObjectStorage] = await Promise.all([
         adminApi.getModels(),
         adminApi.getProviders(),
         adminApi.getPromptOptimizerSetting(),
         adminApi.getCurrencySettings(),
+        adminApi.getObjectStorageConfig(),
       ]);
       setModels(nextModels);
       setProviders(nextProviders);
       setCurrencySettings(nextCurrencySettings);
       setPhotonPerCny(String(nextCurrencySettings.photonPerCny));
+      setObjectStorage(nextObjectStorage);
+      setObjectStorageForm((current) => ({
+        ...current,
+        endpoint: nextObjectStorage.endpoint ?? current.endpoint,
+        publicEndpoint: nextObjectStorage.publicEndpoint ?? "",
+        region: nextObjectStorage.region ?? current.region,
+        bucket: nextObjectStorage.bucket ?? current.bucket,
+        forcePathStyle: nextObjectStorage.forcePathStyle,
+        accessKey: "",
+        secretKey: "",
+        isActive: nextObjectStorage.enabled,
+      }));
       setPromptOptimizerModelId(promptOptimizerSetting.modelId ?? "");
       setSelectedModelId((current) =>
         nextModels.some((model) => model.id === current)
@@ -822,6 +847,51 @@ export default function AdminPage() {
       setNotice("充值汇率已更新；消费价格和已有余额不会改变");
     } catch (currencyError) {
       setError(getErrorMessage(currencyError, "保存充值汇率失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  function objectStoragePayload() {
+    return {
+      endpoint: objectStorageForm.endpoint.trim(),
+      publicEndpoint: objectStorageForm.publicEndpoint.trim() || undefined,
+      region: objectStorageForm.region.trim(),
+      bucket: objectStorageForm.bucket.trim(),
+      forcePathStyle: objectStorageForm.forcePathStyle,
+      accessKey: objectStorageForm.accessKey.trim() || undefined,
+      secretKey: objectStorageForm.secretKey.trim() || undefined,
+      isActive: objectStorageForm.isActive,
+    };
+  }
+
+  async function testObjectStorageConfig() {
+    setMutatingResource("object-storage-test");
+    try {
+      const result = await adminApi.testObjectStorageConfig(objectStoragePayload());
+      setNotice(result.message);
+    } catch (testError) {
+      setError(getErrorMessage(testError, "对象存储连接测试失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function submitObjectStorageConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!objectStorageForm.endpoint.trim() || !objectStorageForm.region.trim() || !objectStorageForm.bucket.trim()) {
+      setError("请填写 Endpoint、Region 和 Bucket");
+      return;
+    }
+
+    setMutatingResource("object-storage");
+    try {
+      const updated = await adminApi.updateObjectStorageConfig(objectStoragePayload());
+      setObjectStorage(updated);
+      setObjectStorageForm((current) => ({ ...current, accessKey: "", secretKey: "" }));
+      setNotice("对象存储配置已验证并保存，后端客户端已热刷新");
+    } catch (storageError) {
+      setError(getErrorMessage(storageError, "保存对象存储配置失败"));
     } finally {
       setMutatingResource("");
     }
@@ -1537,6 +1607,131 @@ export default function AdminPage() {
                 {loadingConfig ? "刷新中…" : "刷新配置"}
               </button>
             </div>
+            <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
+                    S3 Compatible Object Storage
+                  </p>
+                  <h3 className="mt-1 font-semibold text-gray-800">对象存储（S3 兼容）</h3>
+                  <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-500">
+                    支持 AWS S3、MinIO、Cloudflare R2 等服务。保存前会验证已有 Bucket，系统不会自动创建 Bucket；更换 Endpoint 或 Bucket 时会迁移已记录的图片对象。
+                  </p>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${objectStorage?.enabled ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                  {objectStorage?.enabled ? "已启用" : "未启用"}
+                </span>
+              </div>
+              <form className="space-y-4" onSubmit={submitObjectStorageConfig}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Endpoint</span>
+                    <input
+                      value={objectStorageForm.endpoint}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, endpoint: event.target.value }))}
+                      placeholder="https://s3.example.com"
+                      type="url"
+                      required
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">对外 Endpoint（可选）</span>
+                    <input
+                      value={objectStorageForm.publicEndpoint}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, publicEndpoint: event.target.value }))}
+                      placeholder="留空则使用 Endpoint 生成预签名 URL"
+                      type="url"
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Region</span>
+                    <input
+                      value={objectStorageForm.region}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, region: event.target.value }))}
+                      placeholder="us-east-1 / auto"
+                      required
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Bucket</span>
+                    <input
+                      value={objectStorageForm.bucket}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, bucket: event.target.value }))}
+                      placeholder="lumina-images"
+                      required
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Access Key</span>
+                    <input
+                      value={objectStorageForm.accessKey}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, accessKey: event.target.value }))}
+                      placeholder={objectStorage?.accessKeyMasked ?? "首次配置必填"}
+                      autoComplete="off"
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-gray-500">
+                    <span className="block font-medium text-gray-700">Secret Key</span>
+                    <input
+                      value={objectStorageForm.secretKey}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, secretKey: event.target.value }))}
+                      placeholder={objectStorage?.secretKeyMasked ? "已配置，留空保持不变" : "首次配置必填"}
+                      type="password"
+                      autoComplete="new-password"
+                      disabled={mutatingResource.startsWith("object-storage")}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center gap-5 text-sm text-gray-600">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={objectStorageForm.forcePathStyle}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, forcePathStyle: event.target.checked }))}
+                      disabled={mutatingResource.startsWith("object-storage")}
+                    />
+                    使用 Path-style（MinIO / R2 代理通常需要）
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={objectStorageForm.isActive}
+                      onChange={(event) => setObjectStorageForm((current) => ({ ...current, isActive: event.target.checked }))}
+                      disabled={mutatingResource.startsWith("object-storage")}
+                    />
+                    保存后启用
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void testObjectStorageConfig()}
+                    disabled={mutatingResource.startsWith("object-storage")}
+                    className="rounded-lg border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-700 hover:border-emerald-400 disabled:opacity-50"
+                  >
+                    {mutatingResource === "object-storage-test" ? "测试中…" : "测试连接"}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={mutatingResource.startsWith("object-storage")}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {mutatingResource === "object-storage" ? "验证并保存中…" : "验证并保存"}
+                  </button>
+                </div>
+              </form>
+            </section>
             <section className="rounded-2xl border border-amber-100 bg-amber-50/50 p-5 shadow-sm sm:p-6">
               <div className="mb-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">

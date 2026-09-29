@@ -122,7 +122,7 @@ export default function ImageLightbox({
           </button>
         </div>
         <div className="flex min-h-0 items-center justify-center overflow-hidden rounded-2xl bg-black/40 p-2 sm:p-4">
-          {/* imageUrl is a dynamic, signed MinIO URL; it is not a static Next Image host. */}
+          {/* imageUrl is a dynamic, signed S3 URL; it is not a static Next Image host. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={image.src}

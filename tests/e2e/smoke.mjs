@@ -414,6 +414,41 @@ async function main() {
   });
   assert(Number(currencySetting.data.photonPerCny) === 100, 'photon recharge rate did not persist');
   await requestAuth(userToken, '/admin/settings/currency', {}, [403]);
+
+  const objectStorageTest = await requestAuth(adminToken, '/admin/settings/object-storage/test', {
+    method: 'POST',
+    body: {
+      endpoint: 'http://minio:9000',
+      publicEndpoint: 'http://127.0.0.1:9000',
+      region: 'us-east-1',
+      bucket: 'lumina-images',
+      forcePathStyle: true,
+      accessKey: 'lumina_e2e_minio',
+      secretKey: 'lumina_e2e_minio_secret',
+      isActive: true,
+    },
+  });
+  assert(objectStorageTest.data.ok === true, 'object storage connection test did not succeed');
+  const objectStorageConfig = await requestAuth(adminToken, '/admin/settings/object-storage', {
+    method: 'PATCH',
+    body: {
+      endpoint: 'http://minio:9000',
+      publicEndpoint: 'http://127.0.0.1:9000',
+      region: 'us-east-1',
+      bucket: 'lumina-images',
+      forcePathStyle: true,
+      accessKey: 'lumina_e2e_minio',
+      secretKey: 'lumina_e2e_minio_secret',
+      isActive: true,
+    },
+  });
+  assert(objectStorageConfig.data.enabled === true, 'object storage configuration was not enabled');
+  assert(
+    objectStorageConfig.data.secretKeyMasked &&
+      !JSON.stringify(objectStorageConfig.data).includes('lumina_e2e_minio_secret'),
+    'object storage secret key leaked from admin response',
+  );
+  await requestAuth(userToken, '/admin/settings/object-storage', {}, [403]);
   const optimizedPrompt = await requestAuth(userToken, '/image/optimize-prompt', {
     method: 'POST',
     body: { prompt: 'a tiny e2e test image' },
@@ -665,7 +700,7 @@ async function main() {
   );
 
   console.log(
-    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, MinIO, history, audit',
+    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, S3 object storage, history, audit',
   );
 }
 

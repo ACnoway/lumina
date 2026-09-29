@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
 import { SettingsService } from '../settings/settings.service';
+import { ObjectStorageService } from '../../object-storage/object-storage.service';
 import { AdminService } from './admin.service';
 
 const admin = { id: 'admin-1' };
@@ -69,6 +70,22 @@ function createService() {
       photonPerCny: 100,
     }),
   };
+  const objectStorage = {
+    getAdminConfig: jest.fn().mockResolvedValue({
+      configured: false,
+      enabled: false,
+      endpoint: null,
+      publicEndpoint: null,
+      region: null,
+      bucket: null,
+      forcePathStyle: true,
+      accessKeyMasked: null,
+      secretKeyMasked: null,
+      updatedAt: null,
+    }),
+    testConnection: jest.fn(),
+    saveConfig: jest.fn(),
+  };
 
   return {
     service: new AdminService(
@@ -76,11 +93,13 @@ function createService() {
       wallet as unknown as WalletService,
       audit as unknown as AuditService,
       settings as unknown as SettingsService,
+      objectStorage as unknown as ObjectStorageService,
     ),
     prisma,
     wallet,
     audit,
     settings,
+    objectStorage,
     tx,
   };
 }
