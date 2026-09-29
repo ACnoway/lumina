@@ -138,7 +138,7 @@ pnpm frontend:dev   # 前端 http://localhost:3000
 
 - `lumina-network` 内部网络
 - Docker 部署由 Nginx 将统一域名分发到前端和后端；对象存储由管理员配置，预签名 URL 直接指向其对外 Endpoint
-- 本地开发和 E2E 仍使用 MinIO 作为 S3 兼容测试服务，但 Bucket 需预先创建
+- 本地开发和 E2E 仍使用 MinIO 作为 S3 兼容测试服务；E2E smoke 会在 fixture 阶段预先创建 Bucket，本地开发需自行创建
 
 ## 后端模块结构
 

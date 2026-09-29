@@ -1,3 +1,8 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const Minio = require('../../apps/backend/node_modules/minio');
+
 const baseUrl = process.env.E2E_BASE_URL || 'http://127.0.0.1:3001';
 const mailhogUrl = process.env.E2E_MAILHOG_URL || 'http://127.0.0.1:8025';
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MS || 120000);
@@ -53,6 +58,25 @@ async function waitFor(name, callback, deadline = Date.now() + timeoutMs) {
   }
 
   throw new Error(`Timed out waiting for ${name}${lastError ? `: ${lastError.message}` : ''}`);
+}
+
+async function ensureTestBucket() {
+  const client = new Minio.Client({
+    endPoint: process.env.E2E_MINIO_ENDPOINT || '127.0.0.1',
+    port: Number(process.env.E2E_MINIO_PORT || 9000),
+    useSSL: false,
+    accessKey: process.env.E2E_MINIO_ACCESS_KEY || 'lumina_e2e_minio',
+    secretKey: process.env.E2E_MINIO_SECRET_KEY || 'lumina_e2e_minio_secret',
+    pathStyle: true,
+  });
+  const bucket = process.env.E2E_MINIO_BUCKET || 'lumina-images';
+
+  await waitFor(`E2E object storage bucket ${bucket}`, async () => {
+    if (!(await client.bucketExists(bucket))) {
+      await client.makeBucket(bucket, 'us-east-1');
+    }
+    return true;
+  });
 }
 
 async function waitForMailCode(email, afterTimestamp) {
@@ -149,6 +173,7 @@ async function main() {
     const response = await fetch(`${baseUrl}/health`);
     return response.ok;
   });
+  await ensureTestBucket();
 
   const frontend = await fetch('http://127.0.0.1:3000/login');
   assert(frontend.ok, `frontend /login returned ${frontend.status}`);

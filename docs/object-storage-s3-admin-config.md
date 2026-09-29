@@ -47,7 +47,7 @@
 - 如果 Endpoint 或 Bucket 发生变化，保存前会验证新旧 Bucket，并根据数据库中已记录的图片 key 将对象复制到新位置、校验目标对象，再切换数据库配置。
 - 图片 key 保持不变，因此数据库图片记录不需要生成历史配置快照；切换后所有图片统一通过新配置访问。
 - Region、Path-style、对外 Endpoint 或凭证变更不触发对象复制。
-- 本地开发和 E2E 仍保留 MinIO 容器作为 S3 兼容测试服务；测试初始化容器预先创建 `lumina-images` Bucket，应用本身不负责创建。
+- 本地开发和 E2E 仍保留 MinIO 容器作为 S3 兼容测试服务；E2E smoke 在测试 fixture 阶段预先创建 `lumina-images` Bucket，应用本身不负责创建。
 
 ### 前端管理页
 

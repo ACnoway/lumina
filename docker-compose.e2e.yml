@@ -44,16 +44,6 @@ services:
     volumes:
       - lumina_e2e_minio:/data
 
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_started
-    entrypoint: ['/bin/sh', '-c']
-    command: >-
-      "until mc alias set local http://minio:9000 lumina_e2e_minio lumina_e2e_minio_secret; do sleep 1; done;
-      mc mb --ignore-existing local/lumina-images"
-
   mailhog:
     image: mailhog/mailhog:v1.0.1
     ports:
@@ -74,8 +64,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      minio:
+        condition: service_started
       mailhog:
         condition: service_started
       mock-provider:
