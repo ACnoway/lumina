@@ -78,6 +78,11 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 充值汇率可通过登录用户接口 `GET /payments/recharge-settings` 读取；管理员仍通过
 `GET/PATCH /admin/settings/currency` 配置汇率。
 
+个人中心“账单”支持通过 `GET /wallet/transactions` 获取分页流水，并按需调用
+`GET /wallet/transactions/:id` 查看详情。聊天消费详情包含输入/输出 token 和模型，
+生图消费详情包含模型与图片张数，充值详情包含实付人民币、订单创建时汇率、实际到账光子、
+Lumina 订单号和支付平台订单号。历史流水会通过已有支付订单和生图任务数据兼容补齐详情。
+
 支付订单创建只会进入 `CREATED/PENDING`，余额仅在渠道验签成功的异步通知或服务端明确确认已付款的查单后入账。`return_url` 和前端订单轮询都不能直接改变余额。
 
 生产环境必须显式设置 `PAYMENT_NOTIFY_BASE_URL`，并确保最终的

@@ -193,7 +193,7 @@ describe('ImageService durable queue integration', () => {
       0.0005,
       idempotencyKey,
       '提示词优化: chat-model',
-      { inputTokens: 10, outputTokens: 20 },
+      { inputTokens: 10, outputTokens: 20, model: 'chat-model' },
     );
     expect(recordResult).toHaveBeenCalledWith(true);
   });
@@ -326,7 +326,15 @@ describe('ImageService durable queue integration', () => {
       0.01,
       'image:task-1:0',
       '生图: image-model',
-      { taskId: 'task-1', imageId: 'image-1', sequence: 0, model: 'image-model' },
+      {
+        taskId: 'task-1',
+        imageId: 'image-1',
+        sequence: 0,
+        imageCount: 1,
+        chargedImageCount: 1,
+        perImageCost: 0.01,
+        model: 'image-model',
+      },
     );
     expect((service as any).callOpenAIImage).toHaveBeenCalledWith(
       {},
@@ -437,7 +445,15 @@ describe('ImageService durable queue integration', () => {
       0.5,
       'image:task-1:0',
       '生图: image-model',
-      { taskId: 'task-1', imageId: 'image-1', sequence: 0, model: 'image-model' },
+      {
+        taskId: 'task-1',
+        imageId: 'image-1',
+        sequence: 0,
+        imageCount: 2,
+        chargedImageCount: 1,
+        perImageCost: 0.5,
+        model: 'image-model',
+      },
     );
     expect(wallet.refund).toHaveBeenCalledWith(
       'user-1',

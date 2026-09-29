@@ -372,6 +372,7 @@ export class ChatService {
             messageId: userMessage.id,
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
+            totalTokens: usage.totalTokens,
             model: dto.model,
           },
         );

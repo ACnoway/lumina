@@ -1,5 +1,6 @@
 import type {
   GetBalanceResponse,
+  GetTransactionDetailResponse,
   GetTransactionsResponse,
   TransactionType,
 } from '@lumina/shared';
@@ -24,5 +25,9 @@ export const walletApi = {
     params.set('limit', String(options.limit ?? 10));
     if (options.type) params.set('type', options.type);
     return apiClient.get(`/wallet/transactions?${params.toString()}`);
+  },
+
+  getTransactionDetail(id: string): Promise<GetTransactionDetailResponse> {
+    return apiClient.get(`/wallet/transactions/${encodeURIComponent(id)}`);
   },
 };

@@ -288,4 +288,156 @@ describe('WalletService reservations', () => {
       select: { name: true, displayName: true },
     });
   });
+
+  it('returns detailed chat token usage with the user-facing model name', async () => {
+    const transaction = {
+      id: 'transaction-chat',
+      walletId: 'wallet-1',
+      type: 'CONSUME',
+      amount: new Decimal('0.5'),
+      balance: new Decimal('9.5'),
+      reason: '聊天: internal-chat-model',
+      metadata: {
+        model: 'internal-chat-model',
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        inputTokens: 120,
+        outputTokens: 80,
+        totalTokens: 200,
+      },
+      idempotencyKey: 'chat:session-1:message-1',
+      createdAt: new Date('2026-09-28T00:00:00.000Z'),
+    } as any;
+    const prisma = {
+      wallet: { findUnique: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }) },
+      walletTransaction: { findFirst: jest.fn().mockResolvedValue(transaction) },
+      platformModel: {
+        findMany: jest.fn().mockResolvedValue([
+          { name: 'internal-chat-model', displayName: '用户聊天模型' },
+        ]),
+      },
+    };
+    const service = new WalletService(
+      prisma as unknown as PrismaService,
+      {} as RedisService,
+      {} as AuditService,
+    );
+
+    await expect(service.getUserTransactionDetail('user-1', transaction.id)).resolves.toEqual({
+      id: transaction.id,
+      type: 'CONSUME',
+      amount: 0.5,
+      balance: 9.5,
+      reason: '聊天: 用户聊天模型',
+      createdAt: transaction.createdAt.toISOString(),
+      kind: 'CHAT',
+      model: '用户聊天模型',
+      inputTokens: 120,
+      outputTokens: 80,
+      totalTokens: 200,
+      sessionId: 'session-1',
+      messageId: 'message-1',
+    });
+  });
+
+  it('resolves legacy recharge details from the payment order snapshot', async () => {
+    const transaction = {
+      id: 'transaction-recharge',
+      walletId: 'wallet-1',
+      type: 'RECHARGE',
+      amount: new Decimal('100'),
+      balance: new Decimal('110'),
+      reason: '支付充值 LM2026092800001',
+      metadata: null,
+      idempotencyKey: 'payment:recharge:LM2026092800001',
+      createdAt: new Date('2026-09-28T01:00:00.000Z'),
+    } as any;
+    const prisma = {
+      wallet: { findUnique: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }) },
+      walletTransaction: { findFirst: jest.fn().mockResolvedValue(transaction) },
+      platformModel: { findMany: jest.fn().mockResolvedValue([]) },
+      paymentOrder: {
+        findFirst: jest.fn().mockResolvedValue({
+          orderNo: 'LM2026092800001',
+          amount: new Decimal('10'),
+          paidAmount: new Decimal('9.99'),
+          photonPerCny: new Decimal('10'),
+          photonAmount: new Decimal('100'),
+          providerTradeNo: 'TRADE-1',
+          paymentMethod: 'ALIPAY',
+          status: 'SUCCEEDED',
+          paidAt: new Date('2026-09-28T01:02:00.000Z'),
+          channel: { name: '测试支付' },
+        }),
+      },
+    };
+    const service = new WalletService(
+      prisma as unknown as PrismaService,
+      {} as RedisService,
+      {} as AuditService,
+    );
+
+    await expect(service.getUserTransactionDetail('user-1', transaction.id)).resolves.toMatchObject({
+      kind: 'RECHARGE',
+      orderNo: 'LM2026092800001',
+      providerTradeNo: 'TRADE-1',
+      orderAmountCny: 10,
+      paidAmountCny: 9.99,
+      exchangeRate: 10,
+      creditedPhotonAmount: 100,
+      paymentMethod: 'ALIPAY',
+      channelName: '测试支付',
+      status: 'SUCCEEDED',
+    });
+  });
+
+  it('returns image count and task cost for an image consumption transaction', async () => {
+    const transaction = {
+      id: 'transaction-image',
+      walletId: 'wallet-1',
+      type: 'CONSUME',
+      amount: new Decimal('0.5'),
+      balance: new Decimal('9'),
+      reason: '生图: image-model',
+      metadata: {
+        model: 'image-model',
+        taskId: 'task-1',
+        imageId: 'image-1',
+        sequence: 0,
+        imageCount: 4,
+        chargedImageCount: 1,
+        perImageCost: 0.5,
+      },
+      idempotencyKey: 'image:task-1:0',
+      createdAt: new Date('2026-09-28T02:00:00.000Z'),
+    } as any;
+    const prisma = {
+      wallet: { findUnique: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'user-1' }) },
+      walletTransaction: { findFirst: jest.fn().mockResolvedValue(transaction) },
+      platformModel: {
+        findMany: jest.fn().mockResolvedValue([{ name: 'image-model', displayName: '图片模型' }]),
+      },
+      imageGeneration: {
+        findUnique: jest.fn().mockResolvedValue({
+          cost: new Decimal('2'),
+          parameters: { imageCount: 4 },
+        }),
+      },
+    };
+    const service = new WalletService(
+      prisma as unknown as PrismaService,
+      {} as RedisService,
+      {} as AuditService,
+    );
+
+    await expect(service.getUserTransactionDetail('user-1', transaction.id)).resolves.toMatchObject({
+      kind: 'IMAGE',
+      model: '图片模型',
+      requestedImageCount: 4,
+      chargedImageCount: 1,
+      perImageCost: 0.5,
+      taskCost: 2,
+      sequence: 0,
+    });
+  });
 });

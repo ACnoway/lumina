@@ -157,6 +157,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         {
           inputTokens: response.inputTokens,
           outputTokens: response.outputTokens,
+          model: optimizerModelName,
         },
       );
 
@@ -523,6 +524,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           modelName,
           aspectRatio,
           chargeAmount,
+          imageCount,
         );
       } catch (error) {
         const message = this.describeError(error);
@@ -640,6 +642,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     modelName: string,
     aspectRatio: string | undefined,
     chargeAmount: number,
+    imageCount: number = 1,
   ): Promise<void> {
     const claim = await this.prisma.imageGenerationImage.updateMany({
       where: {
@@ -713,6 +716,9 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         taskId,
         imageId,
         sequence,
+        imageCount,
+        chargedImageCount: 1,
+        perImageCost: chargeAmount,
         model: modelName,
       });
       settled = true;

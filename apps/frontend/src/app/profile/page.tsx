@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
   GetTransactionsResponse,
+  GetTransactionDetailResponse,
   GetCurrentUserResponse,
   CurrencySettingsDto,
   PaymentMethod,
@@ -139,6 +140,27 @@ function formatBillAmount(value: number): string {
   return formatPhotonTruncated(value, 4);
 }
 
+function formatCny(value: number | null): string {
+  return value === null ? "暂无" : `¥${value.toFixed(2)}`;
+}
+
+function formatCount(value: number | null): string {
+  return value === null ? "暂无" : value.toLocaleString("zh-CN");
+}
+
+function paymentStatusLabel(value: string | null): string {
+  const labels: Record<string, string> = {
+    CREATED: "待创建",
+    PENDING: "待支付",
+    SUCCEEDED: "支付成功",
+    FAILED: "支付失败",
+    CLOSED: "已关闭",
+    EXPIRED: "已过期",
+    REFUNDED: "已退款",
+  };
+  return value ? labels[value] || value : "暂无";
+}
+
 const transactionTypeLabels: Record<TransactionType, string> = {
   RECHARGE: "充值",
   CONSUME: "消费",
@@ -202,6 +224,65 @@ function InfoItem({ label, value }: { label: string; value: string }) {
   );
 }
 
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+      <p className="text-[11px] text-gray-400">{label}</p>
+      <p className="mt-1 break-all text-sm font-medium text-gray-700">{value}</p>
+    </div>
+  );
+}
+
+function TransactionDetailView({ detail }: { detail: GetTransactionDetailResponse }) {
+  if (detail.kind === "CHAT" || detail.kind === "PROMPT_OPTIMIZATION") {
+    return (
+      <div className="grid gap-2 sm:grid-cols-2">
+        <DetailItem label="使用模型" value={detail.model || "未知模型"} />
+        <DetailItem label="输入 Token" value={formatCount(detail.inputTokens)} />
+        <DetailItem label="输出 Token" value={formatCount(detail.outputTokens)} />
+        <DetailItem label="总 Token" value={formatCount(detail.totalTokens)} />
+        {detail.sessionId && <DetailItem label="会话编号" value={detail.sessionId} />}
+        {detail.messageId && <DetailItem label="消息编号" value={detail.messageId} />}
+      </div>
+    );
+  }
+
+  if (detail.kind === "IMAGE") {
+    return (
+      <div className="grid gap-2 sm:grid-cols-2">
+        <DetailItem label="使用模型" value={detail.model || "未知模型"} />
+        <DetailItem label="本次任务张数" value={formatCount(detail.requestedImageCount)} />
+        <DetailItem label="本笔计费张数" value={formatCount(detail.chargedImageCount)} />
+        <DetailItem label="单张价格" value={detail.perImageCost === null ? "暂无" : `${formatBillAmount(detail.perImageCost)} 光子`} />
+        <DetailItem label="本笔消耗" value={`${formatBillAmount(detail.amount)} 光子`} />
+        <DetailItem label="任务总消耗" value={detail.taskCost === null ? "暂无" : `${formatBillAmount(detail.taskCost)} 光子`} />
+        {detail.taskId && <DetailItem label="任务编号" value={detail.taskId} />}
+        {detail.imageId && <DetailItem label="图片编号" value={detail.imageId} />}
+        {detail.sequence !== null && <DetailItem label="图片序号" value={String(detail.sequence + 1)} />}
+      </div>
+    );
+  }
+
+  if (detail.kind === "RECHARGE") {
+    return (
+      <div className="grid gap-2 sm:grid-cols-2">
+        <DetailItem label="实付人民币" value={formatCny(detail.paidAmountCny)} />
+        <DetailItem label="下单金额" value={formatCny(detail.orderAmountCny)} />
+        <DetailItem label="充值汇率" value={detail.exchangeRate === null ? "暂无" : `1 人民币 = ${detail.exchangeRate} 光子`} />
+        <DetailItem label="实际到账光子" value={`${formatBillAmount(detail.creditedPhotonAmount)} 光子`} />
+        <DetailItem label="支付方式" value={detail.paymentMethod === "ALIPAY" ? "支付宝" : detail.paymentMethod === "WECHAT" ? "微信支付" : "未知"} />
+        <DetailItem label="支付渠道" value={detail.channelName || "暂无"} />
+        <DetailItem label="Lumina 订单号" value={detail.orderNo || "暂无"} />
+        <DetailItem label="支付平台订单号" value={detail.providerTradeNo || "暂无"} />
+        <DetailItem label="支付状态" value={paymentStatusLabel(detail.status)} />
+        <DetailItem label="支付时间" value={detail.paidAt ? formatTransactionDate(detail.paidAt) : "暂无"} />
+      </div>
+    );
+  }
+
+  return <p className="text-sm text-gray-500">暂无可展示的附加详情。</p>;
+}
+
 function EmptyFeatureState({
   title,
   description,
@@ -244,6 +325,10 @@ export default function ProfilePage() {
   const [transactionPage, setTransactionPage] = useState(1);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [transactionsError, setTransactionsError] = useState("");
+  const [transactionDetail, setTransactionDetail] = useState<GetTransactionDetailResponse | null>(null);
+  const [transactionDetailId, setTransactionDetailId] = useState<string | null>(null);
+  const [transactionDetailLoading, setTransactionDetailLoading] = useState(false);
+  const [transactionDetailError, setTransactionDetailError] = useState("");
 
   const loadRechargeSettings = useCallback(async () => {
     setRechargeSettingsLoading(true);
@@ -293,6 +378,27 @@ export default function ProfilePage() {
       setTransactionsLoading(false);
     }
   }, [activeTab, profile, transactionFilter, transactionPage]);
+
+  async function handleTransactionDetail(id: string) {
+    if (transactionDetailId === id) {
+      setTransactionDetailId(null);
+      setTransactionDetail(null);
+      setTransactionDetailError("");
+      return;
+    }
+
+    setTransactionDetailId(id);
+    setTransactionDetail(null);
+    setTransactionDetailError("");
+    setTransactionDetailLoading(true);
+    try {
+      setTransactionDetail(await walletApi.getTransactionDetail(id));
+    } catch (err: unknown) {
+      setTransactionDetailError(err instanceof Error ? err.message : "账单详情加载失败，请稍后重试");
+    } finally {
+      setTransactionDetailLoading(false);
+    }
+  }
 
   useEffect(() => {
     void loadProfile();
@@ -799,6 +905,24 @@ export default function ProfilePage() {
                             <p className="mt-2 text-xs text-gray-400">
                               余额 {formatBillAmount(transaction.balance)} · {formatTransactionDate(transaction.createdAt)}
                             </p>
+                            <button
+                              type="button"
+                              onClick={() => void handleTransactionDetail(transaction.id)}
+                              className="mt-3 text-xs font-medium text-blue-600 hover:text-blue-700"
+                            >
+                              {transactionDetailId === transaction.id ? "收起详情" : "查看详情"}
+                            </button>
+                            {transactionDetailId === transaction.id && (
+                              <div className="mt-3 border-t border-gray-200 pt-3">
+                                {transactionDetailLoading ? (
+                                  <p className="text-sm text-gray-400">正在加载详情…</p>
+                                ) : transactionDetailError ? (
+                                  <p className="text-sm text-red-600">{transactionDetailError}</p>
+                                ) : transactionDetail ? (
+                                  <TransactionDetailView detail={transactionDetail} />
+                                ) : null}
+                              </div>
+                            )}
                           </article>
                         );
                       })}

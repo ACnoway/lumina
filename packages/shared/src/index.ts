@@ -187,6 +187,55 @@ export interface GetTransactionsResponse {
   totalPages: number;
 }
 
+export interface TransactionDetailBase {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  balance: number;
+  reason: string;
+  createdAt: string;
+}
+
+export type TransactionDetail =
+  | (TransactionDetailBase & {
+      kind: 'CHAT' | 'PROMPT_OPTIMIZATION';
+      model: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+      sessionId: string | null;
+      messageId: string | null;
+    })
+  | (TransactionDetailBase & {
+      kind: 'IMAGE';
+      model: string | null;
+      taskId: string | null;
+      imageId: string | null;
+      sequence: number | null;
+      requestedImageCount: number | null;
+      chargedImageCount: number;
+      perImageCost: number | null;
+      taskCost: number | null;
+    })
+  | (TransactionDetailBase & {
+      kind: 'RECHARGE';
+      orderNo: string | null;
+      providerTradeNo: string | null;
+      orderAmountCny: number | null;
+      paidAmountCny: number | null;
+      exchangeRate: number | null;
+      creditedPhotonAmount: number;
+      paymentMethod: PaymentMethod | null;
+      channelName: string | null;
+      status: PaymentOrderStatus | null;
+      paidAt: string | null;
+    })
+  | (TransactionDetailBase & {
+      kind: 'OTHER';
+    });
+
+export type GetTransactionDetailResponse = TransactionDetail;
+
 // ==================== 聊天相关 DTO ====================
 export interface ChatSessionDto {
   id: string;

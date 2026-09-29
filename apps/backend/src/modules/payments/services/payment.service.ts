@@ -226,7 +226,10 @@ export class PaymentService {
     }
   }
 
-  private async applyPaymentResult(order: PaymentOrder, result: PaymentNotification | PaymentQueryResult): Promise<void> {
+  private async applyPaymentResult(
+    order: PaymentOrder & { channel: PaymentChannel },
+    result: PaymentNotification | PaymentQueryResult,
+  ): Promise<void> {
     if (result.status === 'SUCCESS') {
       if (order.status === PaymentOrderStatus.SUCCEEDED) return;
       if (order.status !== PaymentOrderStatus.CREATED && order.status !== PaymentOrderStatus.PENDING) {
@@ -246,20 +249,37 @@ export class PaymentService {
     }
   }
 
-  private async processPaymentSuccess(order: PaymentOrder, result: PaymentNotification | PaymentQueryResult): Promise<void> {
+  private async processPaymentSuccess(
+    order: PaymentOrder & { channel: PaymentChannel },
+    result: PaymentNotification | PaymentQueryResult,
+  ): Promise<void> {
+    const paidAmount = result.amount ? new Decimal(result.amount) : order.amount;
+    const paidAt = result.paidAt ?? new Date();
     await this.walletService.recharge(
       order.userId,
       Number(order.photonAmount.toString()),
       `支付充值 ${order.orderNo}`,
       `payment:recharge:${order.orderNo}`,
+      {
+        orderNo: order.orderNo,
+        providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
+        orderAmountCny: order.amount.toString(),
+        paidAmountCny: paidAmount.toString(),
+        exchangeRate: order.photonPerCny.toString(),
+        photonAmount: order.photonAmount.toString(),
+        paymentMethod: order.paymentMethod,
+        channelName: order.channel.name,
+        status: PaymentOrderStatus.SUCCEEDED,
+        paidAt: paidAt.toISOString(),
+      },
     );
     await this.prisma.paymentOrder.updateMany({
       where: { id: order.id, status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] } },
       data: {
         status: PaymentOrderStatus.SUCCEEDED,
         providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
-        paidAmount: result.amount ? new Decimal(result.amount) : order.amount,
-        paidAt: result.paidAt ?? new Date(),
+        paidAmount,
+        paidAt,
         failureCode: null,
         failureMessage: null,
       },

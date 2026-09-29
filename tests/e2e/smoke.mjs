@@ -572,6 +572,43 @@ async function main() {
     ),
     'user wallet ledger did not use the image model display name',
   );
+  const chatLedgerItem = userLedgerAfterUsage.data.items.find(
+    (item) => item.reason === `聊天: ${chatModel.data.displayName}`,
+  );
+  assert(chatLedgerItem, 'chat consumption ledger item was missing for detail lookup');
+  const chatLedgerDetail = await requestAuth(
+    userToken,
+    `/wallet/transactions/${chatLedgerItem.id}`,
+  );
+  assert(chatLedgerDetail.data.kind === 'CHAT', 'chat ledger detail kind mismatch');
+  assert(
+    Number(chatLedgerDetail.data.inputTokens) > 0 &&
+      Number(chatLedgerDetail.data.outputTokens) > 0,
+    'chat ledger detail did not expose token usage',
+  );
+  assert(
+    chatLedgerDetail.data.model === chatModel.data.displayName,
+    'chat ledger detail did not use the display model name',
+  );
+
+  const imageLedgerItem = userLedgerAfterUsage.data.items.find(
+    (item) => item.reason === `生图: ${imageModel.data.displayName}`,
+  );
+  assert(imageLedgerItem, 'image consumption ledger item was missing for detail lookup');
+  const imageLedgerDetail = await requestAuth(
+    userToken,
+    `/wallet/transactions/${imageLedgerItem.id}`,
+  );
+  assert(imageLedgerDetail.data.kind === 'IMAGE', 'image ledger detail kind mismatch');
+  assert(
+    Number(imageLedgerDetail.data.requestedImageCount) === 4 &&
+      Number(imageLedgerDetail.data.chargedImageCount) === 1,
+    'image ledger detail did not expose image counts',
+  );
+  assert(
+    Number(imageLedgerDetail.data.taskCost) === 0.04,
+    'image ledger detail did not expose the task total cost',
+  );
   for (const item of userLedgerAfterUsage.data.items) {
     const serializedItem = JSON.stringify(item);
     assert(

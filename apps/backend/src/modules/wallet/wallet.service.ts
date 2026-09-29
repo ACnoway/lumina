@@ -11,6 +11,7 @@ import { RedisService } from '../../redis/redis.service';
 import { AuditService } from '../audit/audit.service';
 import { Decimal } from '@prisma/client/runtime/library';
 import { TransactionType, Wallet, WalletTransaction } from '@prisma/client';
+import type { GetTransactionDetailResponse } from '@lumina/shared';
 
 interface PreDeductResult {
   success: boolean;
@@ -41,6 +42,29 @@ interface AdminAdjustmentAuditContext {
   actorId: string;
   ipAddress?: string;
   userAgent?: string;
+}
+
+interface RechargeDetailFields {
+  orderNo: string | null;
+  providerTradeNo: string | null;
+  orderAmountCny: number | null;
+  paidAmountCny: number | null;
+  exchangeRate: number | null;
+  creditedPhotonAmount: number;
+  paymentMethod: 'ALIPAY' | 'WECHAT' | null;
+  channelName: string | null;
+  status: 'CREATED' | 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'CLOSED' | 'EXPIRED' | 'REFUNDED' | null;
+  paidAt: string | null;
+}
+
+interface ImageDetailFields {
+  taskId: string | null;
+  imageId: string | null;
+  sequence: number | null;
+  requestedImageCount: number | null;
+  chargedImageCount: number;
+  perImageCost: number | null;
+  taskCost: number | null;
 }
 
 @Injectable()
@@ -369,6 +393,138 @@ export class WalletService {
     };
   }
 
+  /**
+   * 查询用户可见的单条交易详情。
+   * 详情接口只按当前钱包查询，避免通过流水 ID 越权读取其他用户数据。
+   */
+  async getUserTransactionDetail(
+    userId: string,
+    transactionId: string,
+  ): Promise<GetTransactionDetailResponse> {
+    const wallet = await this.getWallet(userId);
+    const transaction = await this.prisma.walletTransaction.findFirst({
+      where: { id: transactionId, walletId: wallet.id },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException('账单不存在');
+    }
+
+    const modelDisplayNames = await this.getModelDisplayNames([transaction]);
+    const base = {
+      id: transaction.id,
+      type: transaction.type,
+      amount: Number(transaction.amount.toString()),
+      balance: Number(transaction.balance.toString()),
+      reason: this.serializeUserTransaction(transaction, modelDisplayNames).reason,
+      createdAt: transaction.createdAt.toISOString(),
+    };
+
+    if (transaction.type === 'RECHARGE') {
+      return {
+        ...base,
+        kind: 'RECHARGE',
+        ...(await this.buildRechargeDetail(userId, transaction)),
+      };
+    }
+
+    const metadata = this.getMetadataRecord(transaction.metadata);
+    const reasonModel = this.getReasonModelName(transaction.reason);
+    const modelName = this.getMetadataString(metadata, 'model') || reasonModel?.modelName || null;
+    const model = modelName
+      ? modelDisplayNames.get(modelName) || '已下线模型'
+      : null;
+
+    if (transaction.type === 'CONSUME' && (metadata.taskId || reasonModel?.prefix === '生图')) {
+      return {
+        ...base,
+        kind: 'IMAGE',
+        model,
+        ...(await this.buildImageDetail(transaction, metadata)),
+      };
+    }
+
+    if (transaction.type === 'CONSUME' && (reasonModel?.prefix === '聊天' || metadata.inputTokens !== undefined || metadata.outputTokens !== undefined)) {
+      const inputTokens = this.getMetadataNumber(metadata, 'inputTokens');
+      const outputTokens = this.getMetadataNumber(metadata, 'outputTokens');
+      return {
+        ...base,
+        kind: reasonModel?.prefix === '提示词优化' ? 'PROMPT_OPTIMIZATION' : 'CHAT',
+        model,
+        inputTokens,
+        outputTokens,
+        totalTokens: this.getMetadataNumber(metadata, 'totalTokens') ??
+          (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null),
+        sessionId: this.getMetadataString(metadata, 'sessionId'),
+        messageId: this.getMetadataString(metadata, 'messageId'),
+      };
+    }
+
+    return { ...base, kind: 'OTHER' };
+  }
+
+  private async buildRechargeDetail(
+    userId: string,
+    transaction: WalletTransaction,
+  ): Promise<RechargeDetailFields> {
+    const metadata = this.getMetadataRecord(transaction.metadata);
+    const orderNo = this.getMetadataString(metadata, 'orderNo') || this.getRechargeOrderNo(transaction);
+    const order = orderNo
+      ? await this.prisma.paymentOrder.findFirst({
+          where: { userId, orderNo },
+          include: { channel: true },
+        })
+      : null;
+    const paidAmount = order?.paidAmount === null || order?.paidAmount === undefined
+      ? this.getMetadataNumber(metadata, 'paidAmountCny')
+      : Number(order.paidAmount.toString());
+    const fallbackPaidAmount = paidAmount ?? (order?.status === 'SUCCEEDED' ? Number(order.amount) : null);
+
+    return {
+      orderNo: order?.orderNo || orderNo,
+      providerTradeNo: order?.providerTradeNo || this.getMetadataString(metadata, 'providerTradeNo'),
+      orderAmountCny: order ? Number(order.amount.toString()) : this.getMetadataNumber(metadata, 'orderAmountCny'),
+      paidAmountCny: fallbackPaidAmount,
+      exchangeRate: order
+        ? Number(order.photonPerCny.toString())
+        : this.getMetadataNumber(metadata, 'exchangeRate'),
+      creditedPhotonAmount: Number(transaction.amount.toString()),
+      paymentMethod: this.toPaymentMethod(order?.paymentMethod || this.getMetadataString(metadata, 'paymentMethod')),
+      channelName: order?.channel?.name || this.getMetadataString(metadata, 'channelName'),
+      status: this.toPaymentOrderStatus(order?.status || this.getMetadataString(metadata, 'status')),
+      paidAt: order?.paidAt?.toISOString() || this.getMetadataString(metadata, 'paidAt'),
+    };
+  }
+
+  private async buildImageDetail(
+    transaction: WalletTransaction,
+    metadata: Record<string, unknown>,
+  ): Promise<ImageDetailFields> {
+    const taskId = this.getMetadataString(metadata, 'taskId');
+    const task = taskId
+      ? await this.prisma.imageGeneration.findUnique({
+          where: { id: taskId },
+          select: { cost: true, parameters: true },
+        })
+      : null;
+    const parameters = this.getJsonRecord(task?.parameters);
+    const requestedImageCount = this.getMetadataNumber(metadata, 'imageCount') ??
+      this.getJsonNumber(parameters, 'imageCount');
+    const chargedImageCount = this.getMetadataNumber(metadata, 'chargedImageCount') ?? 1;
+    const perImageCost = this.getMetadataNumber(metadata, 'perImageCost') ??
+      Number(transaction.amount.toString()) / Math.max(chargedImageCount, 1);
+
+    return {
+      taskId,
+      imageId: this.getMetadataString(metadata, 'imageId'),
+      sequence: this.getMetadataNumber(metadata, 'sequence'),
+      requestedImageCount,
+      chargedImageCount,
+      perImageCost,
+      taskCost: task?.cost === null || task?.cost === undefined ? null : Number(task.cost.toString()),
+    };
+  }
+
   private async getModelDisplayNames(
     transactions: WalletTransaction[],
   ): Promise<Map<string, string>> {
@@ -430,6 +586,59 @@ export class WalletService {
     return typeof model === 'string' && model.trim() ? model.trim() : null;
   }
 
+  private getMetadataRecord(metadata: WalletTransaction['metadata']): Record<string, unknown> {
+    return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? metadata as Record<string, unknown>
+      : {};
+  }
+
+  private getMetadataString(metadata: Record<string, unknown>, key: string): string | null {
+    const value = metadata[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private getMetadataNumber(metadata: Record<string, unknown>, key: string): number | null {
+    const value = metadata[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    return null;
+  }
+
+  private getJsonRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  }
+
+  private getJsonNumber(value: Record<string, unknown>, key: string): number | null {
+    const candidate = value[key];
+    return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
+  }
+
+  private getRechargeOrderNo(transaction: WalletTransaction): string | null {
+    const prefix = 'payment:recharge:';
+    return transaction.idempotencyKey?.startsWith(prefix)
+      ? transaction.idempotencyKey.slice(prefix.length) || null
+      : null;
+  }
+
+  private toPaymentMethod(value: string | null): 'ALIPAY' | 'WECHAT' | null {
+    return value === 'ALIPAY' || value === 'WECHAT' ? value : null;
+  }
+
+  private toPaymentOrderStatus(value: string | null):
+    | 'CREATED'
+    | 'PENDING'
+    | 'SUCCEEDED'
+    | 'FAILED'
+    | 'CLOSED'
+    | 'EXPIRED'
+    | 'REFUNDED'
+    | null {
+    const statuses = ['CREATED', 'PENDING', 'SUCCEEDED', 'FAILED', 'CLOSED', 'EXPIRED', 'REFUNDED'] as const;
+    return statuses.includes(value as (typeof statuses)[number]) ? value as (typeof statuses)[number] : null;
+  }
+
   private getReasonModelName(
     reason: string,
   ): { prefix: string; modelName: string } | null {
@@ -450,6 +659,7 @@ export class WalletService {
     amount: number,
     reason: string,
     idempotencyKey?: string,
+    metadata?: Record<string, unknown>,
   ): Promise<WalletTransaction> {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('充值光子数量必须大于0');
@@ -495,6 +705,7 @@ export class WalletService {
             amount: new Decimal(amount),
             balance: newBalance,
             reason,
+            metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
             idempotencyKey: key,
           },
         });

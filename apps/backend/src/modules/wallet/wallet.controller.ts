@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Param,
   Query,
   UseGuards,
   Logger,
@@ -18,6 +19,7 @@ import { User } from '@prisma/client';
 import { GetTransactionsQueryDto } from './dto/wallet.dto';
 import {
   GetBalanceResponse,
+  GetTransactionDetailResponse,
   GetTransactionsResponse,
   TransactionItem,
 } from '@lumina/shared';
@@ -89,5 +91,17 @@ export class WalletController {
       limit: query.limit || 20,
       totalPages: Math.ceil(total / (query.limit || 20)),
     };
+  }
+
+  @Get('transactions/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '查询当前用户的账单详情' })
+  async getTransactionDetail(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+  ): Promise<GetTransactionDetailResponse> {
+    this.logger.log(`查询账单详情: userId=${user.id}, transactionId=${id}`);
+    return this.walletService.getUserTransactionDetail(user.id, id);
   }
 }

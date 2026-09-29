@@ -167,6 +167,18 @@ describe('PaymentService', () => {
       100,
       `支付充值 ${order.orderNo}`,
       `payment:recharge:${order.orderNo}`,
+      expect.objectContaining({
+        orderNo: order.orderNo,
+        providerTradeNo: 'T-paid',
+        orderAmountCny: '10',
+        paidAmountCny: '10',
+        exchangeRate: '10',
+        photonAmount: '100',
+        paymentMethod: 'ALIPAY',
+        channelName: '测试易支付',
+        status: PaymentOrderStatus.SUCCEEDED,
+        paidAt: expect.any(String),
+      }),
     );
     expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: order.id, status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] } },
