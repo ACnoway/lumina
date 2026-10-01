@@ -1,18 +1,18 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   // Only trust X-Forwarded-For when the deployment explicitly declares its
   // reverse proxy. This lets H5 payment channels receive the real client IP
   // without allowing direct backend callers to spoof it by default.
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+  app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
 
   // 全局验证管道
   app.useGlobalPipes(
