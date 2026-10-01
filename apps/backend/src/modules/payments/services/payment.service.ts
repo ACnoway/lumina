@@ -15,7 +15,11 @@ import {
   User,
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
-import { PaymentAction, PaymentOrderDto } from '@lumina/shared';
+import {
+  GetPaymentOrdersResponse,
+  PaymentAction,
+  PaymentOrderDto,
+} from '@lumina/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -28,12 +32,18 @@ import {
   PaymentNotifyResponse,
   PaymentQueryResult,
 } from '../core/payment.types';
-import { CreatePaymentOrderDto, ListPaymentChannelsQueryDto } from '../dto/payment.dto';
+import {
+  CreatePaymentOrderDto,
+  ListPaymentChannelsQueryDto,
+  ListPaymentOrdersQueryDto,
+} from '../dto/payment.dto';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
+  /** Redirect URLs and generated forms are provider artifacts with short lives. */
+  private readonly ACTION_MAX_AGE_MS = 5 * 60 * 1000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,7 +74,7 @@ export class PaymentService {
       where: { userId: user.id, idempotencyKey },
       include: { channel: true },
     });
-    if (existing) return this.serializeOrder(existing);
+    if (existing) return this.serializeOrder(await this.expireOrderIfNeeded(existing));
 
     let amount: Decimal;
     try {
@@ -77,13 +87,16 @@ export class PaymentService {
     }
 
     const paymentMethod = dto.paymentMethod as PaymentMethod;
-    const scene = PaymentScene.QR;
-    let usable: Awaited<ReturnType<PaymentChannelService['getUsableChannel']>>;
+    let selection: {
+      scene: PaymentScene;
+      usable: Awaited<ReturnType<PaymentChannelService['getUsableChannelForMethod']>>;
+    };
     try {
-      usable = await this.channels.getUsableChannelForMethod(paymentMethod, scene);
+      selection = await this.getUsableRedirectChannel(paymentMethod);
     } catch (error) {
       this.rethrowChannelError(error);
     }
+    const { scene, usable } = selection!;
 
     const rate = new Decimal((await this.settingsService.getCurrencySettings()).photonPerCny.toString());
     const photonAmount = amount.times(rate).toDecimalPlaces(6);
@@ -118,12 +131,14 @@ export class PaymentService {
         { amount, paymentMethod, scene, subject: order.subject },
         usable!.config,
       );
+      this.assertRedirectAction(result.action);
     } catch (error) {
       const uncertain = error instanceof PaymentChannelError && error.uncertain;
       await this.prisma.paymentOrder.updateMany({
         where: {
           id: order.id,
           status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+          paidAt: null,
         },
         data: {
           status: uncertain ? PaymentOrderStatus.PENDING : PaymentOrderStatus.FAILED,
@@ -138,12 +153,13 @@ export class PaymentService {
       where: {
         id: order.id,
         status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
       },
       data: {
         status: PaymentOrderStatus.PENDING,
         providerTradeNo: result!.providerTradeNo,
         expireAt: result!.expireAt ?? order.expireAt,
-        metadata: { action: result!.action } as Prisma.InputJsonValue,
+        metadata: this.actionMetadata(result!.action),
       },
     });
     const updated = await this.prisma.paymentOrder.findUnique({
@@ -152,7 +168,54 @@ export class PaymentService {
     });
     if (!updated) throw new NotFoundException('支付订单不存在');
     this.logger.log(`payment.create.success orderNo=${orderNo} channelId=${order.channelId}`);
-    return this.serializeOrder(updated);
+    return this.serializeOrder(await this.expireOrderIfNeeded(updated));
+  }
+
+  async listOrders(
+    userId: string,
+    query: ListPaymentOrdersQueryDto,
+  ): Promise<GetPaymentOrdersResponse> {
+    const now = new Date();
+    await this.expireStaleUserOrders(userId, now);
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const statuses = query.status
+      ? [query.status as PaymentOrderStatus]
+      : [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING];
+    const direction = query.sortOrder ?? 'desc';
+    const orderBy = query.sortBy === 'expireAt'
+      ? { expireAt: direction }
+      : { createdAt: direction };
+    const where = {
+      userId,
+      status: { in: statuses },
+      // `paidAt` is the confirmed-payment claim. It is not user-payable while
+      // wallet credit is being completed, so do not surface it as pending.
+      paidAt: null,
+      OR: [
+        { expireAt: null },
+        { expireAt: { gt: now } },
+      ],
+    };
+    const [orders, total] = await Promise.all([
+      this.prisma.paymentOrder.findMany({
+        where,
+        include: { channel: true },
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.paymentOrder.count({ where }),
+    ]);
+
+    return {
+      items: orders.map((order) => this.serializeOrder(order)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async getOrder(userId: string, orderNo: string): Promise<PaymentOrderDto> {
@@ -161,11 +224,113 @@ export class PaymentService {
       include: { channel: true },
     });
     if (!order) throw new NotFoundException('支付订单不存在');
-    return this.serializeOrder(order);
+    return this.serializeOrder(await this.expireOrderIfNeeded(order));
+  }
+
+  /**
+   * Reuse the original Lumina order when the user returns to an unfinished
+   * payment. A recent saved redirect action is returned as-is; a missing,
+   * legacy, or stale action is regenerated with the same merchant order number
+   * and all original monetary snapshots.
+   */
+  async resumePayment(
+    userId: string,
+    orderNo: string,
+    clientIp?: string,
+  ): Promise<PaymentOrderDto> {
+    let order = await this.findUserOrder(userId, orderNo);
+    order = await this.expireOrderIfNeeded(order);
+    try {
+      this.assertResumableOrder(order);
+    } catch (error) {
+      this.rethrowChannelError(error);
+    }
+
+    // An order remains bound to the channel originally selected at creation.
+    // Never fall back to another channel when resuming it.
+    let usable: Awaited<ReturnType<PaymentChannelService['getUsableChannel']>>;
+    try {
+      usable = await this.channels.getUsableChannel(
+        order.channelId,
+        order.paymentMethod,
+        order.scene,
+      );
+    } catch (error) {
+      this.rethrowChannelError(error);
+    }
+
+    const savedAction = this.getOrderAction(order);
+    if (this.isFreshRedirectAction(order, savedAction)) return this.serializeOrder(order);
+
+    let result: PaymentCreateResult;
+    try {
+      result = await usable!.adapter.createPayment(
+        {
+          orderNo: order.orderNo,
+          notifyUrl: `${this.publicBaseUrl()}/payments/notify/${encodeURIComponent(order.channelId)}`,
+          returnUrl: this.config.get<string>('PAYMENT_RETURN_URL') || `${this.publicBaseUrl()}/profile`,
+          clientIp: clientIp ?? order.clientIp ?? undefined,
+        },
+        {
+          amount: order.amount,
+          paymentMethod: order.paymentMethod,
+          scene: order.scene,
+          subject: order.subject,
+        },
+        usable!.config,
+      );
+      this.assertRedirectAction(result.action);
+    } catch (error) {
+      await this.recordPaymentActionFailure(order, error);
+      this.rethrowChannelError(error);
+    }
+
+    const updatedAction = await this.prisma.paymentOrder.updateMany({
+      where: {
+        id: order.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
+        OR: [
+          { expireAt: null },
+          { expireAt: { gt: new Date() } },
+        ],
+      },
+      data: {
+        status: PaymentOrderStatus.PENDING,
+        providerTradeNo: result!.providerTradeNo ?? order.providerTradeNo,
+        expireAt: result!.expireAt ?? order.expireAt,
+        metadata: this.actionMetadata(result!.action),
+      },
+    });
+
+    const updated = await this.prisma.paymentOrder.findUnique({
+      where: { id: order.id },
+      include: { channel: true },
+    });
+    if (!updated) throw new NotFoundException('支付订单不存在');
+    const current = await this.expireOrderIfNeeded(updated);
+    if (updatedAction.count === 0) {
+      try {
+        this.assertResumableOrder(current);
+      } catch (error) {
+        this.rethrowChannelError(error);
+      }
+      throw new BadRequestException('支付订单状态已变化，请刷新后重试');
+    }
+    return this.serializeOrder(current);
   }
 
   async syncOrder(userId: string, orderNo: string): Promise<PaymentOrderDto> {
-    const order = await this.findUserOrder(userId, orderNo);
+    let order = await this.findUserOrder(userId, orderNo);
+    order = await this.expireOrderIfNeeded(order);
+    if (order.status === PaymentOrderStatus.EXPIRED) return this.serializeOrder(order);
+    // A prior verified callback may have claimed payment immediately before a
+    // process crash or a transient wallet failure. Finish that idempotently
+    // rather than querying the provider or reopening the payment flow.
+    if (this.isClaimedPayableOrder(order)) {
+      await this.creditClaimedPayment(order);
+      return this.getOrder(userId, orderNo);
+    }
     const { adapter, config } = await this.channels.getById(order.channelId);
     if (!adapter.queryPayment) throw new BadRequestException('当前渠道不支持主动查询');
     let result: PaymentQueryResult;
@@ -230,11 +395,10 @@ export class PaymentService {
     order: PaymentOrder & { channel: PaymentChannel },
     result: PaymentNotification | PaymentQueryResult,
   ): Promise<void> {
+    order = await this.expireOrderIfNeeded(order);
     if (result.status === 'SUCCESS') {
       if (order.status === PaymentOrderStatus.SUCCEEDED) return;
-      if (order.status !== PaymentOrderStatus.CREATED && order.status !== PaymentOrderStatus.PENDING) {
-        throw new PaymentChannelError(PaymentErrorCode.PAYMENT_ALREADY_CLOSED, '支付订单已关闭，不能再次入账');
-      }
+      this.assertPayableOrder(order, '支付订单已关闭或过期，不能再次入账');
       this.assertConfirmedPayment(order, result);
       await this.processPaymentSuccess(order, result);
       return;
@@ -242,7 +406,11 @@ export class PaymentService {
     if (result.status === 'CLOSED' || result.status === 'FAILED') {
       if (order.status !== PaymentOrderStatus.SUCCEEDED) {
         await this.prisma.paymentOrder.updateMany({
-          where: { id: order.id, status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] } },
+          where: {
+            id: order.id,
+            status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+            paidAt: null,
+          },
           data: { status: result.status === 'CLOSED' ? PaymentOrderStatus.CLOSED : PaymentOrderStatus.FAILED },
         });
       }
@@ -253,8 +421,80 @@ export class PaymentService {
     order: PaymentOrder & { channel: PaymentChannel },
     result: PaymentNotification | PaymentQueryResult,
   ): Promise<void> {
-    const paidAmount = result.amount ? new Decimal(result.amount) : order.amount;
+    const paidAmount = new Decimal(result.amount!);
     const paidAt = result.paidAt ?? new Date();
+
+    // This update is the payment-success claim. It makes expiry and wallet
+    // credit mutually exclusive without adding a schema column: expiry only
+    // touches unpaid (`paidAt: null`) rows, while a successful claim can only
+    // be made before `expireAt`.
+    const claim = await this.prisma.paymentOrder.updateMany({
+      where: {
+        id: order.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
+        OR: [
+          { expireAt: null },
+          { expireAt: { gt: new Date() } },
+        ],
+      },
+      data: {
+        providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
+        paidAmount,
+        paidAt,
+        failureCode: null,
+        failureMessage: null,
+      },
+    });
+
+    if (claim.count > 0) {
+      await this.creditClaimedPayment({
+        ...order,
+        providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
+        paidAmount,
+        paidAt,
+      });
+      return;
+    }
+
+    // A duplicate callback/query may race after another handler has already
+    // claimed the order. Reload it and re-drive the wallet operation using the
+    // stable idempotency key. If the claim was not won, an expired unpaid order
+    // is explicitly expired and cannot be revived by this late success.
+    const current = await this.prisma.paymentOrder.findUnique({
+      where: { id: order.id },
+      include: { channel: true },
+    });
+    if (!current) throw new NotFoundException('支付订单不存在');
+    const currentOrder = await this.expireOrderIfNeeded(current);
+    if (currentOrder.status === PaymentOrderStatus.SUCCEEDED) return;
+    if (this.isClaimedPayableOrder(currentOrder)) {
+      await this.creditClaimedPayment(currentOrder);
+      return;
+    }
+    this.assertPayableOrder(currentOrder, '支付订单已关闭或过期，不能再次入账');
+    throw new PaymentChannelError(
+      PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
+      '支付订单状态已变化，不能再次入账',
+    );
+  }
+
+  /**
+   * Complete an already claimed payment. The wallet transaction uses the
+   * payment order number as its idempotency key, so retrying after a crash is
+   * safe and turns a claimed active order into SUCCEEDED exactly once.
+   */
+  private async creditClaimedPayment(
+    order: PaymentOrder & { channel: PaymentChannel },
+  ): Promise<void> {
+    this.assertPayableOrder(order, '支付订单已关闭或过期，不能再次入账');
+    if (!order.paidAt) {
+      throw new PaymentChannelError(
+        PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
+        '支付订单尚未确认支付，不能入账',
+      );
+    }
+    const paidAmount = order.paidAmount ?? order.amount;
     await this.walletService.recharge(
       order.userId,
       Number(order.photonAmount.toString()),
@@ -262,7 +502,7 @@ export class PaymentService {
       `payment:recharge:${order.orderNo}`,
       {
         orderNo: order.orderNo,
-        providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
+        providerTradeNo: order.providerTradeNo,
         orderAmountCny: order.amount.toString(),
         paidAmountCny: paidAmount.toString(),
         exchangeRate: order.photonPerCny.toString(),
@@ -270,16 +510,20 @@ export class PaymentService {
         paymentMethod: order.paymentMethod,
         channelName: order.channel.name,
         status: PaymentOrderStatus.SUCCEEDED,
-        paidAt: paidAt.toISOString(),
+        paidAt: order.paidAt.toISOString(),
       },
     );
     await this.prisma.paymentOrder.updateMany({
-      where: { id: order.id, status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] } },
+      where: {
+        id: order.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: { not: null },
+      },
       data: {
         status: PaymentOrderStatus.SUCCEEDED,
-        providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
+        providerTradeNo: order.providerTradeNo,
         paidAmount,
-        paidAt,
+        paidAt: order.paidAt,
         failureCode: null,
         failureMessage: null,
       },
@@ -319,10 +563,210 @@ export class PaymentService {
     });
   }
 
-  private serializeOrder(order: PaymentOrder & { channel: PaymentChannel }): PaymentOrderDto {
-    const metadata = order.metadata && typeof order.metadata === 'object' && !Array.isArray(order.metadata)
-      ? order.metadata as { action?: PaymentAction }
+  private async getUsableRedirectChannel(paymentMethod: PaymentMethod): Promise<{
+    scene: PaymentScene;
+    usable: Awaited<ReturnType<PaymentChannelService['getUsableChannelForMethod']>>;
+  }> {
+    const scenes = paymentMethod === PaymentMethod.ALIPAY
+      ? [PaymentScene.WEB, PaymentScene.H5]
+      : [PaymentScene.H5, PaymentScene.WEB];
+
+    for (const scene of scenes) {
+      try {
+        const usable = await this.channels.getUsableChannelForMethod(paymentMethod, scene);
+        return { scene, usable };
+      } catch (error) {
+        if (
+          error instanceof PaymentChannelError &&
+          (error.code === PaymentErrorCode.CHANNEL_NOT_FOUND ||
+            error.code === PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE)
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new PaymentChannelError(
+      PaymentErrorCode.CHANNEL_NOT_FOUND,
+      '当前支付方式暂无可用的跳转支付渠道',
+    );
+  }
+
+  private getOrderAction(order: PaymentOrder): PaymentAction | undefined {
+    return this.sanitizePaymentAction(this.getOrderMetadata(order).action);
+  }
+
+  private getOrderMetadata(order: PaymentOrder): Record<string, unknown> {
+    return order.metadata && typeof order.metadata === 'object' && !Array.isArray(order.metadata)
+      ? order.metadata as Record<string, unknown>
       : {};
+  }
+
+  /** Persist only the public action and its generation time, never raw channel output. */
+  private actionMetadata(action: PaymentAction): Prisma.InputJsonValue {
+    const safeAction = this.sanitizePaymentAction(action);
+    if (!safeAction) {
+      throw new PaymentChannelError(
+        PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE,
+        '当前支付方式未返回可用的跳转支付动作',
+      );
+    }
+    return {
+      action: safeAction,
+      actionGeneratedAt: new Date().toISOString(),
+    } as Prisma.InputJsonValue;
+  }
+
+  private sanitizePaymentAction(value: unknown): PaymentAction | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const action = value as Record<string, unknown>;
+    switch (action.type) {
+      case 'REDIRECT_URL':
+        return typeof action.url === 'string' && action.url.trim()
+          ? { type: 'REDIRECT_URL', url: action.url }
+          : undefined;
+      case 'HTML_FORM':
+        return typeof action.html === 'string' && action.html.trim()
+          ? { type: 'HTML_FORM', html: action.html }
+          : undefined;
+      case 'QR_CODE':
+        return typeof action.content === 'string' && action.content.trim()
+          ? { type: 'QR_CODE', content: action.content }
+          : undefined;
+      case 'JSAPI': {
+        if (!action.params || typeof action.params !== 'object' || Array.isArray(action.params)) return undefined;
+        const params = Object.entries(action.params as Record<string, unknown>);
+        if (params.some(([, value]) => typeof value !== 'string')) return undefined;
+        return { type: 'JSAPI', params: Object.fromEntries(params) as Record<string, string> };
+      }
+      case 'NONE':
+        return { type: 'NONE' };
+      default:
+        return undefined;
+    }
+  }
+
+  private isFreshRedirectAction(order: PaymentOrder, action: PaymentAction | undefined): boolean {
+    if (!this.isRedirectAction(action)) return false;
+    const generatedAt = this.getOrderMetadata(order).actionGeneratedAt;
+    if (typeof generatedAt !== 'string') return false;
+    const generatedAtMs = new Date(generatedAt).getTime();
+    const age = Date.now() - generatedAtMs;
+    // A malformed or future timestamp is treated as stale conservatively.
+    return Number.isFinite(generatedAtMs) && age >= 0 && age < this.ACTION_MAX_AGE_MS;
+  }
+
+  private isRedirectAction(action: PaymentAction | undefined): boolean {
+    return Boolean(
+      (action?.type === 'REDIRECT_URL' && typeof action.url === 'string' && action.url.trim()) ||
+      (action?.type === 'HTML_FORM' && typeof action.html === 'string' && action.html.trim()),
+    );
+  }
+
+  private assertRedirectAction(action: PaymentAction | undefined): void {
+    if (this.isRedirectAction(action)) return;
+    throw new PaymentChannelError(
+      PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE,
+      '当前支付方式未返回可用的跳转支付动作',
+    );
+  }
+
+  private isPayableOrder(order: PaymentOrder): boolean {
+    return order.status === PaymentOrderStatus.CREATED || order.status === PaymentOrderStatus.PENDING;
+  }
+
+  private assertPayableOrder(order: PaymentOrder, message = '支付订单当前状态不可继续支付'): void {
+    if (this.isPayableOrder(order)) return;
+    throw new PaymentChannelError(PaymentErrorCode.PAYMENT_ALREADY_CLOSED, message);
+  }
+
+  private isClaimedPayableOrder(order: PaymentOrder): boolean {
+    return this.isPayableOrder(order) && order.paidAt !== null;
+  }
+
+  private assertResumableOrder(order: PaymentOrder): void {
+    this.assertPayableOrder(order);
+    if (order.paidAt !== null) {
+      throw new PaymentChannelError(
+        PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
+        '支付订单已确认支付，正在入账，不能继续支付',
+      );
+    }
+  }
+
+  private async expireStaleUserOrders(userId: string, now = new Date()): Promise<void> {
+    await this.prisma.paymentOrder.updateMany({
+      where: {
+        userId,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
+        expireAt: { lte: now },
+      },
+      data: { status: PaymentOrderStatus.EXPIRED },
+    });
+  }
+
+  private async expireOrderIfNeeded(
+    order: PaymentOrder & { channel: PaymentChannel },
+  ): Promise<PaymentOrder & { channel: PaymentChannel }> {
+    if (
+      !this.isPayableOrder(order) ||
+      order.paidAt !== null ||
+      !order.expireAt ||
+      order.expireAt.getTime() > Date.now()
+    ) {
+      return order;
+    }
+
+    const now = new Date();
+    const result = await this.prisma.paymentOrder.updateMany({
+      where: {
+        id: order.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
+        expireAt: { lte: now },
+      },
+      data: { status: PaymentOrderStatus.EXPIRED },
+    });
+    if (result.count > 0) {
+      return { ...order, status: PaymentOrderStatus.EXPIRED };
+    }
+
+    // A concurrent successful callback can win the paidAt claim. Reload so a
+    // stale unpaid view cannot subsequently expire or resume that order.
+    const current = await this.prisma.paymentOrder.findUnique({
+      where: { id: order.id },
+      include: { channel: true },
+    });
+    if (!current) throw new NotFoundException('支付订单不存在');
+    return current;
+  }
+
+  private async recordPaymentActionFailure(
+    order: PaymentOrder & { channel: PaymentChannel },
+    error: unknown,
+  ): Promise<void> {
+    const current = await this.expireOrderIfNeeded(order);
+    if (!this.isPayableOrder(current) || current.paidAt !== null) return;
+
+    await this.prisma.paymentOrder.updateMany({
+      where: {
+        id: current.id,
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        paidAt: null,
+      },
+      data: {
+        // A resume failure must leave the original order payable. The user can
+        // retry with the same order number after a transient channel problem.
+        status: PaymentOrderStatus.PENDING,
+        failureCode: error instanceof PaymentChannelError ? error.code : PaymentErrorCode.CHANNEL_REQUEST_FAILED,
+        failureMessage: error instanceof Error ? error.message : '支付渠道请求失败',
+      },
+    });
+  }
+
+  private serializeOrder(order: PaymentOrder & { channel: PaymentChannel }): PaymentOrderDto {
     return {
       orderNo: order.orderNo,
       amount: order.amount.toString(),
@@ -332,7 +776,7 @@ export class PaymentService {
       paymentMethod: order.paymentMethod,
       scene: order.scene,
       channel: { id: order.channel.id, name: order.channel.name, type: order.channel.type },
-      action: metadata.action,
+      action: order.paidAt === null ? this.getOrderAction(order) : undefined,
       expireAt: order.expireAt?.toISOString() ?? null,
       paidAt: order.paidAt?.toISOString() ?? null,
       createdAt: order.createdAt.toISOString(),

@@ -35,7 +35,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       type: this.type,
       name: '易支付',
       methods: [PaymentMethod.ALIPAY, PaymentMethod.WECHAT],
-      scenes: [PaymentScene.WEB, PaymentScene.QR],
+      scenes: [PaymentScene.WEB, PaymentScene.H5, PaymentScene.QR],
       capabilities: { query: true, close: false, refund: false },
     };
   }
@@ -93,9 +93,19 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
           timeout: config.timeout ?? 15000,
         },
       );
+      // Epay gateways may respond with an auto-submit form rather than JSON.
+      // Detect it before parsing generic strings as URLs, otherwise the raw
+      // HTML would incorrectly be surfaced as a redirect URL.
+      if (typeof response.data === 'string' && /<form[\s>]/i.test(response.data)) {
+        return { action: { type: 'HTML_FORM', html: response.data } };
+      }
+
       const data = this.parseResponse(response.data);
+      // A QR code is only a valid payment action when the caller explicitly
+      // requested the QR scene. Web and H5 flows must continue in the browser
+      // by redirecting to the provider (or using the HTML form above).
       const qr = this.firstString(data, ['qrcode', 'qr_code', 'code_url', 'payurl']);
-      if (qr)
+      if (request.scene === PaymentScene.QR && qr)
         return {
           action: { type: 'QR_CODE', content: qr },
           providerTradeNo: this.firstString(data, ['trade_no']),
@@ -106,9 +116,6 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
           action: { type: 'REDIRECT_URL', url },
           providerTradeNo: this.firstString(data, ['trade_no']),
         };
-      if (typeof response.data === 'string' && /<form[\s>]/i.test(response.data)) {
-        return { action: { type: 'HTML_FORM', html: response.data } };
-      }
       throw new Error('易支付返回中没有可用的支付动作');
     } catch (error) {
       if (error instanceof PaymentChannelError) throw error;

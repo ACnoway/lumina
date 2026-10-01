@@ -4,7 +4,11 @@ import { Request } from 'express';
 import { User } from '@prisma/client';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { CreatePaymentOrderDto, ListPaymentChannelsQueryDto } from '../dto/payment.dto';
+import {
+  CreatePaymentOrderDto,
+  ListPaymentChannelsQueryDto,
+  ListPaymentOrdersQueryDto,
+} from '../dto/payment.dto';
 import { PaymentService } from '../services/payment.service';
 
 @ApiTags('payments')
@@ -37,10 +41,26 @@ export class PaymentsController {
     return this.paymentService.createPayment(user, dto, idempotencyKey, request.ip);
   }
 
+  @Get('orders')
+  @ApiOperation({ summary: '分页查询当前用户待支付订单' })
+  listOrders(@CurrentUser() user: User, @Query() query: ListPaymentOrdersQueryDto) {
+    return this.paymentService.listOrders(user.id, query);
+  }
+
   @Get('orders/:orderNo')
   @ApiOperation({ summary: '查询当前用户的支付订单' })
   getOrder(@CurrentUser() user: User, @Param('orderNo') orderNo: string) {
     return this.paymentService.getOrder(user.id, orderNo);
+  }
+
+  @Post('orders/:orderNo/pay')
+  @ApiOperation({ summary: '恢复当前用户原有支付订单的支付动作' })
+  resumeOrder(
+    @CurrentUser() user: User,
+    @Param('orderNo') orderNo: string,
+    @Req() request: Request,
+  ) {
+    return this.paymentService.resumePayment(user.id, orderNo, request.ip);
   }
 
   @Post('orders/:orderNo/sync')

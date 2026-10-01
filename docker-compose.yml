@@ -67,6 +67,7 @@ services:
       PAYMENT_CONFIG_ENCRYPTION_KEY: ${PAYMENT_CONFIG_ENCRYPTION_KEY:?PAYMENT_CONFIG_ENCRYPTION_KEY must be set}
       PAYMENT_NOTIFY_BASE_URL: ${PAYMENT_NOTIFY_BASE_URL:-http://localhost:3000/api}
       PAYMENT_RETURN_URL: ${PAYMENT_RETURN_URL:-http://localhost:3000/profile}
+      TRUST_PROXY: 'true'
       BACKEND_PORT: 3001
     # ports:
     #   - '3001:3001'  # 如需直接访问 API / Swagger，取消注释

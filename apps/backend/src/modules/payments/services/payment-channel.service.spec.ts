@@ -15,7 +15,7 @@ function createService() {
   const adapter = {
     getMetadata: jest.fn().mockReturnValue({
       methods: ['ALIPAY'],
-      scenes: ['QR'],
+      scenes: ['WEB'],
     }),
   };
   const registry = { get: jest.fn().mockReturnValue(adapter) };
@@ -29,12 +29,12 @@ function createService() {
 }
 
 describe('PaymentChannelService', () => {
-  it('selects the first active channel matching the payment method and fixed scene', async () => {
+  it('selects the first active channel matching the payment method and requested scene', async () => {
     const { service, prisma, adapter, crypto } = createService();
     const first = { id: 'channel-1', type: 'ALIPAY', isActive: true } as PaymentChannel;
     prisma.paymentChannel.findMany.mockResolvedValue([first]);
 
-    await expect(service.getUsableChannelForMethod('ALIPAY', 'QR')).resolves.toEqual({
+    await expect(service.getUsableChannelForMethod('ALIPAY', 'WEB')).resolves.toEqual({
       channel: first,
       adapter,
       config: { merchant: 'test' },

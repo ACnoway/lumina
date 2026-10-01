@@ -75,6 +75,24 @@ export interface PaymentOrderDto {
   createdAt: string;
 }
 
+/**
+ * User-visible payment orders that can still be paid. Terminal orders remain
+ * available through the individual order endpoint, but are intentionally not
+ * mixed into the pending-order list used by the profile and bill views.
+ */
+export type PayablePaymentOrderStatus = 'CREATED' | 'PENDING';
+
+export type PaymentOrderSortField = 'createdAt' | 'expireAt';
+export type SortDirection = 'asc' | 'desc';
+
+export interface GetPaymentOrdersResponse {
+  items: PaymentOrderDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 // ==================== 消息角色 ====================
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 

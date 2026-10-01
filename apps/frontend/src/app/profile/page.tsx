@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
   GetTransactionsResponse,
+  GetPaymentOrdersResponse,
   GetTransactionDetailResponse,
   GetCurrentUserResponse,
   CurrencySettingsDto,
@@ -159,6 +160,89 @@ function paymentStatusLabel(value: string | null): string {
     REFUNDED: "已退款",
   };
   return value ? labels[value] || value : "暂无";
+}
+
+function paymentMethodLabel(value: PaymentMethod): string {
+  return value === "ALIPAY" ? "支付宝" : "微信支付";
+}
+
+function formatPaymentOrderAmount(value: string): string {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? `¥${amount.toFixed(2)}` : `¥${value}`;
+}
+
+function isPayablePaymentOrder(order: PaymentOrderDto): boolean {
+  return order.status === "CREATED" || order.status === "PENDING";
+}
+
+function closePaymentWindow(paymentWindow: Window | null): void {
+  try {
+    if (paymentWindow && !paymentWindow.closed) paymentWindow.close();
+  } catch {
+    // A navigation race must not hide the original payment error.
+  }
+}
+
+function openPaymentWindow(): Window | null {
+  const paymentWindow = window.open("", "_blank");
+  if (!paymentWindow) return null;
+
+  try {
+    // The external payment document must not be able to navigate the still
+    // authenticated profile page through window.opener.
+    paymentWindow.opener = null;
+    paymentWindow.document.title = "Lumina 支付";
+    if (paymentWindow.document.body) {
+      paymentWindow.document.body.textContent = "正在准备支付…";
+    }
+    paymentWindow.focus();
+  } catch {
+    // The window can still receive a redirect or HTML form below.
+  }
+  return paymentWindow;
+}
+
+function showQrPaymentAction(paymentWindow: Window, content: string): void {
+  const paymentDocument = paymentWindow.document;
+  paymentDocument.open();
+  paymentDocument.write("<!doctype html><html><head><title>Lumina 支付</title></head><body></body></html>");
+  paymentDocument.close();
+
+  const heading = paymentDocument.createElement("h1");
+  heading.textContent = "请使用对应 App 扫描或打开支付地址";
+  const link = paymentDocument.createElement("a");
+  link.href = content;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = content;
+  link.style.display = "block";
+  link.style.marginTop = "16px";
+  link.style.overflowWrap = "anywhere";
+  paymentDocument.body.replaceChildren(heading, link);
+}
+
+function sendPaymentActionToWindow(
+  paymentWindow: Window,
+  action: PaymentOrderDto["action"],
+): void {
+  if (action?.type === "REDIRECT_URL" && action.url) {
+    paymentWindow.location.href = action.url;
+    return;
+  }
+
+  if (action?.type === "HTML_FORM" && action.html) {
+    paymentWindow.document.open();
+    paymentWindow.document.write(action.html);
+    paymentWindow.document.close();
+    return;
+  }
+
+  if (action?.type === "QR_CODE" && action.content) {
+    showQrPaymentAction(paymentWindow, action.content);
+    return;
+  }
+
+  throw new Error("支付渠道未返回可用的跳转支付动作");
 }
 
 const transactionTypeLabels: Record<TransactionType, string> = {
@@ -319,6 +403,11 @@ export default function ProfilePage() {
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrderDto | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
+  const [pendingOrders, setPendingOrders] = useState<GetPaymentOrdersResponse | null>(null);
+  const [pendingOrdersLoading, setPendingOrdersLoading] = useState(false);
+  const [pendingOrdersError, setPendingOrdersError] = useState("");
+  const [resumingOrderNo, setResumingOrderNo] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState("");
   const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
   const [transactions, setTransactions] = useState<GetTransactionsResponse | null>(null);
   const [transactionFilter, setTransactionFilter] = useState<TransactionFilter>("ALL");
@@ -360,8 +449,8 @@ export default function ProfilePage() {
     }
   }, [router]);
 
-  const loadTransactions = useCallback(async () => {
-    if (!profile || activeTab !== "usage") return;
+  const loadTransactions = useCallback(async (force = false) => {
+    if (!profile || (!force && activeTab !== "usage")) return;
 
     setTransactionsLoading(true);
     setTransactionsError("");
@@ -378,6 +467,20 @@ export default function ProfilePage() {
       setTransactionsLoading(false);
     }
   }, [activeTab, profile, transactionFilter, transactionPage]);
+
+  const loadPendingOrders = useCallback(async () => {
+    if (!profile) return;
+
+    setPendingOrdersLoading(true);
+    setPendingOrdersError("");
+    try {
+      setPendingOrders(await paymentsApi.listPendingOrders());
+    } catch (err: unknown) {
+      setPendingOrdersError(err instanceof Error ? err.message : "待支付订单加载失败，请稍后重试");
+    } finally {
+      setPendingOrdersLoading(false);
+    }
+  }, [profile]);
 
   async function handleTransactionDetail(id: string) {
     if (transactionDetailId === id) {
@@ -409,11 +512,15 @@ export default function ProfilePage() {
   }, [loadRechargeSettings, profile]);
 
   useEffect(() => {
+    if (profile) void loadPendingOrders();
+  }, [loadPendingOrders, profile]);
+
+  useEffect(() => {
     void loadTransactions();
   }, [loadTransactions]);
 
   useEffect(() => {
-    if (!paymentOrder || paymentOrder.status !== "PENDING") return;
+    if (!paymentOrder || !isPayablePaymentOrder(paymentOrder)) return;
     let cancelled = false;
     const timer = window.setInterval(async () => {
       try {
@@ -425,7 +532,7 @@ export default function ProfilePage() {
         setPaymentOrder(current);
         if (current.status === "SUCCEEDED") {
           window.clearInterval(timer);
-          await loadProfile();
+          await Promise.all([loadProfile(), loadPendingOrders(), loadTransactions(true)]);
         }
       } catch {
         // The next polling attempt can recover a transient request failure.
@@ -435,7 +542,7 @@ export default function ProfilePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [loadProfile, paymentOrder]);
+  }, [loadPendingOrders, loadProfile, loadTransactions, paymentOrder]);
 
   useEffect(() => {
     const syncTabFromUrl = () => {
@@ -501,6 +608,7 @@ export default function ProfilePage() {
   async function handleCreatePayment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPaymentError("");
+    setResumeError("");
     setPaymentOrder(null);
     if (!currencySettings) {
       setPaymentError("充值汇率加载中，请稍后重试");
@@ -510,6 +618,15 @@ export default function ProfilePage() {
       setPaymentError("请输入有效的充值金额，最低 0.1 元");
       return;
     }
+
+    // This must happen before the first await so browsers retain the user
+    // gesture and do not block the payment tab as a popup.
+    const paymentWindow = openPaymentWindow();
+    if (!paymentWindow) {
+      setPaymentError("浏览器拦截了支付窗口，请允许弹窗后重试");
+      return;
+    }
+
     setPaymentLoading(true);
     try {
       const order = await paymentsApi.createOrder(
@@ -520,25 +637,49 @@ export default function ProfilePage() {
         crypto.randomUUID(),
       );
       setPaymentOrder(order);
-      if (order.action?.type === "REDIRECT_URL" && order.action.url) {
-        window.location.assign(order.action.url);
-      } else if (order.action?.type === "HTML_FORM" && order.action.html) {
-        const popup = window.open("", "_blank");
-        if (popup) {
-          popup.document.write(order.action.html);
-          popup.document.close();
-        } else {
-          setPaymentError("浏览器拦截了支付窗口，请允许弹窗后重试");
-        }
-      }
+      sendPaymentActionToWindow(paymentWindow, order.action);
     } catch (err: unknown) {
+      closePaymentWindow(paymentWindow);
       setPaymentError(err instanceof Error ? err.message : "创建支付订单失败");
     } finally {
       setPaymentLoading(false);
+      void loadPendingOrders();
+    }
+  }
+
+  async function handleResumePayment(orderNo: string) {
+    setResumeError("");
+
+    // As with creation, open the blank tab synchronously inside the click
+    // handler before awaiting the API response.
+    const paymentWindow = openPaymentWindow();
+    if (!paymentWindow) {
+      setResumeError("浏览器拦截了支付窗口，请允许弹窗后重试");
+      return;
+    }
+
+    setResumingOrderNo(orderNo);
+    try {
+      const order = await paymentsApi.resumeOrder(orderNo);
+      setPaymentOrder(order);
+      sendPaymentActionToWindow(paymentWindow, order.action);
+    } catch (err: unknown) {
+      closePaymentWindow(paymentWindow);
+      setResumeError(err instanceof Error ? err.message : "恢复支付失败，请稍后重试");
+    } finally {
+      setResumingOrderNo(null);
+      void loadPendingOrders();
     }
   }
 
   const activeTabInfo = profileTabs.find((tab) => tab.id === activeTab) ?? profileTabs[0];
+  const latestPendingOrder = pendingOrders?.items[0] ?? null;
+  const paymentAmountNumber = /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(paymentAmount)
+    ? Number(paymentAmount)
+    : null;
+  const estimatedPhotonAmount = currencySettings && paymentAmountNumber !== null
+    ? paymentAmountNumber * currencySettings.photonPerCny
+    : null;
 
   return (
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
@@ -664,6 +805,58 @@ export default function ProfilePage() {
                 </div>
               </div>
             </section>
+            {pendingOrdersLoading ? (
+              <section className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
+                <div className="h-5 w-36 animate-pulse rounded bg-amber-50" />
+                <div className="mt-3 h-4 w-60 animate-pulse rounded bg-gray-100" />
+              </section>
+            ) : pendingOrdersError ? (
+              <section className="rounded-2xl border border-red-100 bg-red-50 p-5">
+                <p className="text-sm text-red-600">待支付订单加载失败：{pendingOrdersError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadPendingOrders()}
+                  className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                >
+                  重新加载
+                </button>
+              </section>
+            ) : latestPendingOrder ? (
+              <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Pending payment</p>
+                    <h3 className="mt-1 text-lg font-semibold text-amber-950">有待支付的充值订单</h3>
+                    <p className="mt-2 text-sm text-amber-800">
+                      共 {pendingOrders?.total ?? 0} 笔待支付订单，最近一笔为 {formatPaymentOrderAmount(latestPendingOrder.amount)}。
+                    </p>
+                    {latestPendingOrder.expireAt && (
+                      <p className="mt-1 text-xs text-amber-700">
+                        请在 {formatTransactionDate(latestPendingOrder.expireAt)} 前完成支付。
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTabChange("usage")}
+                      className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                    >
+                      查看账单
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleResumePayment(latestPendingOrder.orderNo)}
+                      disabled={resumingOrderNo !== null || !isPayablePaymentOrder(latestPendingOrder)}
+                      className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {resumingOrderNo === latestPendingOrder.orderNo ? "正在打开…" : "去支付"}
+                    </button>
+                  </div>
+                </div>
+                {resumeError && <p className="mt-3 text-sm text-red-600">{resumeError}</p>}
+              </section>
+            ) : null}
               </>
             )}
 
@@ -715,6 +908,23 @@ export default function ProfilePage() {
                       ? "正在加载充值汇率…"
                       : "充值汇率暂时不可用"}
                 </p>
+                <section className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-700">订单确认</p>
+                    <p className="text-xs text-gray-400">创建后将在新标签页打开支付页面</p>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <InfoItem label="当前光子余额" value={formatBillAmount(profile.wallet.balance)} />
+                    <InfoItem label="本次充值金额" value={paymentAmountNumber === null ? "请输入金额" : formatPaymentOrderAmount(paymentAmount)} />
+                    <InfoItem label="支付方式" value={paymentMethodLabel(paymentMethod)} />
+                    <InfoItem label="预计到账光子" value={estimatedPhotonAmount === null ? "等待汇率或金额" : formatBillAmount(estimatedPhotonAmount)} />
+                    <InfoItem
+                      label="充值后预计余额"
+                      value={estimatedPhotonAmount === null ? "等待汇率或金额" : formatBillAmount(profile.wallet.balance + estimatedPhotonAmount)}
+                    />
+                    <InfoItem label="支付有效期" value="创建后约 30 分钟，以订单提示为准" />
+                  </div>
+                </section>
                 {paymentError && <p className="text-sm text-red-600">{paymentError}</p>}
                 {paymentOrder?.action?.type === "QR_CODE" && paymentOrder.action.content && (
                   <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm">
@@ -725,9 +935,14 @@ export default function ProfilePage() {
                   </div>
                 )}
                 {paymentOrder && (
-                  <p className="text-sm text-gray-500">
-                    订单 {paymentOrder.orderNo} · 状态：{paymentOrder.status === "SUCCEEDED" ? "支付成功" : paymentOrder.status === "PENDING" ? "等待支付" : paymentOrder.status}
-                  </p>
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-500">
+                    <p>订单 {paymentOrder.orderNo} · 状态：{paymentStatusLabel(paymentOrder.status)}</p>
+                    {paymentOrder.expireAt && (
+                      <p className="mt-1 text-xs text-gray-400">
+                        请在 {formatTransactionDate(paymentOrder.expireAt)} 前完成支付。
+                      </p>
+                    )}
+                  </div>
                 )}
                 <button
                   type="submit"
@@ -840,6 +1055,78 @@ export default function ProfilePage() {
                     </p>
                   </div>
                 </div>
+
+                {resumeError && (
+                  <div className="mt-5 rounded-xl border border-red-100 bg-red-50 p-4">
+                    <p className="text-sm text-red-600">{resumeError}</p>
+                  </div>
+                )}
+
+                {pendingOrdersLoading ? (
+                  <div className="mt-5 space-y-3">
+                    {[1, 2].map((item) => (
+                      <div key={item} className="h-32 animate-pulse rounded-xl bg-amber-50" />
+                    ))}
+                  </div>
+                ) : pendingOrdersError ? (
+                  <div className="mt-5 rounded-xl border border-red-100 bg-red-50 p-4">
+                    <p className="text-sm text-red-600">待支付订单加载失败：{pendingOrdersError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void loadPendingOrders()}
+                      className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      重新加载
+                    </button>
+                  </div>
+                ) : pendingOrders?.items.length ? (
+                  <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-amber-950">待支付充值订单</p>
+                        <p className="mt-1 text-xs text-amber-800">支付成功后会生成实际到账流水，不会在这里重复显示为余额变化。</p>
+                      </div>
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+                        {pendingOrders.total} 笔待支付
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {pendingOrders.items.map((order) => (
+                        <article key={order.orderNo} className="rounded-xl border border-amber-100 bg-white p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-800">
+                                {formatPaymentOrderAmount(order.amount)} · 预计到账 {formatBillAmount(Number(order.photonAmount))}
+                              </p>
+                              <p className="mt-1 text-sm text-gray-500">
+                                {paymentMethodLabel(order.paymentMethod)} · {order.channel.name}
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                              {paymentStatusLabel(order.status)}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-1 text-xs text-gray-400 sm:grid-cols-2">
+                            <p>创建时间：{formatTransactionDate(order.createdAt)}</p>
+                            <p>{order.expireAt ? `过期时间：${formatTransactionDate(order.expireAt)}` : "支付有效期以渠道为准"}</p>
+                            <p className="break-all sm:col-span-2">Lumina 订单号：{order.orderNo}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleResumePayment(order.orderNo)}
+                            disabled={resumingOrderNo !== null || !isPayablePaymentOrder(order)}
+                            className="mt-4 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {resumingOrderNo === order.orderNo ? "正在打开支付页面…" : "去支付"}
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                    {pendingOrders.total > pendingOrders.items.length && (
+                      <p className="mt-3 text-xs text-amber-700">当前展示最近 {pendingOrders.items.length} 笔订单。</p>
+                    )}
+                  </section>
+                ) : null}
 
                 <div className="mt-5 flex flex-wrap gap-2" aria-label="账单类型筛选">
                   {transactionFilters.map((filter) => (

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import axios from 'axios';
+import { PaymentMethod, PaymentScene } from '@prisma/client';
 import { EpayPaymentAdapter } from './epay.adapter';
 
 describe('EpayPaymentAdapter', () => {
@@ -14,8 +15,74 @@ describe('EpayPaymentAdapter', () => {
     expect(adapter.getMetadata()).toMatchObject({
       type: 'EPAY',
       methods: ['ALIPAY', 'WECHAT'],
-      scenes: ['WEB', 'QR'],
+      scenes: ['WEB', 'H5', 'QR'],
     });
+  });
+
+  const paymentContext = {
+    orderNo: 'LM202609190000001234',
+    notifyUrl: 'https://lumina.example.com/payment/notify',
+    returnUrl: 'https://lumina.example.com/payment/return',
+  };
+
+  const paymentRequest = (scene: PaymentScene) =>
+    ({
+      amount: { toFixed: () => '10.00' },
+      paymentMethod: PaymentMethod.ALIPAY,
+      scene,
+      subject: 'Test order',
+    }) as never;
+
+  it('uses a redirect URL for web and H5 flows even when Epay also returns a QR code', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        qrcode: 'weixin://wxpay/bizpayurl?pr=qr',
+        url: 'https://pay.example.com/cashier',
+        trade_no: 'T202609190001',
+      },
+    } as never);
+
+    await expect(
+      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.WEB), config),
+    ).resolves.toEqual({
+      action: { type: 'REDIRECT_URL', url: 'https://pay.example.com/cashier' },
+      providerTradeNo: 'T202609190001',
+    });
+    await expect(
+      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.H5), config),
+    ).resolves.toEqual({
+      action: { type: 'REDIRECT_URL', url: 'https://pay.example.com/cashier' },
+      providerTradeNo: 'T202609190001',
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('detects an Epay HTML form before treating raw text as a redirect URL', async () => {
+    const html = '<form action="https://pay.example.com/cashier" method="post"><input name="token" value="abc"></form>';
+    jest.spyOn(axios, 'post').mockResolvedValue({ data: html } as never);
+
+    await expect(
+      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.WEB), config),
+    ).resolves.toEqual({ action: { type: 'HTML_FORM', html } });
+    jest.restoreAllMocks();
+  });
+
+  it('keeps Epay QR behavior when the QR scene is requested', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValue({
+      data: {
+        qrcode: 'weixin://wxpay/bizpayurl?pr=qr',
+        url: 'https://pay.example.com/cashier',
+        trade_no: 'T202609190001',
+      },
+    } as never);
+
+    await expect(
+      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.QR), config),
+    ).resolves.toEqual({
+      action: { type: 'QR_CODE', content: 'weixin://wxpay/bizpayurl?pr=qr' },
+      providerTradeNo: 'T202609190001',
+    });
+    jest.restoreAllMocks();
   });
 
   it('verifies a V1 success notification', async () => {

@@ -1,13 +1,17 @@
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreatePaymentOrderDto {
   @IsString({ message: 'amount 必须是字符串' })
@@ -38,6 +42,33 @@ export class ListPaymentChannelsQueryDto {
   @IsOptional()
   @IsIn(['WEB', 'H5', 'QR', 'JSAPI', 'APP'], { message: 'scene 不合法' })
   scene?: 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
+}
+
+export class ListPaymentOrdersQueryDto {
+  @IsOptional()
+  @IsIn(['CREATED', 'PENDING'], { message: 'status 只能为 CREATED 或 PENDING' })
+  status?: 'CREATED' | 'PENDING';
+
+  @IsOptional()
+  @IsIn(['createdAt', 'expireAt'], { message: 'sortBy 只能为 createdAt 或 expireAt' })
+  sortBy?: 'createdAt' | 'expireAt' = 'createdAt';
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'], { message: 'sortOrder 只能为 asc 或 desc' })
+  sortOrder?: 'asc' | 'desc' = 'desc';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page 必须是整数' })
+  @Min(1, { message: 'page 必须大于 0' })
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'limit 必须是整数' })
+  @Min(1, { message: 'limit 必须大于 0' })
+  @Max(100, { message: 'limit 不能超过 100' })
+  limit?: number = 20;
 }
 
 export class CreatePaymentChannelDto {
