@@ -615,7 +615,7 @@ export class PaymentService {
     return {
       action: safeAction,
       actionGeneratedAt: new Date().toISOString(),
-    } as Prisma.InputJsonValue;
+    } as unknown as Prisma.InputJsonValue;
   }
 
   private sanitizePaymentAction(value: unknown): PaymentAction | undefined {
