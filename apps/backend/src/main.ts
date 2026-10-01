@@ -9,7 +9,10 @@ async function bootstrap() {
   // Only trust X-Forwarded-For when the deployment explicitly declares its
   // reverse proxy. This lets H5 payment channels receive the real client IP
   // without allowing direct backend callers to spoof it by default.
-  app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
 
   // 全局验证管道
   app.useGlobalPipes(
