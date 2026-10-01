@@ -209,16 +209,91 @@ function showQrPaymentAction(paymentWindow: Window, content: string): void {
   paymentDocument.close();
 
   const heading = paymentDocument.createElement("h1");
-  heading.textContent = "请使用对应 App 扫描或打开支付地址";
-  const link = paymentDocument.createElement("a");
-  link.href = content;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  link.textContent = content;
-  link.style.display = "block";
-  link.style.marginTop = "16px";
-  link.style.overflowWrap = "anywhere";
-  paymentDocument.body.replaceChildren(heading, link);
+  heading.textContent = "请使用对应 App 扫描支付码";
+  const code = paymentDocument.createElement("code");
+  // QR actions are legacy fallback only. Render their opaque content as text
+  // rather than making an untrusted custom URL executable in this same-origin
+  // helper page.
+  code.textContent = content;
+  code.style.display = "block";
+  code.style.marginTop = "16px";
+  code.style.overflowWrap = "anywhere";
+  paymentDocument.body.replaceChildren(heading, code);
+}
+
+type PaymentFormPayload = {
+  action: string;
+  method: "get" | "post";
+  fields: Array<{ name: string; value: string }>;
+};
+
+function safePaymentUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && url.hostname && !url.username && !url.password
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Provider HTML must never be written into the same-origin blank payment
+ * window. Parse it inertly, retain only an HTTPS GET/POST form and hidden
+ * fields, then rebuild it with DOM APIs below.
+ */
+function parsePaymentForm(html: string): PaymentFormPayload {
+  const parsedDocument = new DOMParser().parseFromString(html, "text/html");
+  const forms = Array.from(parsedDocument.querySelectorAll("form"));
+  if (forms.length !== 1) throw new Error("支付渠道返回的表单不合法");
+
+  const sourceForm = forms[0];
+  const action = safePaymentUrl(sourceForm.getAttribute("action") ?? "");
+  if (!action) throw new Error("支付渠道返回的表单地址不安全");
+
+  const method = (sourceForm.getAttribute("method") ?? "get").toLowerCase();
+  if (method !== "get" && method !== "post") {
+    throw new Error("支付渠道返回的表单方法不支持");
+  }
+
+  const fields = Array.from(sourceForm.querySelectorAll("input")).flatMap((input) => {
+    const type = (input.getAttribute("type") ?? "text").toLowerCase();
+    if (type !== "hidden") return [];
+    const name = input.getAttribute("name");
+    if (!name) {
+      throw new Error("支付渠道返回的表单字段不安全");
+    }
+    return [{ name, value: input.getAttribute("value") ?? "" }];
+  });
+  if (fields.length > 200) throw new Error("支付渠道返回的表单字段过多");
+
+  return { action, method, fields };
+}
+
+function submitPaymentForm(paymentWindow: Window, html: string): void {
+  const payload = parsePaymentForm(html);
+  const paymentDocument = paymentWindow.document;
+  paymentDocument.open();
+  paymentDocument.write("<!doctype html><html><head><title>Lumina 支付</title></head><body></body></html>");
+  paymentDocument.close();
+  if (!paymentDocument.body) throw new Error("无法打开支付窗口");
+
+  const form = paymentDocument.createElement("form");
+  form.action = payload.action;
+  form.method = payload.method;
+  form.target = "_self";
+  form.setAttribute("referrerpolicy", "no-referrer");
+  for (const field of payload.fields) {
+    const input = paymentDocument.createElement("input");
+    input.type = "hidden";
+    input.name = field.name;
+    input.value = field.value;
+    form.append(input);
+  }
+  paymentDocument.body.append(form);
+  // An untrusted field name such as `submit` must not shadow this call.
+  HTMLFormElement.prototype.submit.call(form);
 }
 
 function sendPaymentActionToWindow(
@@ -226,14 +301,14 @@ function sendPaymentActionToWindow(
   action: PaymentOrderDto["action"],
 ): void {
   if (action?.type === "REDIRECT_URL" && action.url) {
-    paymentWindow.location.href = action.url;
+    const url = safePaymentUrl(action.url);
+    if (!url) throw new Error("支付渠道返回的跳转地址不安全");
+    paymentWindow.location.assign(url);
     return;
   }
 
   if (action?.type === "HTML_FORM" && action.html) {
-    paymentWindow.document.open();
-    paymentWindow.document.write(action.html);
-    paymentWindow.document.close();
+    submitPaymentForm(paymentWindow, action.html);
     return;
   }
 

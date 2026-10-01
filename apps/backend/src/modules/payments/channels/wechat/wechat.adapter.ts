@@ -52,6 +52,9 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     if (Buffer.byteLength(config.apiV3Key, 'utf8') !== 32) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 APIv3 Key 必须是 32 字节');
     }
+    if (config.baseUrl && !this.isSecureEndpoint(config.baseUrl)) {
+      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 baseUrl 必须为有效的 HTTPS 地址');
+    }
     try {
       createSign('RSA-SHA256').update('lumina-config').sign(config.merchantPrivateKey);
     } catch (error) {
@@ -245,6 +248,22 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
   private fenToYuan(value: unknown): string | undefined {
     if (value === undefined || value === null || value === '') return undefined;
     return (Number(value) / 100).toFixed(2);
+  }
+
+  private isSecureEndpoint(value: string): boolean {
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === 'https:' &&
+        Boolean(url.hostname) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+      );
+    } catch {
+      return false;
+    }
   }
 
   private mask(value: string): string {

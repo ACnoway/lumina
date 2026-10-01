@@ -11,6 +11,12 @@ describe('EpayPaymentAdapter', () => {
     key: 'test-key',
   };
 
+  it('rejects an HTTP endpoint so the merchant key is never sent in cleartext', async () => {
+    await expect(adapter.validateConfig({ ...config, baseUrl: 'http://pay.example.com' })).rejects.toMatchObject({
+      code: 'INVALID_CHANNEL_CONFIG',
+    });
+  });
+
   it('declares user-selectable payment methods and scenes', () => {
     expect(adapter.getMetadata()).toMatchObject({
       type: 'EPAY',

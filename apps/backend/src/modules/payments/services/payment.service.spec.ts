@@ -146,6 +146,28 @@ describe('PaymentService', () => {
     expect(walletService.recharge).not.toHaveBeenCalled();
   });
 
+  it('rejects an unsafe provider redirect URL before exposing it to the browser', async () => {
+    const { service, prisma, adapter } = createService();
+    const order = { ...makeOrder(PaymentOrderStatus.CREATED), scene: 'WEB' as const };
+    prisma.paymentOrder.findFirst.mockResolvedValue(null);
+    prisma.paymentOrder.create.mockResolvedValue(order);
+    adapter.createPayment.mockResolvedValue({
+      action: { type: 'REDIRECT_URL', url: 'javascript:alert(document.domain)' },
+    });
+
+    await expect(
+      service.createPayment(
+        { id: order.userId } as never,
+        { amount: '10.00', paymentMethod: 'ALIPAY' },
+        'payment-idempotency-unsafe-redirect',
+      ),
+    ).rejects.toThrow('当前支付方式未返回可用的跳转支付动作');
+
+    expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: PaymentOrderStatus.FAILED }),
+    }));
+  });
+
   it('requires an exact amount and currency before crediting a successful payment', async () => {
     const { service, prisma, walletService, adapter } = createService();
     const order = makeOrder();
@@ -509,5 +531,48 @@ describe('PaymentService', () => {
     })).resolves.toEqual({ body: 'fail' });
     expect(walletService.recharge).not.toHaveBeenCalled();
     expect(prisma.paymentCallbackEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('processes SUCCESS after an earlier PENDING callback with the same provider trade number', async () => {
+    const { service, prisma, walletService, adapter } = createService();
+    const order = makeOrder();
+    adapter.parseNotification
+      .mockResolvedValueOnce({
+        eventId: 'T-state-transition',
+        orderNo: order.orderNo,
+        providerTradeNo: 'T-state-transition',
+        status: 'PENDING',
+        amount: '10.00',
+        currency: 'CNY',
+      })
+      .mockResolvedValueOnce({
+        eventId: 'T-state-transition',
+        orderNo: order.orderNo,
+        providerTradeNo: 'T-state-transition',
+        status: 'SUCCESS',
+        amount: '10.00',
+        currency: 'CNY',
+      });
+    prisma.paymentCallbackEvent.findUnique.mockResolvedValue(null);
+    prisma.paymentOrder.findUnique.mockResolvedValue(order);
+    prisma.paymentOrder.updateMany.mockResolvedValue({ count: 1 });
+    walletService.recharge.mockResolvedValue({});
+    const request = {
+      headers: {},
+      rawBody: Buffer.from('state-transition'),
+      body: {},
+      method: 'POST' as const,
+    };
+
+    await expect(service.processNotification(order.channelId, request)).resolves.toEqual({ body: 'success' });
+    await expect(service.processNotification(order.channelId, request)).resolves.toEqual({ body: 'success' });
+
+    expect(prisma.paymentCallbackEvent.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      data: expect.objectContaining({ eventKey: 'T-state-transition:PENDING' }),
+    }));
+    expect(prisma.paymentCallbackEvent.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: expect.objectContaining({ eventKey: 'T-state-transition:SUCCESS' }),
+    }));
+    expect(walletService.recharge).toHaveBeenCalledTimes(1);
   });
 });

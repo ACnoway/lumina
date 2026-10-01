@@ -41,10 +41,10 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   }
 
   async validateConfig(config: EpayConfig): Promise<void> {
-    if (!config || typeof config.baseUrl !== 'string' || !/^https?:\/\//i.test(config.baseUrl)) {
+    if (!config || !this.isSecureEndpoint(config.baseUrl)) {
       throw new PaymentChannelError(
         PaymentErrorCode.INVALID_CHANNEL_CONFIG,
-        '易支付 baseUrl 不合法',
+        '易支付 baseUrl 必须为有效的 HTTPS 地址',
       );
     }
     if (!config.pid?.trim() || !config.key?.trim()) {
@@ -290,6 +290,23 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
 
   private optionalString(value: unknown): string | undefined {
     return value === undefined || value === null || value === '' ? undefined : String(value);
+  }
+
+  private isSecureEndpoint(value: unknown): value is string {
+    if (typeof value !== 'string') return false;
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === 'https:' &&
+        Boolean(url.hostname) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+      );
+    } catch {
+      return false;
+    }
   }
 
   private mask(value: string): string {

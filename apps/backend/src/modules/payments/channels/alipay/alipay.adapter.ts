@@ -43,6 +43,9 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     if (!config?.appId?.trim() || !config.privateKey?.trim() || !config.alipayPublicKey?.trim()) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 appId、私钥和支付宝公钥不能为空');
     }
+    if (config.gateway && !this.isSecureEndpoint(config.gateway)) {
+      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 gateway 必须为有效的 HTTPS 地址');
+    }
     try {
       createSign('RSA-SHA256').update('lumina-config').sign(config.privateKey);
       createVerify('RSA-SHA256').update('lumina-config').verify(config.alipayPublicKey, Buffer.from('invalid'));
@@ -199,6 +202,22 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
 
   private gateway(config: AlipayConfig): string {
     return config.gateway || (config.sandbox ? 'https://openapi-sandbox.dl.alipaydev.com/gateway.do' : 'https://openapi.alipay.com/gateway.do');
+  }
+
+  private isSecureEndpoint(value: string): boolean {
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === 'https:' &&
+        Boolean(url.hostname) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+      );
+    } catch {
+      return false;
+    }
   }
 
   private timestamp(): string {

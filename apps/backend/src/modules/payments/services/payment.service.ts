@@ -44,6 +44,8 @@ export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
   /** Redirect URLs and generated forms are provider artifacts with short lives. */
   private readonly ACTION_MAX_AGE_MS = 5 * 60 * 1000;
+  /** Keep a malformed provider response from becoming an unbounded DB/UI payload. */
+  private readonly MAX_PAYMENT_FORM_LENGTH = 64 * 1024;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -353,8 +355,12 @@ export class PaymentService {
       return adapter.buildNotificationResponse(false);
     }
     const payloadHash = createHash('sha256').update(request.rawBody).digest('hex');
+    // A provider can send PENDING and SUCCESS notifications for the same
+    // provider trade number. Deduplicate repeats of the *same state*, but do
+    // not let an earlier PENDING acknowledgement suppress a later success.
+    const eventKey = `${notification.eventId}:${notification.status}`;
     const existingEvent = await this.prisma.paymentCallbackEvent.findUnique({
-      where: { channelId_eventKey: { channelId, eventKey: notification.eventId } },
+      where: { channelId_eventKey: { channelId, eventKey } },
     });
     if (existingEvent?.processed) return adapter.buildNotificationResponse(true);
     if (!existingEvent) {
@@ -362,7 +368,7 @@ export class PaymentService {
         data: {
           channelId,
           orderNo: notification.orderNo,
-          eventKey: notification.eventId,
+          eventKey,
           signatureValid: notification.signatureValid !== false,
           payloadHash,
         },
@@ -374,19 +380,19 @@ export class PaymentService {
       include: { channel: true },
     });
     if (!order || order.channelId !== channelId) {
-      await this.markEventFailed(channelId, notification.eventId, '本地订单不存在或渠道不匹配');
+      await this.markEventFailed(channelId, eventKey, '本地订单不存在或渠道不匹配');
       return adapter.buildNotificationResponse(false);
     }
     try {
       await this.applyPaymentResult(order, notification);
       await this.prisma.paymentCallbackEvent.update({
-        where: { channelId_eventKey: { channelId, eventKey: notification.eventId } },
+        where: { channelId_eventKey: { channelId, eventKey } },
         data: { processed: true, processedAt: new Date(), errorMessage: null },
       });
       this.logger.log(`payment.notify.success orderNo=${order.orderNo} channelId=${channelId}`);
       return adapter.buildNotificationResponse(true);
     } catch (error) {
-      await this.markEventFailed(channelId, notification.eventId, error instanceof Error ? error.message : '支付回调处理失败');
+      await this.markEventFailed(channelId, eventKey, error instanceof Error ? error.message : '支付回调处理失败');
       return adapter.buildNotificationResponse(false);
     }
   }
@@ -622,12 +628,12 @@ export class PaymentService {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const action = value as Record<string, unknown>;
     switch (action.type) {
-      case 'REDIRECT_URL':
-        return typeof action.url === 'string' && action.url.trim()
-          ? { type: 'REDIRECT_URL', url: action.url }
-          : undefined;
+      case 'REDIRECT_URL': {
+        const url = this.safePaymentUrl(action.url);
+        return url ? { type: 'REDIRECT_URL', url } : undefined;
+      }
       case 'HTML_FORM':
-        return typeof action.html === 'string' && action.html.trim()
+        return typeof action.html === 'string' && action.html.trim() && action.html.length <= this.MAX_PAYMENT_FORM_LENGTH
           ? { type: 'HTML_FORM', html: action.html }
           : undefined;
       case 'QR_CODE':
@@ -658,10 +664,31 @@ export class PaymentService {
   }
 
   private isRedirectAction(action: PaymentAction | undefined): boolean {
+    const safeAction = this.sanitizePaymentAction(action);
     return Boolean(
-      (action?.type === 'REDIRECT_URL' && typeof action.url === 'string' && action.url.trim()) ||
-      (action?.type === 'HTML_FORM' && typeof action.html === 'string' && action.html.trim()),
+      safeAction?.type === 'REDIRECT_URL' || safeAction?.type === 'HTML_FORM',
     );
+  }
+
+  /** Payment providers may only send absolute HTTPS browser-navigation URLs. */
+  private safePaymentUrl(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const url = value.trim();
+    if (!url) return undefined;
+    try {
+      const parsed = new URL(url);
+      if (
+        parsed.protocol !== 'https:' ||
+        !parsed.hostname ||
+        parsed.username ||
+        parsed.password
+      ) {
+        return undefined;
+      }
+      return url;
+    } catch {
+      return undefined;
+    }
   }
 
   private assertRedirectAction(action: PaymentAction | undefined): void {
