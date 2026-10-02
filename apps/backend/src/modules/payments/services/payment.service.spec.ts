@@ -127,7 +127,14 @@ describe('PaymentService', () => {
     const order = { ...makeOrder(PaymentOrderStatus.CREATED), scene: 'WEB' as const };
     prisma.paymentOrder.findFirst.mockResolvedValue(null);
     prisma.paymentOrder.create.mockResolvedValue(order);
-    prisma.paymentOrder.findUnique.mockResolvedValue(order);
+    prisma.paymentOrder.findUnique.mockResolvedValue({
+      ...order,
+      status: PaymentOrderStatus.PENDING,
+      metadata: {
+        action: { type: 'QR_CODE', content: 'weixin://qr-code' },
+        actionGeneratedAt: new Date().toISOString(),
+      },
+    });
     adapter.createPayment.mockResolvedValue({
       action: { type: 'QR_CODE', content: 'weixin://qr-code' },
       legacyScene: 'QR',
