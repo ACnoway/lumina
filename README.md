@@ -75,7 +75,7 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 个人中心的充值页面只需要选择支付方式并填写人民币金额，不再让普通用户选择支付场景或具体支付渠道。创建前会确认当前光子余额、本次人民币金额、支付方式、预计到账光子和充值后的预计余额；最低充值金额为 0.1 元，页面会展示当前 `1 人民币 = N 光子` 的充值汇率。
 
-充值订单只选择可跳转的支付场景：支付宝优先使用 `WEB`，微信优先使用 `H5`；当首选场景不可用时，可使用同一支付方式支持的其他非二维码跳转场景，但不会在未确认的情况下静默回退到 `QR`。创建订单时，前端会在用户点击事件内先打开空白新标签页，再请求创建订单；`REDIRECT_URL` 在新标签页跳转，`HTML_FORM` 在新标签页提交。创建失败会关闭该标签页，个人中心页面始终保留。
+充值订单只选择可跳转的支付场景：支付宝优先使用 `WEB`，微信优先使用 `H5`；当首选场景不可用时，可使用同一支付方式支持的其他非二维码跳转场景，但不会在未确认的情况下静默回退到 `QR`。创建订单时，前端会在用户点击事件内先打开空白新标签页，再请求创建订单；`REDIRECT_URL` 只会跳转到无嵌入凭据的绝对 HTTPS 地址，`HTML_FORM` 会被惰性解析为一个 HTTPS `GET`/`POST` 表单的隐藏字段后，由 DOM 重建提交，不会直接执行渠道返回的原始 HTML。创建失败会关闭该标签页，个人中心页面始终保留。
 
 充值汇率可通过登录用户接口 `GET /payments/recharge-settings` 读取；管理员仍通过
 `GET/PATCH /admin/settings/currency` 配置汇率。
@@ -85,12 +85,11 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 个人中心“账单”仍通过 `GET /wallet/transactions` 获取实际余额流水，并按需调用
 `GET /wallet/transactions/:id` 查看详情。聊天消费详情包含输入/输出 token 和模型，生图消费详情包含模型与图片张数；充值详情包含实付人民币、订单创建时汇率、实际到账光子、Lumina 订单号和支付平台订单号。历史流水会通过已有支付订单和生图任务数据兼容补齐详情。
 
-支付订单创建只会进入 `CREATED/PENDING`，余额仅在渠道验签成功的异步通知或服务端明确确认已付款的查单后入账。成功后统一生成一条 `RECHARGE` 流水并更新余额；重复通知仍由既有幂等键保护。`return_url`、前端新标签页、轮询和“去支付”都不能直接改变余额，失败、关闭或过期订单也不能恢复入账。
+支付订单创建只会进入 `CREATED/PENDING`，余额仅在渠道验签成功的异步通知或服务端明确确认已付款的查单后入账。成功后统一生成一条 `RECHARGE` 流水并更新余额；通知去重键包含状态，因此同一平台单号从 `PENDING` 到 `SUCCESS` 时不会漏掉成功入账，而相同状态的重复通知仍由既有幂等键保护。`return_url`、前端新标签页、轮询和“去支付”都不能直接改变余额，失败、关闭或过期订单也不能恢复入账。
 
 生产环境必须显式设置 `PAYMENT_NOTIFY_BASE_URL`，并确保最终的
 `/payments/notify/:channelId` 能通过公网入口到达后端；支付渠道配置使用
-`PAYMENT_CONFIG_ENCRYPTION_KEY` 加密保存，密钥变更前必须完成配置迁移。
-Docker 生产编排会设置 `TRUST_PROXY=true`，使微信 H5 下单可取得 Nginx 传递的真实客户端 IP；仅当后端只经受信任的反向代理暴露时才应启用该配置。
+`PAYMENT_CONFIG_ENCRYPTION_KEY` 加密保存，密钥变更前必须完成配置迁移。易支付 `baseUrl`、支付宝 `gateway` 与微信 `baseUrl` 必须是无嵌入凭据、查询串和片段的 HTTPS endpoint；易支付查单携带商户 key，禁止配置 HTTP 地址。
 Docker 生产编排会设置 `TRUST_PROXY=true`，使微信 H5 下单可取得 Nginx 传递的真实客户端 IP；仅当后端只经受信任的反向代理暴露时才应启用该配置。
 
 ### 方式二：本地开发
