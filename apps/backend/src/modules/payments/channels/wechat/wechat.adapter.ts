@@ -5,6 +5,7 @@ import { PaymentChannelType, PaymentMethod, PaymentScene } from '@prisma/client'
 import {
   PaymentChannelAdapter,
   PaymentChannelMetadata,
+  PaymentCloseRequest,
   PaymentContext,
   PaymentCreateRequest,
   PaymentCreateResult,
@@ -22,8 +23,10 @@ export interface WechatPayConfig {
   merchantSerialNo: string;
   merchantPrivateKey: string;
   apiV3Key: string;
-  wechatPayPublicKey?: string;
+  wechatPayPublicKey: string;
   wechatPayPublicKeyId?: string;
+  /** The official WeChat product used by this channel instance. */
+  product?: 'JSAPI' | 'H5' | 'NATIVE' | 'APP';
   baseUrl?: string;
   timeout?: number;
 }
@@ -46,8 +49,11 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     if (!config?.appId?.trim() || !config.mchId?.trim() || !config.merchantSerialNo?.trim()) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 appId、mchId 和商户证书序列号不能为空');
     }
-    if (!config.merchantPrivateKey?.trim() || !config.apiV3Key?.trim()) {
+    if (!config.merchantPrivateKey?.trim() || !config.apiV3Key?.trim() || !config.wechatPayPublicKey?.trim()) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信商户私钥和 APIv3 Key 不能为空');
+    }
+    if (config.product && !['JSAPI', 'H5', 'NATIVE', 'APP'].includes(config.product)) {
+      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 product 必须为 JSAPI、H5、NATIVE 或 APP');
     }
     if (Buffer.byteLength(config.apiV3Key, 'utf8') !== 32) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 APIv3 Key 必须是 32 字节');
@@ -68,6 +74,7 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
       mchId: this.mask(config.mchId),
       merchantSerialNo: this.mask(config.merchantSerialNo),
       baseUrl: config.baseUrl || 'https://api.mch.weixin.qq.com',
+      product: config.product ?? 'H5',
       merchantPrivateKeyConfigured: Boolean(config.merchantPrivateKey),
       apiV3KeyConfigured: Boolean(config.apiV3Key),
       wechatPayPublicKeyConfigured: Boolean(config.wechatPayPublicKey),
@@ -80,6 +87,7 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     config: WechatPayConfig,
   ): Promise<PaymentCreateResult> {
     await this.validateConfig(config);
+    const product = config.product ?? 'H5';
     const amount = { total: Number(request.amount.times(100).toFixed(0)), currency: 'CNY' };
     const common = {
       appid: config.appId,
@@ -89,7 +97,7 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
       notify_url: context.notifyUrl,
       amount,
     };
-    if (request.scene === PaymentScene.JSAPI) {
+    if (product === 'JSAPI') {
       if (!context.payerOpenId) {
         throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 JSAPI 支付缺少用户 openid');
       }
@@ -108,9 +116,10 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
           type: 'JSAPI',
           params: { appId: config.appId, timeStamp: timestamp, nonceStr: nonce, package: packageValue, signType: 'RSA', paySign },
         },
+          legacyScene: PaymentScene.JSAPI,
       };
     }
-    if (request.scene === PaymentScene.H5) {
+    if (product === 'H5') {
       if (!context.clientIp) throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '微信 H5 支付缺少客户端 IP');
       const response = await this.request('POST', '/v3/pay/transactions/h5', {
         ...common,
@@ -118,12 +127,28 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
       }, config);
       const url = this.stringValue(response.h5_url);
       if (!url) throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '微信 H5 未返回跳转地址');
-      return { action: { type: 'REDIRECT_URL', url } };
+      return { action: { type: 'REDIRECT_URL', url }, legacyScene: PaymentScene.H5 };
+    }
+    if (product === 'APP') {
+      const response = await this.request('POST', '/v3/pay/transactions/app', common, config);
+      const prepayId = this.stringValue(response.prepay_id);
+      if (!prepayId) throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '微信 APP 未返回 prepay_id');
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = randomBytes(16).toString('hex');
+      const packageValue = 'Sign=WXPay';
+      const paySign = this.sign(`${config.appId}\n${timestamp}\n${nonce}\n${prepayId}\n`, config.merchantPrivateKey);
+      return {
+        action: {
+          type: 'APP',
+          params: { appId: config.appId, partnerId: config.mchId, prepayId, package: packageValue, nonceStr: nonce, timeStamp: timestamp, sign: paySign },
+        },
+        legacyScene: PaymentScene.APP,
+      };
     }
     const response = await this.request('POST', '/v3/pay/transactions/native', common, config);
     const codeUrl = this.stringValue(response.code_url);
     if (!codeUrl) throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '微信 Native 未返回二维码地址');
-    return { action: { type: 'QR_CODE', content: codeUrl } };
+    return { action: { type: 'QR_CODE', content: codeUrl }, legacyScene: PaymentScene.QR };
   }
 
   async parseNotification(
@@ -163,6 +188,7 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
   }
 
   async queryPayment(request: PaymentQueryRequest, config: WechatPayConfig): Promise<PaymentQueryResult> {
+    await this.validateConfig(config);
     const response = await this.request('GET', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(request.orderNo)}?mchid=${encodeURIComponent(config.mchId)}`, undefined, config);
     const tradeState = String(response.trade_state ?? '').toUpperCase();
     const amount = response.amount && typeof response.amount === 'object' ? this.optionalString((response.amount as { payer_total?: unknown }).payer_total) : undefined;
@@ -173,6 +199,16 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
       currency: 'CNY',
       paidAt: tradeState === 'SUCCESS' ? new Date(String(response.success_time ?? Date.now())) : undefined,
     };
+  }
+
+  async closePayment(request: PaymentCloseRequest, config: WechatPayConfig): Promise<void> {
+    await this.validateConfig(config);
+    await this.request(
+      'POST',
+      `/v3/pay/transactions/out-trade-no/${encodeURIComponent(request.orderNo)}/close`,
+      { mchid: config.mchId },
+      config,
+    );
   }
 
   private async request(method: 'GET' | 'POST', path: string, body: Record<string, unknown> | undefined, config: WechatPayConfig): Promise<Record<string, unknown>> {
@@ -209,11 +245,12 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
   }
 
   private verifyResponse(response: AxiosResponse<Record<string, unknown>>, config: WechatPayConfig): void {
-    if (!config.wechatPayPublicKey) return;
     const timestamp = this.header(response.headers as Record<string, unknown>, 'wechatpay-timestamp');
     const nonce = this.header(response.headers as Record<string, unknown>, 'wechatpay-nonce');
     const signature = this.header(response.headers as Record<string, unknown>, 'wechatpay-signature');
-    if (!timestamp || !nonce || !signature) return;
+    if (!timestamp || !nonce || !signature || !config.wechatPayPublicKey) {
+      throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '微信响应签名材料不完整');
+    }
     const body = JSON.stringify(response.data);
     const valid = createVerify('RSA-SHA256').update(`${timestamp}\n${nonce}\n${body}\n`, 'utf8').verify(config.wechatPayPublicKey, signature, 'base64');
     if (!valid) throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '微信响应签名无效');

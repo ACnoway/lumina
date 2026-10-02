@@ -29,12 +29,12 @@ function createService() {
 }
 
 describe('PaymentChannelService', () => {
-  it('selects the first active channel matching the payment method and requested scene', async () => {
+  it('selects the first active channel matching the payment method', async () => {
     const { service, prisma, adapter, crypto } = createService();
     const first = { id: 'channel-1', type: 'ALIPAY', isActive: true } as PaymentChannel;
     prisma.paymentChannel.findMany.mockResolvedValue([first]);
 
-    await expect(service.getUsableChannelForMethod('ALIPAY', 'WEB')).resolves.toEqual({
+    await expect(service.getUsableChannelForMethod('ALIPAY')).resolves.toEqual({
       channel: first,
       adapter,
       config: { merchant: 'test' },
@@ -50,7 +50,7 @@ describe('PaymentChannelService', () => {
     const { service, prisma } = createService();
     prisma.paymentChannel.findMany.mockResolvedValue([]);
 
-    await expect(service.getUsableChannelForMethod('WECHAT', 'QR')).rejects.toMatchObject({
+    await expect(service.getUsableChannelForMethod('WECHAT')).rejects.toMatchObject({
       code: PaymentErrorCode.CHANNEL_NOT_FOUND,
     });
   });

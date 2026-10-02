@@ -75,7 +75,7 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 个人中心的充值页面只需要选择支付方式并填写人民币金额，不再让普通用户选择支付场景或具体支付渠道。创建前会确认当前光子余额、本次人民币金额、支付方式、预计到账光子和充值后的预计余额；最低充值金额为 0.1 元，页面会展示当前 `1 人民币 = N 光子` 的充值汇率。
 
-充值订单只选择可跳转的支付场景：支付宝优先使用 `WEB`，微信优先使用 `H5`；当首选场景不可用时，可使用同一支付方式支持的其他非二维码跳转场景，但不会在未确认的情况下静默回退到 `QR`。创建订单时，前端会在用户点击事件内先打开空白新标签页，再请求创建订单；`REDIRECT_URL` 只会跳转到无嵌入凭据的绝对 HTTPS 地址，`HTML_FORM` 会被惰性解析为一个 HTTPS `GET`/`POST` 表单的隐藏字段后，由 DOM 重建提交，不会直接执行渠道返回的原始 HTML。创建失败会关闭该标签页，个人中心页面始终保留。
+充值订单只提交人民币金额和支付方式，不提交跨渠道通用的支付场景；支付宝 PAGE/WAP/PRECREATE、微信 H5/JSAPI/Native/APP，以及易支付 `mapi.php`/`submit.php` 由各自渠道实例配置决定。Adapter 返回统一的 `REDIRECT_URL`、`HTML_FORM` 或 `QR_CODE` 等支付动作；前端会在用户点击事件内先打开空白新标签页，再请求创建订单。`REDIRECT_URL` 只会跳转到无嵌入凭据的绝对 HTTPS 地址，`HTML_FORM` 会被惰性解析为一个 HTTPS `GET`/`POST` 表单的隐藏字段后，由 DOM 重建提交，不会直接执行渠道返回的原始 HTML。创建失败会关闭该标签页，个人中心页面始终保留。
 
 充值汇率可通过登录用户接口 `GET /payments/recharge-settings` 读取；管理员仍通过
 `GET/PATCH /admin/settings/currency` 配置汇率。

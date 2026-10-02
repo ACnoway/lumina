@@ -5,6 +5,7 @@ import { PaymentChannelType, PaymentMethod, PaymentScene } from '@prisma/client'
 import {
   PaymentChannelAdapter,
   PaymentChannelMetadata,
+  PaymentCloseRequest,
   PaymentContext,
   PaymentCreateRequest,
   PaymentCreateResult,
@@ -20,6 +21,8 @@ export interface AlipayConfig {
   appId: string;
   privateKey: string;
   alipayPublicKey: string;
+  /** The official Alipay product used by this channel instance. */
+  product?: 'PAGE' | 'WAP' | 'PRECREATE';
   gateway?: string;
   sandbox?: boolean;
   timeout?: number;
@@ -43,6 +46,9 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     if (!config?.appId?.trim() || !config.privateKey?.trim() || !config.alipayPublicKey?.trim()) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 appId、私钥和支付宝公钥不能为空');
     }
+    if (config.product && !['PAGE', 'WAP', 'PRECREATE'].includes(config.product)) {
+      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 product 必须为 PAGE、WAP 或 PRECREATE');
+    }
     if (config.gateway && !this.isSecureEndpoint(config.gateway)) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 gateway 必须为有效的 HTTPS 地址');
     }
@@ -60,6 +66,7 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     return {
       appId: this.mask(config.appId),
       gateway: config.gateway || (config.sandbox ? 'https://openapi-sandbox.dl.alipaydev.com/gateway.do' : 'https://openapi.alipay.com/gateway.do'),
+      product: config.product ?? 'PAGE',
       sandbox: Boolean(config.sandbox),
       privateKeyConfigured: Boolean(config.privateKey),
       alipayPublicKeyConfigured: Boolean(config.alipayPublicKey),
@@ -72,8 +79,8 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     config: AlipayConfig,
   ): Promise<PaymentCreateResult> {
     await this.validateConfig(config);
-    const method = request.scene === PaymentScene.H5 ? 'alipay.trade.wap.pay' : 'alipay.trade.page.pay';
-    if (request.scene === PaymentScene.QR) {
+    const product = config.product ?? 'PAGE';
+    if (product === 'PRECREATE') {
       const data = await this.callGateway('alipay.trade.precreate', {
         out_trade_no: context.orderNo,
         total_amount: request.amount.toFixed(2),
@@ -82,9 +89,10 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
       }, config);
       const qr = this.readResponse(data, 'qr_code');
       if (!qr) throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '支付宝未返回二维码');
-      return { action: { type: 'QR_CODE', content: qr } };
+      return { action: { type: 'QR_CODE', content: qr }, legacyScene: PaymentScene.QR };
     }
 
+    const method = product === 'WAP' ? 'alipay.trade.wap.pay' : 'alipay.trade.page.pay';
     const fields = this.signedFields({
       app_id: config.appId,
       method,
@@ -97,7 +105,7 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
       return_url: context.returnUrl,
       biz_content: JSON.stringify({
         out_trade_no: context.orderNo,
-        product_code: request.scene === PaymentScene.H5 ? 'QUICK_WAP_WAY' : 'FAST_INSTANT_TRADE_PAY',
+        product_code: product === 'WAP' ? 'QUICK_WAP_WAY' : 'FAST_INSTANT_TRADE_PAY',
         total_amount: request.amount.toFixed(2),
         subject: request.subject,
       }),
@@ -105,7 +113,10 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     const html = `<form id="alipay-submit" name="alipay-submit" action="${this.escape(this.gateway(config))}" method="post">${Object.entries(fields)
       .map(([key, value]) => `<input type="hidden" name="${this.escape(key)}" value="${this.escape(value)}">`)
       .join('')}</form><script>document.getElementById('alipay-submit').submit();</script>`;
-    return { action: { type: 'HTML_FORM', html } };
+    return {
+      action: { type: 'HTML_FORM', html },
+      legacyScene: product === 'WAP' ? PaymentScene.H5 : PaymentScene.WEB,
+    };
   }
 
   async parseNotification(
@@ -137,6 +148,7 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
   }
 
   async queryPayment(request: PaymentQueryRequest, config: AlipayConfig): Promise<PaymentQueryResult> {
+    await this.validateConfig(config);
     const data = await this.callGateway('alipay.trade.query', { out_trade_no: request.orderNo }, config);
     const trade = this.readResponseObject(data);
     const status = String(trade.trade_status ?? '').toUpperCase();
@@ -147,6 +159,14 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
       currency: 'CNY',
       paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? new Date() : undefined,
     };
+  }
+
+  async closePayment(request: PaymentCloseRequest, config: AlipayConfig): Promise<void> {
+    await this.validateConfig(config);
+    await this.callGateway('alipay.trade.close', {
+      out_trade_no: request.orderNo,
+      ...(request.providerTradeNo ? { trade_no: request.providerTradeNo } : {}),
+    }, config);
   }
 
   private async callGateway(method: string, bizContent: Record<string, string>, config: AlipayConfig): Promise<Record<string, unknown>> {
@@ -166,8 +186,25 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
         timeout: config.timeout ?? 15000,
       });
       const value = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-      return this.readResponseObject(value);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '支付宝响应格式不合法');
+      }
+      const root = value as Record<string, unknown>;
+      const responseObject = this.readResponseObject(root);
+      const responseSignature = this.optionalString(root.sign);
+      if (!responseSignature || !this.verifyResponse(responseObject, responseSignature, config.alipayPublicKey)) {
+        throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '支付宝响应签名无效');
+      }
+      const code = this.optionalString(responseObject.code);
+      if (code && code !== '10000') {
+        throw new PaymentChannelError(
+          PaymentErrorCode.CHANNEL_REQUEST_FAILED,
+          this.optionalString(responseObject.sub_msg) ?? this.optionalString(responseObject.msg) ?? '支付宝请求被渠道拒绝',
+        );
+      }
+      return responseObject;
     } catch (error) {
+      if (error instanceof PaymentChannelError) throw error;
       throw new PaymentChannelError(
         axios.isAxiosError(error) && error.code === 'ECONNABORTED' ? PaymentErrorCode.CHANNEL_REQUEST_TIMEOUT : PaymentErrorCode.CHANNEL_REQUEST_FAILED,
         '支付宝请求失败',
@@ -189,6 +226,12 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
       .sort()
       .map((key) => `${key}=${String(payload[key])}`)
       .join('&');
+  }
+
+  private verifyResponse(response: Record<string, unknown>, signature: string, publicKey: string): boolean {
+    return createVerify('RSA-SHA256')
+      .update(JSON.stringify(response), 'utf8')
+      .verify(publicKey, signature, 'base64');
   }
 
   private readResponse(value: Record<string, unknown>, key: string): string | undefined {

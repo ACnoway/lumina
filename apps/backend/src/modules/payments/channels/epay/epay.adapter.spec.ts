@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import axios from 'axios';
-import { PaymentMethod, PaymentScene } from '@prisma/client';
+import { PaymentMethod } from '@prisma/client';
 import { EpayPaymentAdapter } from './epay.adapter';
 
 describe('EpayPaymentAdapter', () => {
@@ -17,7 +17,7 @@ describe('EpayPaymentAdapter', () => {
     });
   });
 
-  it('declares user-selectable payment methods and scenes', () => {
+  it('declares legacy action capabilities without making scenes part of the request', () => {
     expect(adapter.getMetadata()).toMatchObject({
       type: 'EPAY',
       methods: ['ALIPAY', 'WECHAT'],
@@ -31,34 +31,29 @@ describe('EpayPaymentAdapter', () => {
     returnUrl: 'https://lumina.example.com/payment/return',
   };
 
-  const paymentRequest = (scene: PaymentScene) =>
+  const paymentRequest = () =>
     ({
       amount: { toFixed: () => '10.00' },
       paymentMethod: PaymentMethod.ALIPAY,
-      scene,
       subject: 'Test order',
     }) as never;
 
-  it('uses a redirect URL for web and H5 flows even when Epay also returns a QR code', async () => {
+  it('treats payurl as a redirect action even when Epay also returns a QR code', async () => {
     jest.spyOn(axios, 'post').mockResolvedValue({
       data: {
         qrcode: 'weixin://wxpay/bizpayurl?pr=qr',
-        url: 'https://pay.example.com/cashier',
+        payurl: 'https://pay.example.com/cashier',
         trade_no: 'T202609190001',
+        code: 1,
       },
     } as never);
 
     await expect(
-      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.WEB), config),
+      adapter.createPayment(paymentContext, paymentRequest(), config),
     ).resolves.toEqual({
       action: { type: 'REDIRECT_URL', url: 'https://pay.example.com/cashier' },
       providerTradeNo: 'T202609190001',
-    });
-    await expect(
-      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.H5), config),
-    ).resolves.toEqual({
-      action: { type: 'REDIRECT_URL', url: 'https://pay.example.com/cashier' },
-      providerTradeNo: 'T202609190001',
+      legacyScene: 'WEB',
     });
     jest.restoreAllMocks();
   });
@@ -68,25 +63,26 @@ describe('EpayPaymentAdapter', () => {
     jest.spyOn(axios, 'post').mockResolvedValue({ data: html } as never);
 
     await expect(
-      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.WEB), config),
-    ).resolves.toEqual({ action: { type: 'HTML_FORM', html } });
+      adapter.createPayment(paymentContext, paymentRequest(), config),
+    ).resolves.toEqual({ action: { type: 'HTML_FORM', html }, legacyScene: 'WEB' });
     jest.restoreAllMocks();
   });
 
-  it('keeps Epay QR behavior when the QR scene is requested', async () => {
+  it('returns a QR action when the provider only returns QR content', async () => {
     jest.spyOn(axios, 'post').mockResolvedValue({
       data: {
         qrcode: 'weixin://wxpay/bizpayurl?pr=qr',
-        url: 'https://pay.example.com/cashier',
         trade_no: 'T202609190001',
+        code: 1,
       },
     } as never);
 
     await expect(
-      adapter.createPayment(paymentContext, paymentRequest(PaymentScene.QR), config),
+      adapter.createPayment(paymentContext, paymentRequest(), config),
     ).resolves.toEqual({
       action: { type: 'QR_CODE', content: 'weixin://wxpay/bizpayurl?pr=qr' },
       providerTradeNo: 'T202609190001',
+      legacyScene: 'QR',
     });
     jest.restoreAllMocks();
   });
@@ -123,16 +119,7 @@ describe('EpayPaymentAdapter', () => {
     });
   });
 
-  it('uses the authenticated order query when a GET callback signature is rejected', async () => {
-    jest.spyOn(axios, 'get').mockResolvedValueOnce({
-      data: {
-        code: 1,
-        status: 1,
-        trade_no: 'T202609190001',
-        money: '10.00',
-      },
-    } as never);
-
+  it('rejects an invalid callback instead of silently trusting a follow-up query', async () => {
     await expect(
       adapter.parseNotification(
         {
@@ -147,27 +134,11 @@ describe('EpayPaymentAdapter', () => {
         },
         config,
       ),
-    ).resolves.toMatchObject({
-      orderNo: 'LM202609190000001234',
-      providerTradeNo: 'T202609190001',
-      status: 'SUCCESS',
-      amount: '10.00',
-      signatureValid: false,
-    });
-    expect(axios.get).toHaveBeenCalledWith('https://pay.example.com/api.php', {
-      params: {
-        act: 'order',
-        pid: config.pid,
-        key: config.key,
-        out_trade_no: 'LM202609190000001234',
-      },
-      timeout: 10000,
-    });
-    jest.restoreAllMocks();
+    ).rejects.toMatchObject({ code: 'SIGNATURE_INVALID' });
   });
 
   it('does not treat a successful query response as a successful payment', async () => {
-    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
       data: {
         code: 1,
         status: 0,
@@ -185,7 +156,7 @@ describe('EpayPaymentAdapter', () => {
   });
 
   it('keeps the payment pending when the query has no explicit order status', async () => {
-    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
       data: {
         code: 1,
         trade_no: 'T202609190003',

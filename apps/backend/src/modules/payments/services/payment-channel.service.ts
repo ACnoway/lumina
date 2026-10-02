@@ -7,7 +7,6 @@ import {
   PaymentChannel,
   PaymentChannelType,
   PaymentMethod,
-  PaymentScene,
   Prisma,
 } from '@prisma/client';
 import { PaymentChannelDto } from '@lumina/shared';
@@ -44,8 +43,7 @@ export class PaymentChannelService {
         const metadata = channel.metadata;
         return Boolean(
           metadata &&
-            (!query.paymentMethod || metadata.methods.includes(query.paymentMethod)) &&
-            (!query.scene || metadata.scenes.includes(query.scene)),
+            (!query.paymentMethod || metadata.methods.includes(query.paymentMethod)),
         );
       });
   }
@@ -113,7 +111,6 @@ export class PaymentChannelService {
   async getUsableChannel(
     id: string,
     paymentMethod: PaymentMethod,
-    scene: PaymentScene,
   ): Promise<{
     channel: PaymentChannel;
     adapter: ReturnType<PaymentAdapterRegistry['get']>;
@@ -131,18 +128,11 @@ export class PaymentChannelService {
         '该渠道不支持当前支付方式',
       );
     }
-    if (!metadata.scenes.includes(scene)) {
-      throw new PaymentChannelError(
-        PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE,
-        '该渠道不支持当前支付场景',
-      );
-    }
     return { channel, adapter, config: this.decrypt(channel) };
   }
 
   async getUsableChannelForMethod(
     paymentMethod: PaymentMethod,
-    scene: PaymentScene,
   ): Promise<{
     channel: PaymentChannel;
     adapter: ReturnType<PaymentAdapterRegistry['get']>;
@@ -159,7 +149,7 @@ export class PaymentChannelService {
     const matchingChannels = channels.filter((channel) => {
       const adapter = this.registry.get(channel.type);
       const metadata = adapter.getMetadata();
-      return metadata.methods.includes(paymentMethod) && metadata.scenes.includes(scene);
+      return metadata.methods.includes(paymentMethod);
     });
     const selectedChannel = matchingChannels.find((channel) => channel.type === preferredType) ?? matchingChannels[0];
     if (selectedChannel) {

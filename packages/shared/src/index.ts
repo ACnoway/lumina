@@ -53,7 +53,7 @@ export interface PaymentChannelDto {
 }
 
 export interface PaymentAction {
-  type: 'REDIRECT_URL' | 'HTML_FORM' | 'QR_CODE' | 'JSAPI' | 'NONE';
+  type: 'REDIRECT_URL' | 'HTML_FORM' | 'QR_CODE' | 'JSAPI' | 'APP' | 'NONE';
   url?: string;
   html?: string;
   content?: string;

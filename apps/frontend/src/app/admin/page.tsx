@@ -394,7 +394,7 @@ export default function AdminPage() {
   const [paymentChannelForm, setPaymentChannelForm] = useState({
     name: "",
     type: "EPAY" as PaymentChannelDto["type"],
-    config: '{\n  "baseUrl": "https://pay.example.com",\n  "pid": "",\n  "key": ""\n}',
+    config: '{\n  "baseUrl": "https://pay.example.com",\n  "pid": "",\n  "key": "",\n  "createEndpoint": "mapi.php",\n  "queryMethod": "POST"\n}',
     isActive: true,
   });
 
@@ -2660,7 +2660,7 @@ export default function AdminPage() {
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold">已配置渠道</h3>
-                  <p className="mt-1 text-xs text-gray-400">启用后的渠道会根据支付方式和场景展示给用户。</p>
+                   <p className="mt-1 text-xs text-gray-400">启用后的渠道会根据支付方式选择；具体官方产品和协议由渠道配置决定。</p>
                 </div>
                 <span className="text-sm text-gray-400">共 {paymentChannels.length} 个</span>
               </div>
@@ -2678,9 +2678,9 @@ export default function AdminPage() {
                             {channel.isActive ? "已启用" : "已停用"}
                           </span>
                         </div>
-                        <p className="mt-1 text-xs text-gray-400">
-                          支付方式：{channel.metadata?.methods.join("、") || "—"} · 场景：{channel.metadata?.scenes.join("、") || "—"}
-                        </p>
+                         <p className="mt-1 text-xs text-gray-400">
+                           支付方式：{channel.metadata?.methods.join("、") || "—"} · Adapter 能力：{channel.metadata?.scenes.join("、") || "—"}
+                         </p>
                         <p className="mt-1 break-all text-xs text-gray-400">{channel.publicConfig ? JSON.stringify(channel.publicConfig) : "无公开配置摘要"}</p>
                       </div>
                       <div className="flex shrink-0 gap-3 text-sm">

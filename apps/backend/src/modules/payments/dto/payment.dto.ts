@@ -38,10 +38,6 @@ export class ListPaymentChannelsQueryDto {
   @IsOptional()
   @IsIn(['ALIPAY', 'WECHAT'], { message: 'paymentMethod 不合法' })
   paymentMethod?: 'ALIPAY' | 'WECHAT';
-
-  @IsOptional()
-  @IsIn(['WEB', 'H5', 'QR', 'JSAPI', 'APP'], { message: 'scene 不合法' })
-  scene?: 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
 }
 
 export class ListPaymentOrdersQueryDto {

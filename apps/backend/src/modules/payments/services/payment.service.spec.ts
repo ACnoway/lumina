@@ -122,13 +122,15 @@ describe('PaymentService', () => {
     ).rejects.toThrow('充值金额必须在 0.1 至 100000 元之间');
   });
 
-  it('selects a redirect scene and fails the order when the channel returns a QR action', async () => {
+  it('accepts a provider QR action without passing a generic scene to the adapter', async () => {
     const { service, prisma, walletService, adapter, channels } = createService();
     const order = { ...makeOrder(PaymentOrderStatus.CREATED), scene: 'WEB' as const };
     prisma.paymentOrder.findFirst.mockResolvedValue(null);
     prisma.paymentOrder.create.mockResolvedValue(order);
+    prisma.paymentOrder.findUnique.mockResolvedValue(order);
     adapter.createPayment.mockResolvedValue({
       action: { type: 'QR_CODE', content: 'weixin://qr-code' },
+      legacyScene: 'QR',
     });
 
     await expect(
@@ -137,12 +139,18 @@ describe('PaymentService', () => {
         { amount: '10.00', paymentMethod: 'ALIPAY' },
         'payment-idempotency-redirect-only',
       ),
-    ).rejects.toThrow('当前支付方式未返回可用的跳转支付动作');
+    ).resolves.toMatchObject({
+      orderNo: order.orderNo,
+      status: PaymentOrderStatus.PENDING,
+      action: { type: 'QR_CODE', content: 'weixin://qr-code' },
+    });
 
-    expect(channels.getUsableChannelForMethod).toHaveBeenCalledWith('ALIPAY', 'WEB');
-    expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: PaymentOrderStatus.FAILED }),
-    }));
+    expect(channels.getUsableChannelForMethod).toHaveBeenCalledWith('ALIPAY');
+    expect(adapter.createPayment).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({ scene: expect.anything() }),
+      {},
+    );
     expect(walletService.recharge).not.toHaveBeenCalled();
   });
 
@@ -161,7 +169,7 @@ describe('PaymentService', () => {
         { amount: '10.00', paymentMethod: 'ALIPAY' },
         'payment-idempotency-unsafe-redirect',
       ),
-    ).rejects.toThrow('当前支付方式未返回可用的跳转支付动作');
+    ).rejects.toThrow('当前支付方式未返回可用的支付动作');
 
     expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: PaymentOrderStatus.FAILED }),
@@ -315,7 +323,7 @@ describe('PaymentService', () => {
 
     expect(adapter.createPayment).not.toHaveBeenCalled();
     expect(prisma.paymentOrder.create).not.toHaveBeenCalled();
-    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod, order.scene);
+    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod);
   });
 
   it('regenerates a missing action with the same original order snapshot', async () => {
@@ -340,7 +348,6 @@ describe('PaymentService', () => {
       expect.objectContaining({
         amount: order.amount,
         paymentMethod: order.paymentMethod,
-        scene: order.scene,
         subject: order.subject,
       }),
       {},
@@ -375,10 +382,10 @@ describe('PaymentService', () => {
 
     await expect(service.resumePayment(order.userId, order.orderNo)).resolves.toMatchObject({ action });
 
-    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod, order.scene);
+    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod);
     expect(adapter.createPayment).toHaveBeenCalledWith(
       expect.objectContaining({ orderNo: order.orderNo }),
-      expect.objectContaining({ amount: order.amount, scene: order.scene }),
+      expect.objectContaining({ amount: order.amount }),
       {},
     );
     expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({

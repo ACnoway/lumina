@@ -89,16 +89,12 @@ export class PaymentService {
     }
 
     const paymentMethod = dto.paymentMethod as PaymentMethod;
-    let selection: {
-      scene: PaymentScene;
-      usable: Awaited<ReturnType<PaymentChannelService['getUsableChannelForMethod']>>;
-    };
+    let usable: Awaited<ReturnType<PaymentChannelService['getUsableChannelForMethod']>>;
     try {
-      selection = await this.getUsableRedirectChannel(paymentMethod);
+      usable = await this.channels.getUsableChannelForMethod(paymentMethod);
     } catch (error) {
       this.rethrowChannelError(error);
     }
-    const { scene, usable } = selection!;
 
     const rate = new Decimal((await this.settingsService.getCurrencySettings()).photonPerCny.toString());
     const photonAmount = amount.times(rate).toDecimalPlaces(6);
@@ -110,7 +106,9 @@ export class PaymentService {
         channelId: usable!.channel.id,
         channelType: usable!.channel.type,
         paymentMethod,
-        scene,
+        // Kept only for backwards-compatible database/API snapshots. The
+        // selected channel's adapter replaces it after creating the action.
+        scene: PaymentScene.WEB,
         amount,
         currency: 'CNY',
         photonAmount,
@@ -130,7 +128,7 @@ export class PaymentService {
     try {
       result = await usable!.adapter.createPayment(
         { orderNo, notifyUrl, returnUrl, clientIp, payerOpenId: dto.payerOpenId },
-        { amount, paymentMethod, scene, subject: order.subject },
+        { amount, paymentMethod, subject: order.subject },
         usable!.config,
       );
       this.assertRedirectAction(result.action);
@@ -160,6 +158,7 @@ export class PaymentService {
       data: {
         status: PaymentOrderStatus.PENDING,
         providerTradeNo: result!.providerTradeNo,
+        scene: result!.legacyScene ?? order.scene,
         expireAt: result!.expireAt ?? order.expireAt,
         metadata: this.actionMetadata(result!.action),
       },
@@ -255,7 +254,6 @@ export class PaymentService {
       usable = await this.channels.getUsableChannel(
         order.channelId,
         order.paymentMethod,
-        order.scene,
       );
     } catch (error) {
       this.rethrowChannelError(error);
@@ -276,7 +274,6 @@ export class PaymentService {
         {
           amount: order.amount,
           paymentMethod: order.paymentMethod,
-          scene: order.scene,
           subject: order.subject,
         },
         usable!.config,
@@ -300,6 +297,7 @@ export class PaymentService {
       data: {
         status: PaymentOrderStatus.PENDING,
         providerTradeNo: result!.providerTradeNo ?? order.providerTradeNo,
+        scene: result!.legacyScene ?? order.scene,
         expireAt: result!.expireAt ?? order.expireAt,
         metadata: this.actionMetadata(result!.action),
       },
@@ -569,36 +567,6 @@ export class PaymentService {
     });
   }
 
-  private async getUsableRedirectChannel(paymentMethod: PaymentMethod): Promise<{
-    scene: PaymentScene;
-    usable: Awaited<ReturnType<PaymentChannelService['getUsableChannelForMethod']>>;
-  }> {
-    const scenes = paymentMethod === PaymentMethod.ALIPAY
-      ? [PaymentScene.WEB, PaymentScene.H5]
-      : [PaymentScene.H5, PaymentScene.WEB];
-
-    for (const scene of scenes) {
-      try {
-        const usable = await this.channels.getUsableChannelForMethod(paymentMethod, scene);
-        return { scene, usable };
-      } catch (error) {
-        if (
-          error instanceof PaymentChannelError &&
-          (error.code === PaymentErrorCode.CHANNEL_NOT_FOUND ||
-            error.code === PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE)
-        ) {
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    throw new PaymentChannelError(
-      PaymentErrorCode.CHANNEL_NOT_FOUND,
-      '当前支付方式暂无可用的跳转支付渠道',
-    );
-  }
-
   private getOrderAction(order: PaymentOrder): PaymentAction | undefined {
     return this.sanitizePaymentAction(this.getOrderMetadata(order).action);
   }
@@ -614,7 +582,7 @@ export class PaymentService {
     const safeAction = this.sanitizePaymentAction(action);
     if (!safeAction) {
       throw new PaymentChannelError(
-        PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE,
+        PaymentErrorCode.UNSUPPORTED_PAYMENT_ACTION,
         '当前支付方式未返回可用的跳转支付动作',
       );
     }
@@ -646,6 +614,12 @@ export class PaymentService {
         if (params.some(([, value]) => typeof value !== 'string')) return undefined;
         return { type: 'JSAPI', params: Object.fromEntries(params) as Record<string, string> };
       }
+      case 'APP': {
+        if (!action.params || typeof action.params !== 'object' || Array.isArray(action.params)) return undefined;
+        const params = Object.entries(action.params as Record<string, unknown>);
+        if (params.some(([, value]) => typeof value !== 'string')) return undefined;
+        return { type: 'APP', params: Object.fromEntries(params) as Record<string, string> };
+      }
       case 'NONE':
         return { type: 'NONE' };
       default:
@@ -666,7 +640,9 @@ export class PaymentService {
   private isRedirectAction(action: PaymentAction | undefined): boolean {
     const safeAction = this.sanitizePaymentAction(action);
     return Boolean(
-      safeAction?.type === 'REDIRECT_URL' || safeAction?.type === 'HTML_FORM',
+      safeAction?.type === 'REDIRECT_URL' ||
+      safeAction?.type === 'HTML_FORM' ||
+      safeAction?.type === 'QR_CODE',
     );
   }
 
@@ -694,8 +670,8 @@ export class PaymentService {
   private assertRedirectAction(action: PaymentAction | undefined): void {
     if (this.isRedirectAction(action)) return;
     throw new PaymentChannelError(
-      PaymentErrorCode.UNSUPPORTED_PAYMENT_SCENE,
-      '当前支付方式未返回可用的跳转支付动作',
+      PaymentErrorCode.UNSUPPORTED_PAYMENT_ACTION,
+      '当前支付方式未返回可用的支付动作',
     );
   }
 

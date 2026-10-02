@@ -6,6 +6,7 @@ export type PaymentAction =
   | { type: 'HTML_FORM'; html: string }
   | { type: 'QR_CODE'; content: string }
   | { type: 'JSAPI'; params: Record<string, string> }
+  | { type: 'APP'; params: Record<string, string> }
   | { type: 'NONE' };
 
 export interface PaymentChannelMetadata {
@@ -27,7 +28,6 @@ export interface PaymentContext {
 export interface PaymentCreateRequest {
   amount: Decimal;
   paymentMethod: PaymentMethod;
-  scene: PaymentScene;
   subject: string;
 }
 
@@ -35,6 +35,12 @@ export interface PaymentCreateResult {
   providerTradeNo?: string;
   action: PaymentAction;
   expireAt?: Date;
+  /**
+   * Compatibility snapshot for the legacy PaymentOrder.scene column. This is
+   * not an input to a provider protocol and must not be used to build a
+   * provider request.
+   */
+  legacyScene?: PaymentScene;
 }
 
 export interface PaymentNotificationRequest {
@@ -80,6 +86,11 @@ export interface PaymentQueryResult {
   paidAt?: Date;
 }
 
+export interface PaymentCloseRequest {
+  orderNo: string;
+  providerTradeNo?: string;
+}
+
 export interface PaymentChannelAdapter<TConfig = unknown> {
   readonly type: PaymentChannelType;
   getMetadata(): PaymentChannelMetadata;
@@ -96,4 +107,5 @@ export interface PaymentChannelAdapter<TConfig = unknown> {
   ): Promise<PaymentNotification>;
   buildNotificationResponse(success: boolean): PaymentNotifyResponse;
   queryPayment?(request: PaymentQueryRequest, config: TConfig): Promise<PaymentQueryResult>;
+  closePayment?(request: PaymentCloseRequest, config: TConfig): Promise<void>;
 }

@@ -22,6 +22,11 @@ export interface EpayConfig {
   key: string;
   protocolVersion?: 'V1';
   signType?: 'MD5';
+  /** The provider-specific native create endpoint. */
+  createEndpoint?: 'mapi.php' | 'submit.php';
+  queryEndpoint?: 'api.php';
+  /** GET is supported for legacy providers; POST avoids putting key in URLs. */
+  queryMethod?: 'GET' | 'POST';
   supportedTypes?: { alipay?: boolean; wxpay?: boolean };
   timeout?: number;
 }
@@ -61,6 +66,9 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       pid: this.mask(config.pid),
       protocolVersion: config.protocolVersion ?? 'V1',
       signType: config.signType ?? 'MD5',
+      createEndpoint: config.createEndpoint ?? 'mapi.php',
+      queryEndpoint: config.queryEndpoint ?? 'api.php',
+      queryMethod: config.queryMethod ?? 'POST',
       supportedTypes: config.supportedTypes ?? { alipay: true, wxpay: true },
       keyConfigured: Boolean(config.key),
     };
@@ -84,10 +92,23 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       ...(context.clientIp ? { clientip: context.clientIp } : {}),
     };
     const signed = this.withSignature(values, config.key);
+    const signType = config.signType ?? 'MD5';
+    const endpoint = this.endpoint(config, config.createEndpoint ?? 'mapi.php');
+
+    if ((config.createEndpoint ?? 'mapi.php') === 'submit.php') {
+      return {
+        action: {
+          type: 'HTML_FORM',
+          html: this.buildForm(endpoint, { ...signed, sign_type: signType }),
+        },
+        legacyScene: PaymentScene.WEB,
+      };
+    }
+
     try {
       const response = await axios.post(
-        `${config.baseUrl.replace(/\/$/, '')}/mapi.php`,
-        new URLSearchParams({ ...signed, sign_type: config.signType ?? 'MD5' }).toString(),
+        endpoint,
+        new URLSearchParams({ ...signed, sign_type: signType }).toString(),
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           timeout: config.timeout ?? 15000,
@@ -97,26 +118,30 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       // Detect it before parsing generic strings as URLs, otherwise the raw
       // HTML would incorrectly be surfaced as a redirect URL.
       if (typeof response.data === 'string' && /<form[\s>]/i.test(response.data)) {
-        return { action: { type: 'HTML_FORM', html: response.data } };
+        return { action: { type: 'HTML_FORM', html: response.data }, legacyScene: PaymentScene.WEB };
       }
 
       const data = this.parseResponse(response.data);
-      // A QR code is only a valid payment action when the caller explicitly
-      // requested the QR scene. Web and H5 flows must continue in the browser
-      // by redirecting to the provider (or using the HTML form above).
-      const qr = this.firstString(data, ['qrcode', 'qr_code', 'code_url', 'payurl']);
-      if (request.scene === PaymentScene.QR && qr)
-        return {
-          action: { type: 'QR_CODE', content: qr },
-          providerTradeNo: this.firstString(data, ['trade_no']),
-        };
-      const url = this.firstString(data, ['url', 'pay_url', 'redirect_url']);
+      this.assertAcceptedResponse(data);
+      const providerTradeNo = this.firstString(data, ['trade_no']);
+      // `payurl` is a cashier action, not a QR-only field. Keep it as a
+      // browser redirect even when the provider also returns a QR payload.
+      const url = this.firstString(data, ['payurl', 'url', 'pay_url', 'redirect_url']);
       if (url)
         return {
           action: { type: 'REDIRECT_URL', url },
-          providerTradeNo: this.firstString(data, ['trade_no']),
+          providerTradeNo,
+          legacyScene: PaymentScene.WEB,
         };
-      throw new Error('易支付返回中没有可用的支付动作');
+      const qr = this.firstString(data, ['qrcode', 'qr_code', 'code_url']);
+      if (qr) {
+        return {
+          action: { type: 'QR_CODE', content: qr },
+          providerTradeNo,
+          legacyScene: PaymentScene.QR,
+        };
+      }
+      throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '易支付返回中没有可用的支付动作');
     } catch (error) {
       if (error instanceof PaymentChannelError) throw error;
       throw new PaymentChannelError(
@@ -142,8 +167,6 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
     delete values.sign_type;
     const expected = this.signature(values, config.key);
     if (!signature || signature.toLowerCase() !== expected.toLowerCase()) {
-      const fallback = await this.queryAfterInvalidGetSignature(request, payload, config);
-      if (fallback) return { ...fallback, signatureValid: false };
       throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调签名无效');
     }
     const status = String(payload.trade_status ?? '').toUpperCase();
@@ -179,11 +202,17 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       key: config.key,
       out_trade_no: request.orderNo,
     };
+    const method = config.queryMethod ?? 'POST';
     try {
-      const response = await axios.get(`${config.baseUrl.replace(/\/$/, '')}/api.php`, {
-        params,
-        timeout: config.timeout ?? 10000,
-      });
+      const response = method === 'POST'
+        ? await axios.post(this.endpoint(config, config.queryEndpoint ?? 'api.php'), new URLSearchParams(params).toString(), {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: config.timeout ?? 10000,
+        })
+        : await axios.get(this.endpoint(config, config.queryEndpoint ?? 'api.php'), {
+          params,
+          timeout: config.timeout ?? 10000,
+        });
       const data = this.parseResponse(response.data);
       // Epay-compatible gateways commonly return code=1 to indicate that the
       // query request itself succeeded. It is not a payment state. Only an
@@ -191,7 +220,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       // remain PENDING (fail closed).
       const rawStatus = data.trade_status ?? data.status;
       const status = String(rawStatus ?? '').toUpperCase();
-      const isSuccess = status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || status === 'SUCCESS' || status === '1';
+      const isSuccess = status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || status === 'SUCCESS';
       return {
         status:
           isSuccess
@@ -210,35 +239,6 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
         false,
         error,
       );
-    }
-  }
-
-  private async queryAfterInvalidGetSignature(
-    request: PaymentNotificationRequest,
-    payload: Record<string, unknown>,
-    config: EpayConfig,
-  ): Promise<PaymentNotification | undefined> {
-    if (
-      request.method !== 'GET' ||
-      typeof payload.out_trade_no !== 'string' ||
-      !payload.out_trade_no
-    )
-      return undefined;
-    try {
-      const result = await this.queryPayment({ orderNo: payload.out_trade_no }, config);
-      if (result.status !== 'SUCCESS' && result.status !== 'CLOSED') return undefined;
-      return {
-        eventId: result.providerTradeNo ?? `${payload.out_trade_no}:${result.status}`,
-        orderNo: payload.out_trade_no,
-        providerTradeNo: result.providerTradeNo,
-        status: result.status,
-        amount: result.amount,
-        currency: result.currency ?? 'CNY',
-        paidAt: result.status === 'SUCCESS' ? new Date() : undefined,
-        signatureValid: false,
-      };
-    } catch {
-      return undefined;
     }
   }
 
@@ -280,6 +280,31 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       }
     }
     return {};
+  }
+
+  private assertAcceptedResponse(data: Record<string, unknown>): void {
+    const code = data.code;
+    if (code === undefined || code === null || code === '') return;
+    if (String(code) === '1' || String(code).toLowerCase() === 'success') return;
+    throw new PaymentChannelError(
+      PaymentErrorCode.CHANNEL_REQUEST_FAILED,
+      this.firstString(data, ['msg', 'message', 'error']) ?? '易支付下单被渠道拒绝',
+    );
+  }
+
+  private endpoint(config: EpayConfig, path: 'mapi.php' | 'submit.php' | 'api.php'): string {
+    return `${config.baseUrl.replace(/\/$/, '')}/${path}`;
+  }
+
+  private buildForm(action: string, values: Record<string, string>): string {
+    const escape = (value: string) => value
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return `<form method="post" action="${escape(action)}">${Object.entries(values)
+      .map(([name, value]) => `<input type="hidden" name="${escape(name)}" value="${escape(value)}">`)
+      .join('')}</form>`;
   }
 
   private firstString(value: Record<string, unknown>, keys: string[]): string | undefined {
