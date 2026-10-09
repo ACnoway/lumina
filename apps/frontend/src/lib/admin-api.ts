@@ -14,6 +14,8 @@ import type {
   PlatformModelPricing,
   PaymentChannelDto,
   PaymentChannelMetadata,
+  SmsChannelDto,
+  SmsChannelMetadata,
   ObjectStorageConfigDto,
   ObjectStorageTestResponse,
   PromptOptimizerSettingDto,
@@ -134,6 +136,31 @@ export const adminApi = {
 
   testPaymentChannel(id: string): Promise<{ ok: true; metadata: PaymentChannelMetadata }> {
     return apiClient.post(`/admin/payment-channels/${encodeURIComponent(id)}/test`);
+  },
+
+  getSmsAdapters(): Promise<SmsChannelMetadata[]> {
+    return apiClient.get('/admin/sms-channels/adapters');
+  },
+
+  getSmsChannels(): Promise<SmsChannelDto[]> {
+    return apiClient.get('/admin/sms-channels');
+  },
+
+  createSmsChannel(data: {
+    name: string;
+    type: SmsChannelDto['type'];
+    config: Record<string, unknown>;
+    isActive: boolean;
+  }): Promise<SmsChannelDto> {
+    return apiClient.post('/admin/sms-channels', data);
+  },
+
+  setSmsChannelActive(id: string, isActive: boolean): Promise<SmsChannelDto> {
+    return apiClient.post(`/admin/sms-channels/${encodeURIComponent(id)}/${isActive ? 'enable' : 'disable'}`);
+  },
+
+  testSmsChannel(id: string): Promise<{ ok: true; metadata: SmsChannelMetadata }> {
+    return apiClient.post(`/admin/sms-channels/${encodeURIComponent(id)}/test`);
   },
 
   getUsers(options: ListAdminUsersOptions = {}): Promise<AdminUsersResponse> {

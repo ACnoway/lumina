@@ -13,7 +13,9 @@ datasource db {
 // ==================== 用户表 ====================
 model User {
   id        String   @id @default(cuid())
-  email     String   @unique
+  email     String?  @unique
+  phone     String?  @unique
+  phoneVerifiedAt DateTime?
   password  String?  // bcrypt hashed, nullable for email-code login
   nickname  String?
   avatar    String?
@@ -36,6 +38,7 @@ model User {
   updatedAt DateTime @updatedAt
   
   @@index([email])
+  @@index([phone])
   @@index([role])
   @@map("users")
 }
@@ -186,6 +189,29 @@ enum PaymentChannelType {
   EPAY
   ALIPAY
   WECHAT
+}
+
+enum SmsChannelType {
+  MOCK
+  ALIYUN
+  TENCENT
+}
+
+model SmsChannel {
+  id              String         @id @default(cuid())
+  name            String
+  type            SmsChannelType
+  isActive        Boolean        @default(true)
+  publicConfig    Json?
+  configEncrypted String         @db.Text
+  configVersion   Int            @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@map("sms_channels")
 }
 
 enum PaymentMethod {

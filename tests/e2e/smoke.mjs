@@ -1,4 +1,6 @@
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const require = createRequire(import.meta.url);
 const Minio = require('../../apps/backend/node_modules/minio');
@@ -6,6 +8,7 @@ const Minio = require('../../apps/backend/node_modules/minio');
 const baseUrl = process.env.E2E_BASE_URL || 'http://127.0.0.1:3001';
 const mailhogUrl = process.env.E2E_MAILHOG_URL || 'http://127.0.0.1:8025';
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MS || 120000);
+const execFileAsync = promisify(execFile);
 
 function assert(condition, message) {
   if (!condition) {
@@ -111,6 +114,18 @@ async function waitForMailCode(email, afterTimestamp) {
   });
 }
 
+async function waitForMockSmsCode(phone) {
+  return waitFor(`mock SMS for ${phone}`, async () => {
+    const { stdout } = await execFileAsync(
+      process.env.E2E_DOCKER_BIN || 'docker',
+      ['compose', '-f', 'docker-compose.e2e.yml', '-p', 'lumina-e2e', 'exec', '-T', 'redis', 'redis-cli', 'GET', `sms:mock:last-code:${phone}`],
+      { maxBuffer: 1024 * 1024 },
+    );
+    const code = String(stdout).trim();
+    return /^\d{6}$/.test(code) ? code : null;
+  });
+}
+
 async function sendCodeAndLogin(email) {
   const sentAt = Date.now() - 1000;
   await requestJson('/auth/send-code', {
@@ -198,6 +213,44 @@ async function main() {
   assert(adminLogin.data.user.role === 'ADMIN', 'configured admin did not receive ADMIN role');
   assert(userLogin.data.user.role === 'USER', 'registered user did not receive USER role');
   assert(userLogin.data.user.nickname === 'E2E User', 'registered nickname was not persisted');
+
+  const smsAdapterList = await requestAuth(adminToken, '/admin/sms-channels/adapters');
+  assert(smsAdapterList.data.some((adapter) => adapter.type === 'MOCK'), 'Mock SMS adapter is not registered');
+  const smsChannel = await requestAuth(adminToken, '/admin/sms-channels', {
+    method: 'POST',
+    body: { name: 'E2E Mock SMS', type: 'MOCK', config: {}, isActive: true },
+  });
+  assert(smsChannel.data.type === 'MOCK', 'Mock SMS channel was not created');
+  const smsChannelTest = await requestAuth(adminToken, `/admin/sms-channels/${smsChannel.data.id}/test`, { method: 'POST' });
+  assert(smsChannelTest.data.ok === true, 'Mock SMS channel test failed');
+
+  const phone = `+86138${String(Date.now()).slice(-8)}`;
+  await requestJson('/auth/register/send-code', { method: 'POST', body: { phone } });
+  const phoneRegisterCode = await waitForMockSmsCode(phone);
+  const phoneLogin = await requestJson('/auth/register', {
+    method: 'POST',
+    body: {
+      phone,
+      verificationMethod: 'sms',
+      code: phoneRegisterCode,
+      password: 'E2ePhone1',
+      confirmPassword: 'E2ePhone1',
+    },
+  });
+  assert(phoneLogin.data.user.email === null, 'phone-only registration unexpectedly has an email');
+  assert(phoneLogin.data.user.phone === '138****' + phone.slice(-4), 'phone registration did not return a masked phone');
+  const phonePasswordLogin = await requestJson('/auth/password-login', { method: 'POST', body: { phone, password: 'E2ePhone1' } });
+  assert(phonePasswordLogin.data.user.id === phoneLogin.data.user.id, 'phone password login failed');
+  await requestJson('/auth/send-code', { method: 'POST', body: { phone } });
+  const phoneCode = await waitForMockSmsCode(phone);
+  const phoneCodeLogin = await requestJson('/auth/login', { method: 'POST', body: { phone, code: phoneCode } });
+  assert(phoneCodeLogin.data.user.id === phoneLogin.data.user.id, 'phone SMS login failed');
+
+  const bindPhone = `+86139${String(Date.now()).slice(-8)}`;
+  await requestAuth(userToken, '/auth/phone/send-code', { method: 'POST', body: { phone: bindPhone } });
+  const bindCode = await waitForMockSmsCode(bindPhone);
+  const boundUser = await requestAuth(userToken, '/auth/me/phone', { method: 'PATCH', body: { phone: bindPhone, code: bindCode } });
+  assert(boundUser.data.phone === '139****' + bindPhone.slice(-4), 'legacy user phone binding failed');
 
   const passwordLogin = await requestJson('/auth/password-login', {
     method: 'POST',

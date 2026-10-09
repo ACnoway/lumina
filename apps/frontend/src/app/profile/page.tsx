@@ -493,6 +493,12 @@ export default function ProfilePage() {
   const [transactionDetailId, setTransactionDetailId] = useState<string | null>(null);
   const [transactionDetailLoading, setTransactionDetailLoading] = useState(false);
   const [transactionDetailError, setTransactionDetailError] = useState("");
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [phoneSending, setPhoneSending] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
+  const [phoneInfo, setPhoneInfo] = useState("");
 
   const loadRechargeSettings = useCallback(async () => {
     setRechargeSettingsLoading(true);
@@ -680,6 +686,49 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSendPhoneCode() {
+    setPhoneError("");
+    setPhoneInfo("");
+    if (!/^\+?\d{7,15}$/.test(phoneDraft.trim().replace(/[\s()-]/g, ""))) {
+      setPhoneError("请输入有效的手机号");
+      return;
+    }
+    setPhoneSending(true);
+    try {
+      await apiClient.post("/auth/phone/send-code", { phone: phoneDraft.trim() });
+      setPhoneInfo("绑定短信验证码已发送");
+    } catch (err: unknown) {
+      setPhoneError(err instanceof Error ? err.message : "验证码发送失败");
+    } finally {
+      setPhoneSending(false);
+    }
+  }
+
+  async function handleBindPhone(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPhoneError("");
+    setPhoneInfo("");
+    if (!/^\d{6}$/.test(phoneCode)) {
+      setPhoneError("请输入6位数字验证码");
+      return;
+    }
+    setPhoneLoading(true);
+    try {
+      const user = await apiClient.patch<GetCurrentUserResponse["user"]>("/auth/me/phone", {
+        phone: phoneDraft.trim(),
+        code: phoneCode,
+      });
+      setProfile((current) => current ? { ...current, user } : current);
+      setPhoneDraft("");
+      setPhoneCode("");
+      setPhoneInfo("手机号绑定成功");
+    } catch (err: unknown) {
+      setPhoneError(err instanceof Error ? err.message : "手机号绑定失败");
+    } finally {
+      setPhoneLoading(false);
+    }
+  }
+
   async function handleCreatePayment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPaymentError("");
@@ -791,7 +840,7 @@ export default function ProfilePage() {
                 Account center
               </p>
               <div className="mt-4 border-b border-gray-100 pb-4">
-                <p className="truncate text-sm font-medium text-gray-700">{profile.user.email}</p>
+                <p className="truncate text-sm font-medium text-gray-700">{profile.user.email || profile.user.phone || "未绑定账号"}</p>
                 <p className="mt-1 text-xs text-gray-400">{roleLabel(profile.user.role)}</p>
               </div>
               <nav className="mt-4 space-y-1" aria-label="个人中心分组导航">
@@ -1040,10 +1089,22 @@ export default function ProfilePage() {
                 <h2 className="mt-1 text-xl font-semibold tracking-tight">账户信息</h2>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <InfoItem label="邮箱" value={profile.user.email} />
+                <InfoItem label="邮箱" value={profile.user.email || "未绑定"} />
+                <InfoItem label="手机号" value={profile.user.phone || "未绑定"} />
                 <InfoItem label="昵称" value={profile.user.nickname || "未设置"} />
                 <InfoItem label="账户角色" value={roleLabel(profile.user.role)} />
                 <InfoItem label="钱包编号" value={profile.wallet.id || "未创建"} />
+              </div>
+              <div className="mt-6 border-t border-gray-100 pt-5">
+                <h3 className="font-medium text-gray-800">绑定或更换手机号</h3>
+                <p className="mt-1 text-sm text-gray-400">绑定后可以使用手机号密码或短信验证码登录，页面只展示脱敏手机号。</p>
+                <form onSubmit={handleBindPhone} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <input type="tel" value={phoneDraft} onChange={(event) => setPhoneDraft(event.target.value)} placeholder="手机号" disabled={phoneLoading || phoneSending} className={authInputClassName} />
+                  <input type="text" inputMode="numeric" maxLength={6} value={phoneCode} onChange={(event) => setPhoneCode(event.target.value)} placeholder="短信验证码" disabled={phoneLoading} className={authInputClassName} />
+                  <button type="button" onClick={() => void handleSendPhoneCode()} disabled={phoneLoading || phoneSending} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50">{phoneSending ? "发送中…" : "发送验证码"}</button>
+                  <button type="submit" disabled={phoneLoading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 sm:col-span-3">{phoneLoading ? "保存中…" : "保存手机号"}</button>
+                </form>
+                <AuthMessage error={phoneError} info={phoneInfo} />
               </div>
             </section>
             )}

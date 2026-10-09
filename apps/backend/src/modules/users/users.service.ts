@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,9 +8,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { User, UserRole } from '@prisma/client';
+import { Prisma, User, UserRole } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { normalizePhone } from '../auth/phone.util';
 
 @Injectable()
 export class UsersService implements OnModuleInit {
@@ -78,11 +80,19 @@ export class UsersService implements OnModuleInit {
     });
   }
 
+  async findByPhone(phone: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: { phone: normalizePhone(phone) },
+    });
+  }
+
   /**
    * 创建用户（同时创建钱包并赋予初始额度）
    */
   async create(data: {
-    email: string;
+    email?: string;
+    phone?: string;
+    phoneVerifiedAt?: Date;
     nickname?: string;
     avatar?: string;
     password?: string;
@@ -90,12 +100,15 @@ export class UsersService implements OnModuleInit {
   }): Promise<User> {
     const initialBalance = parseFloat(this.config.get<string>('INITIAL_BALANCE', '10.00'));
 
-    this.logger.log(`Creating user ${data.email} with initial photon balance ${initialBalance}`);
+    const account = data.email || data.phone || 'unknown';
+    this.logger.log(`Creating user ${account} with initial photon balance ${initialBalance}`);
 
     // 使用事务确保用户和钱包同时创建
     const user = await this.prisma.user.create({
       data: {
         email: data.email,
+        phone: data.phone ? normalizePhone(data.phone) : undefined,
+        phoneVerifiedAt: data.phoneVerifiedAt,
         password: data.password,
         nickname: data.nickname,
         avatar: data.avatar,
@@ -109,7 +122,7 @@ export class UsersService implements OnModuleInit {
                 amount: initialBalance,
                 balance: initialBalance,
                 reason: '新用户注册赠送',
-                idempotencyKey: `init:${data.email}:${Date.now()}`,
+                idempotencyKey: `init:${account}:${Date.now()}`,
               },
             },
           },
@@ -119,6 +132,28 @@ export class UsersService implements OnModuleInit {
 
     this.logger.log(`User ${user.id} created successfully`);
     return user;
+  }
+
+  async bindPhone(userId: string, phone: string): Promise<User> {
+    const normalizedPhone = normalizePhone(phone);
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, status: true },
+    });
+    if (!current) throw new NotFoundException('用户不存在');
+    if (current.status !== 'ACTIVE') throw new UnauthorizedException('当前账号不可执行此操作');
+
+    try {
+      return await this.prisma.user.update({
+        where: { id: userId },
+        data: { phone: normalizedPhone, phoneVerifiedAt: new Date() },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('该手机号已被使用');
+      }
+      throw error;
+    }
   }
 
   /**

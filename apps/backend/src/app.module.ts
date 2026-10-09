@@ -15,6 +15,7 @@ import { ImageModule } from './modules/image/image.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { SmsModule } from './modules/sms/sms.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     AdminModule,
     AuditModule,
     PaymentsModule,
+    SmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

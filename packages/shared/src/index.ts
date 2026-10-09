@@ -18,6 +18,7 @@ export interface CurrencySettingsDto {
 
 // ==================== 支付相关类型 ====================
 export type PaymentChannelType = 'EPAY' | 'ALIPAY' | 'WECHAT';
+export type SmsChannelType = 'MOCK' | 'ALIYUN' | 'TENCENT';
 export type PaymentMethod = 'ALIPAY' | 'WECHAT';
 export type PaymentScene = 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
 export type PaymentOrderStatus =
@@ -75,6 +76,27 @@ export interface PaymentOrderDto {
   createdAt: string;
 }
 
+export interface SmsChannelMetadata {
+  type: SmsChannelType;
+  name: string;
+  capabilities: {
+    send: boolean;
+    testConnection: boolean;
+  };
+}
+
+export interface SmsChannelDto {
+  id: string;
+  name: string;
+  type: SmsChannelType;
+  isActive: boolean;
+  publicConfig?: Record<string, unknown> | null;
+  metadata?: SmsChannelMetadata;
+  configVersion?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 /**
  * User-visible payment orders that can still be paid. Terminal orders remain
  * available through the individual order endpoint, but are intentionally not
@@ -121,21 +143,29 @@ export interface ApiResponse<T = unknown> {
 
 // ==================== 认证相关 DTO ====================
 export interface SendCodeDto {
-  email: string;
+  email?: string;
+  phone?: string;
+  account?: string;
 }
 
 export interface LoginDto {
-  email: string;
+  email?: string;
+  phone?: string;
+  account?: string;
   code: string;
 }
 
 export interface PasswordLoginDto {
-  email: string;
+  email?: string;
+  phone?: string;
+  account?: string;
   password: string;
 }
 
 export interface RegisterDto {
-  email: string;
+  email?: string;
+  phone?: string;
+  verificationMethod?: 'email' | 'sms';
   code: string;
   password: string;
   confirmPassword: string;
@@ -160,7 +190,9 @@ export interface GetCurrentUserResponse {
 
 export interface UserInfo {
   id: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
+  phoneVerifiedAt: string | null;
   nickname: string | null;
   avatar: string | null;
   role: UserRole;
@@ -368,6 +400,13 @@ export interface AdminUsersResponse {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+export interface CreateSmsChannelDto {
+  name: string;
+  type: SmsChannelType;
+  config: Record<string, unknown>;
+  isActive?: boolean;
 }
 
 export interface AdminOverviewResponse {

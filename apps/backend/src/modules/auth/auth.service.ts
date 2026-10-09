@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -12,12 +13,25 @@ import * as bcrypt from 'bcrypt';
 import { Prisma, User } from '@prisma/client';
 import { RedisService } from '../../redis/redis.service';
 import { UsersService } from '../users/users.service';
+import { SmsChannelService } from '../sms/services/sms-channel.service';
+import {
+  AuthCodePurpose,
+  IP_RATE_LIMIT,
+  IP_RATE_LIMIT_TTL_SECONDS,
+  PHONE_RATE_LIMIT,
+  PHONE_RATE_LIMIT_TTL_SECONDS,
+  SEND_COOLDOWN_TTL_SECONDS,
+  VERIFICATION_CODE_TTL_SECONDS,
+  getEmailCodeKey,
+  getEmailCooldownKey,
+  getSmsCodeKey,
+  getSmsCooldownKey,
+  getSmsIpRateKey,
+  getSmsPhoneRateKey,
+} from './auth.constants';
+import { isValidPhone, normalizePhone } from './phone.util';
 
-const VERIFICATION_CODE_TTL_SECONDS = 300;
-const SEND_COOLDOWN_TTL_SECONDS = 60;
 const BCRYPT_ROUNDS = 12;
-
-type CodePurpose = 'login' | 'register';
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') return value;
@@ -29,32 +43,30 @@ function parseBoolean(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+type AuthTarget = { type: 'email'; value: string } | { type: 'phone'; value: string };
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private transporter: nodemailer.Transporter;
+  private readonly transporter: nodemailer.Transporter;
 
   constructor(
     private readonly redis: RedisService,
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    @Optional() private readonly smsChannels?: SmsChannelService,
   ) {
-    // 初始化邮件发送器
     const smtpUser = this.config.get<string>('SMTP_USER')?.trim();
     const smtpPassword = this.config.get<string>('SMTP_PASSWORD');
-    const transportOptions = {
+    this.transporter = nodemailer.createTransport({
       host: this.config.get<string>('SMTP_HOST'),
       port: this.config.get<number>('SMTP_PORT', 587),
       secure: parseBoolean(this.config.get('SMTP_SECURE', false), false),
       ...(smtpUser && smtpPassword ? { auth: { user: smtpUser, pass: smtpPassword } } : {}),
-    };
-    this.transporter = nodemailer.createTransport(transportOptions);
+    });
   }
 
-  /**
-   * 生成6位随机验证码
-   */
   private generateCode(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
@@ -63,212 +75,195 @@ export class AuthService {
     return email.trim().toLowerCase();
   }
 
-  private getCodeKey(email: string, purpose: CodePurpose): string {
-    return `auth:code:${purpose}:${email}`;
+  private getEmailTarget(email: string): string {
+    const normalized = this.normalizeEmail(email);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      throw new BadRequestException('请输入有效的邮箱地址');
+    }
+    return normalized;
   }
 
-  private getCooldownKey(email: string, purpose: CodePurpose): string {
-    return `auth:code:cooldown:${purpose}:${email}`;
+  private resolveTarget(input: { email?: string; phone?: string; account?: string }): AuthTarget {
+    const raw = input.account?.trim() || input.email?.trim() || input.phone?.trim();
+    if (!raw) throw new BadRequestException('请输入邮箱或手机号');
+    if (raw.includes('@')) return { type: 'email', value: this.getEmailTarget(raw) };
+    const phone = normalizePhone(raw);
+    if (!isValidPhone(phone)) throw new BadRequestException('请输入有效的手机号');
+    return { type: 'phone', value: phone };
   }
 
-  private async clearSendState(
-    email: string,
-    purpose: CodePurpose,
-    clearCode: boolean,
-  ): Promise<void> {
-    const keys = [this.getCooldownKey(email, purpose)];
-    if (clearCode) {
-      keys.push(this.getCodeKey(email, purpose));
-    }
-
-    const results = await Promise.allSettled(keys.map((key) => this.redis.del(key)));
-
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        this.logger.warn(`Failed to clear auth state ${keys[index]}: ${String(result.reason)}`);
-      }
-    });
-  }
-
-  private async reserveSendCooldown(cooldownKey: string): Promise<number | null> {
-    const acquired = await this.redis.setNX(cooldownKey, '1', SEND_COOLDOWN_TTL_SECONDS);
-    if (acquired) {
-      return null;
-    }
-
-    // TTL 过期与读取之间可能发生竞态，重新尝试一次，避免把已结束的
-    // 冷却窗口错误地报告给用户。
-    let ttl = await this.redis.ttl(cooldownKey);
-    if (ttl <= 0) {
-      if (await this.redis.setNX(cooldownKey, '1', SEND_COOLDOWN_TTL_SECONDS)) {
-        return null;
-      }
-      ttl = await this.redis.ttl(cooldownKey);
-    }
-
+  private async reserveSendCooldown(key: string): Promise<number | null> {
+    if (await this.redis.setNX(key, '1', SEND_COOLDOWN_TTL_SECONDS)) return null;
+    let ttl = await this.redis.ttl(key);
+    if (ttl <= 0 && await this.redis.setNX(key, '1', SEND_COOLDOWN_TTL_SECONDS)) return null;
+    if (ttl <= 0) ttl = await this.redis.ttl(key);
     return Math.max(1, ttl);
   }
 
-  /**
-   * 发送验证码
-   */
-  async sendCode(email: string, purpose: CodePurpose = 'login'): Promise<void> {
-    const normalizedEmail = this.normalizeEmail(email);
+  private async clearSendState(codeKey: string, cooldownKey: string): Promise<void> {
+    await Promise.allSettled([this.redis.del(codeKey), this.redis.del(cooldownKey)]);
+  }
+
+  private async sendEmailCode(email: string, purpose: AuthCodePurpose): Promise<void> {
+    const normalizedEmail = this.getEmailTarget(email);
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
+    if (purpose === 'register' && existingUser) throw new ConflictException('该邮箱已注册，请直接登录');
+    if (purpose === 'login' && !existingUser) throw new BadRequestException('该邮箱尚未注册，请先注册');
 
-    if (purpose === 'register' && existingUser) {
-      throw new ConflictException('该邮箱已注册，请直接登录');
-    }
-
-    if (purpose === 'login' && !existingUser) {
-      throw new BadRequestException('该邮箱尚未注册，请先注册');
-    }
-
-    const codeKey = this.getCodeKey(normalizedEmail, purpose);
-    const cooldownKey = this.getCooldownKey(normalizedEmail, purpose);
-
-    // 使用独立的短期 key 原子限频，避免并发请求重复投递邮件。
+    const codeKey = getEmailCodeKey(normalizedEmail, purpose);
+    const cooldownKey = getEmailCooldownKey(normalizedEmail, purpose);
     const retryAfterSeconds = await this.reserveSendCooldown(cooldownKey);
-    if (retryAfterSeconds !== null) {
-      throw new BadRequestException(`验证码已发送，请在 ${retryAfterSeconds} 秒后重试`);
-    }
+    if (retryAfterSeconds !== null) throw new BadRequestException(`验证码已发送，请在 ${retryAfterSeconds} 秒后重试`);
 
     const code = this.generateCode();
-
     try {
       await this.transporter.sendMail({
         from: this.config.get<string>('SMTP_FROM'),
         to: normalizedEmail,
-        subject: purpose === 'register' ? '【Lumina】注册验证码' : '【Lumina】登录验证码',
-        html: `
-          <div style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>${purpose === 'register' ? '您的注册验证码' : '您的登录验证码'}</h2>
-            <p>您正在${purpose === 'register' ? '注册 Lumina 账号' : '登录 Lumina'}，验证码为：</p>
-            <div style="font-size: 32px; font-weight: bold; color: #C4612F; letter-spacing: 8px; margin: 20px 0;">
-              ${code}
-            </div>
-            <p style="color: #666;">验证码5分钟内有效，请勿泄露给他人。</p>
-            <p style="color: #999; font-size: 12px; margin-top: 40px;">
-              如果这不是您的操作，请忽略此邮件。
-            </p>
-          </div>
-        `,
+        subject: purpose === 'register' ? '【Lumina】注册验证码' : purpose === 'bind' ? '【Lumina】绑定验证邮箱验证码' : '【Lumina】登录验证码',
+        html: `<div style="font-family:Arial,sans-serif;padding:20px"><h2>Lumina 验证码</h2><p>验证码为：</p><div style="font-size:32px;font-weight:bold;color:#C4612F;letter-spacing:8px;margin:20px 0">${code}</div><p style="color:#666">验证码5分钟内有效，请勿泄露给他人。</p></div>`,
       });
-
-      // 只有邮件投递成功后才保留验证码，避免失败请求留下可登录状态。
       await this.redis.set(codeKey, code, VERIFICATION_CODE_TTL_SECONDS);
-      this.logger.log(`Verification code sent to ${normalizedEmail}`);
+      this.logger.log(`Verification email sent to ${normalizedEmail}`);
     } catch (error) {
-      await this.clearSendState(normalizedEmail, purpose, true);
-      this.logger.error(`Failed to send verification code to ${normalizedEmail}: ${String(error)}`);
+      await this.clearSendState(codeKey, cooldownKey);
+      this.logger.error(`Failed to send verification email: ${String(error)}`);
       throw new BadRequestException('邮件发送失败，请稍后重试');
     }
   }
 
-  private async verifyCode(email: string, code: string, purpose: CodePurpose): Promise<void> {
-    const normalizedEmail = this.normalizeEmail(email);
-    const result = await this.redis.consumeVerificationCode(
-      this.getCodeKey(normalizedEmail, purpose),
-      code,
-    );
+  /** Legacy-compatible email verification-code endpoint. */
+  async sendCode(email: string, purpose: AuthCodePurpose = 'login'): Promise<void> {
+    return this.sendEmailCode(email, purpose);
+  }
 
-    if (result !== 'matched') {
-      throw new UnauthorizedException('验证码错误或已过期');
+  async sendSmsCode(phone: string, purpose: AuthCodePurpose = 'login', ip = 'unknown', ownerId?: string): Promise<void> {
+    const normalizedPhone = normalizePhone(phone);
+    if (!isValidPhone(normalizedPhone)) throw new BadRequestException('请输入有效的手机号');
+    if (await this.redis.isRateLimited(getSmsPhoneRateKey(normalizedPhone), PHONE_RATE_LIMIT, PHONE_RATE_LIMIT_TTL_SECONDS)) {
+      throw new BadRequestException('该手机号发送次数过多，请稍后再试');
+    }
+    if (await this.redis.isRateLimited(getSmsIpRateKey(ip || 'unknown'), IP_RATE_LIMIT, IP_RATE_LIMIT_TTL_SECONDS)) {
+      throw new BadRequestException('请求过于频繁，请稍后再试');
+    }
+
+    const existingUser = await this.usersService.findByPhone(normalizedPhone);
+    if (purpose === 'register' && existingUser) throw new ConflictException('该手机号已注册，请直接登录');
+    if (purpose === 'bind' && existingUser && existingUser.id !== ownerId) throw new ConflictException('该手机号已被使用');
+    // Login intentionally returns generic success for unknown phone numbers.
+    if (purpose === 'login' && (!existingUser || !existingUser.phoneVerifiedAt)) return;
+    if (!this.smsChannels) throw new BadRequestException('短信服务尚未配置，请联系管理员');
+
+    const codeKey = getSmsCodeKey(normalizedPhone, purpose);
+    const cooldownKey = getSmsCooldownKey(normalizedPhone, purpose);
+    const retryAfterSeconds = await this.reserveSendCooldown(cooldownKey);
+    if (retryAfterSeconds !== null) throw new BadRequestException(`验证码已发送，请在 ${retryAfterSeconds} 秒后重试`);
+    const code = this.generateCode();
+    try {
+      await this.smsChannels.sendVerificationCode(normalizedPhone, code, purpose);
+      await this.redis.set(codeKey, code, VERIFICATION_CODE_TTL_SECONDS);
+      this.logger.log(`Verification SMS sent to ${normalizedPhone.slice(0, 3)}****${normalizedPhone.slice(-4)}`);
+    } catch (error) {
+      await this.clearSendState(codeKey, cooldownKey);
+      this.logger.error(`Failed to send verification SMS: ${String(error)}`);
+      throw new BadRequestException('短信发送失败，请稍后重试');
     }
   }
 
+  private async verifyCode(key: string, code: string): Promise<void> {
+    const result = await this.redis.consumeVerificationCode(key, code);
+    if (result !== 'matched') throw new UnauthorizedException('验证码错误或已过期');
+  }
+
+  async verifySmsCode(phone: string, code: string, purpose: AuthCodePurpose): Promise<void> {
+    await this.verifyCode(getSmsCodeKey(normalizePhone(phone), purpose), code);
+  }
+
   private ensureActive(user: User): void {
-    if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('账号已被停用');
-    }
+    if (user.status !== 'ACTIVE') throw new UnauthorizedException('账号已被停用');
   }
 
   private issueToken(user: User): { accessToken: string; user: User } {
     this.ensureActive(user);
-    const payload = { sub: user.id, email: user.email };
-    const accessToken = this.jwtService.sign(payload);
-    return { accessToken, user };
+    const payload: { sub: string; email?: string; phone?: string } = { sub: user.id };
+    if (user.email) payload.email = user.email;
+    if (user.phone) payload.phone = user.phone;
+    return { accessToken: this.jwtService.sign(payload), user };
   }
 
-  /**
-   * 验证码登录，仅允许已注册用户登录。
-   */
-  async login(email: string, code: string): Promise<{ accessToken: string; user: User }> {
-    const normalizedEmail = this.normalizeEmail(email);
-    await this.verifyCode(normalizedEmail, code, 'login');
+  private async findByTarget(target: AuthTarget): Promise<User | null> {
+    return target.type === 'email'
+      ? this.usersService.findByEmail(target.value)
+      : this.usersService.findByPhone(target.value);
+  }
 
-    const user = await this.usersService.findByEmail(normalizedEmail);
-    if (!user) {
-      throw new BadRequestException('该邮箱尚未注册，请先注册');
-    }
-
-    this.logger.log(`Existing user code login: ${normalizedEmail}`);
+  async login(account: string, code: string): Promise<{ accessToken: string; user: User }> {
+    const target = this.resolveTarget({ account });
+    if (target.type === 'email') await this.verifyCode(getEmailCodeKey(target.value, 'login'), code);
+    else await this.verifySmsCode(target.value, code, 'login');
+    const user = await this.findByTarget(target);
+    if (!user) throw new BadRequestException('该账号尚未注册，请先注册');
+    if (target.type === 'phone' && !user.phoneVerifiedAt) throw new BadRequestException('手机号尚未验证，请先绑定');
     return this.issueToken(user);
   }
 
-  /**
-   * 密码登录。
-   */
-  async passwordLogin(
-    email: string,
-    password: string,
-  ): Promise<{ accessToken: string; user: User }> {
-    const normalizedEmail = this.normalizeEmail(email);
-    const user = await this.usersService.findByEmail(normalizedEmail);
-
-    if (!user?.password || !(await bcrypt.compare(password, user.password))) {
-      throw new UnauthorizedException('邮箱或密码错误');
-    }
-
-    this.logger.log(`Password login: ${normalizedEmail}`);
+  async passwordLogin(account: string, password: string): Promise<{ accessToken: string; user: User }> {
+    const user = await this.findByTarget(this.resolveTarget({ account }));
+    if (!user?.password || !(await bcrypt.compare(password, user.password))) throw new UnauthorizedException('邮箱或密码错误');
     return this.issueToken(user);
   }
 
-  /**
-   * 注册新用户并初始化钱包。
-   */
   async register(data: {
-    email: string;
+    email?: string;
+    phone?: string;
+    verificationMethod?: 'email' | 'sms';
     code: string;
     password: string;
     confirmPassword: string;
     nickname?: string;
   }): Promise<{ accessToken: string; user: User }> {
-    if (data.password !== data.confirmPassword) {
-      throw new BadRequestException('两次输入的密码不一致');
+    if (data.password !== data.confirmPassword) throw new BadRequestException('两次输入的密码不一致');
+    const email = data.email?.trim() ? this.getEmailTarget(data.email) : undefined;
+    const phone = data.phone?.trim() ? normalizePhone(data.phone) : undefined;
+    if (!email && !phone) throw new BadRequestException('邮箱和手机号至少填写一种');
+    if (phone && !isValidPhone(phone)) throw new BadRequestException('请输入有效的手机号');
+    const method = data.verificationMethod ?? (email ? 'email' : 'sms');
+    if (method === 'email') {
+      if (!email) throw new BadRequestException('邮箱注册需要填写邮箱');
+      await this.verifyCode(getEmailCodeKey(email, 'register'), data.code);
+    } else {
+      if (!phone) throw new BadRequestException('短信注册需要填写手机号');
+      await this.verifySmsCode(phone, data.code, 'register');
     }
 
-    const normalizedEmail = this.normalizeEmail(data.email);
-    await this.verifyCode(normalizedEmail, data.code, 'register');
-
-    const existingUser = await this.usersService.findByEmail(normalizedEmail);
-    if (existingUser) {
-      throw new ConflictException('该邮箱已注册，请直接登录');
-    }
+    const [existingEmail, existingPhone] = await Promise.all([
+      email ? this.usersService.findByEmail(email) : Promise.resolve(null),
+      phone ? this.usersService.findByPhone(phone) : Promise.resolve(null),
+    ]);
+    if (existingEmail || existingPhone) throw new ConflictException('邮箱或手机号已注册，请直接登录');
 
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
-    const nickname = data.nickname?.trim() || undefined;
-
     try {
       const user = await this.usersService.create({
-        email: normalizedEmail,
-        nickname,
+        email,
+        phone,
+        phoneVerifiedAt: method === 'sms' ? new Date() : undefined,
+        nickname: data.nickname?.trim() || undefined,
         password: passwordHash,
       });
-
-      this.logger.log(`New user registered: ${normalizedEmail}`);
       return this.issueToken(user);
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('该邮箱已注册，请直接登录');
-      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('邮箱或手机号已注册，请直接登录');
       throw error;
     }
   }
 
-  /**
-   * 验证用户（由 JWT 策略调用）
-   */
+  async bindPhone(userId: string, phone: string, code: string): Promise<User> {
+    const normalized = normalizePhone(phone);
+    await this.verifySmsCode(normalized, code, 'bind');
+    return this.usersService.bindPhone(userId, normalized);
+  }
+
   async validateUser(userId: string): Promise<User | null> {
     return this.usersService.findById(userId);
   }

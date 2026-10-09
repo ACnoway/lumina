@@ -13,6 +13,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
 import { GetCurrentUserResponse } from '@lumina/shared';
 import { ChangePasswordDto } from './dto/users.dto';
+import { toUserInfo } from '../auth/user-info';
 
 @Controller('users')
 export class UsersController {
@@ -37,14 +38,7 @@ export class UsersController {
     }
 
     return {
-      user: {
-        id: userWithWallet.id,
-        email: userWithWallet.email,
-        nickname: userWithWallet.nickname,
-        avatar: userWithWallet.avatar,
-        role: userWithWallet.role,
-        status: userWithWallet.status,
-      },
+      user: toUserInfo(userWithWallet),
       wallet: userWithWallet.wallet
         ? {
             id: userWithWallet.wallet.id,

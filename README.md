@@ -24,7 +24,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + S3 兼容对象存储
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包与模型/供应商管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
+- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包、模型/供应商、支付渠道和短信渠道管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
 - **平台货币**：钱包、账本、模型价格和所有消费统一使用光子（符号 `✦`）；后台汇率 `1 人民币 = N 光子` 只用于充值换算，消费不套用汇率
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
@@ -38,8 +38,8 @@ lumina/
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
-# 编辑 .env，修改密码、JWT_SECRET、SMTP 等
-# 启用支付时必须配置 PAYMENT_CONFIG_ENCRYPTION_KEY 和公网 PAYMENT_NOTIFY_BASE_URL。
+# 编辑 .env，修改密码、JWT_SECRET、SMTP、SMS_CONFIG_ENCRYPTION_KEY 等
+# 启用支付时必须配置 PAYMENT_CONFIG_ENCRYPTION_KEY 和公网 PAYMENT_NOTIFY_BASE_URL；使用短信时必须配置独立的 SMS_CONFIG_ENCRYPTION_KEY。
 # 若统一入口由 Nginx 代理 /api，回调基础地址应包含 /api，例如 https://example.com/api。
 
 # 2. 构建并启动所有服务
@@ -91,6 +91,21 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 `/payments/notify/:channelId` 能通过公网入口到达后端；支付渠道配置使用
 `PAYMENT_CONFIG_ENCRYPTION_KEY` 加密保存，密钥变更前必须完成配置迁移。易支付 `baseUrl`、支付宝 `gateway` 与微信 `baseUrl` 必须是无嵌入凭据、查询串和片段的 HTTPS endpoint；易支付查单携带商户 key，禁止配置 HTTP 地址。
 Docker 生产编排会设置 `TRUST_PROXY=true`，使微信 H5 下单可取得 Nginx 传递的真实客户端 IP；仅当后端只经受信任的反向代理暴露时才应启用该配置。
+
+### 手机号与短信认证
+
+认证接口兼容原有邮箱参数，同时支持 `account`（邮箱或手机号）参数：
+
+- `POST /auth/send-code`、`POST /auth/register/send-code`：根据邮箱或手机号发送登录/注册验证码；邮箱路径继续使用 SMTP，手机号路径使用已启用的短信渠道。
+- `POST /auth/password-login`：`account + password`，账号可为邮箱或手机号。
+- `POST /auth/login`：`account + code`，账号为邮箱时校验邮箱验证码，账号为手机号时校验短信验证码。
+- `POST /auth/phone/send-code`、`PATCH /auth/me/phone`：登录用户绑定或更换手机号。
+
+手机号注册用户可以不填写邮箱；邮箱注册用户可以在个人中心绑定手机号。邮箱和手机号在数据库中均为可选唯一字段，但业务层保证至少有一个，短信登录只允许已验证手机号。`/auth/me`、`/users/me` 和管理端用户接口只返回脱敏手机号（例如 `138****1234`），不会返回短信渠道密钥或验证码。
+
+短信渠道位于 `apps/backend/src/modules/sms/`，包含 `MockSmsAdapter`、`AliyunSmsAdapter` 和 `TencentSmsAdapter`。管理端“短信渠道”页提供 Adapter 能力、渠道 CRUD、启停和配置测试；配置采用独立的 `SMS_CONFIG_ENCRYPTION_KEY` 加密，列表只返回脱敏摘要。Mock 渠道会把最近验证码短暂写入 Redis 的 `sms:mock:last-code:*`，仅用于测试，不写入数据库。
+
+老用户迁移由 `20261009000000_add_phone_sms_auth` 完成：原有邮箱值保留，`email` 改为可空并新增可空唯一 `phone` 与 `phoneVerifiedAt`，管理员邮箱初始化逻辑不变。部署时先执行 `prisma migrate deploy`，再启动应用。
 
 ### 方式二：本地开发
 
@@ -154,8 +169,9 @@ apps/backend/src/
 ├── redis/                 # Redis 连接
 ├── object-storage/        # S3 兼容对象存储客户端与热刷新
 └── modules/
-    ├── auth/              # 注册、密码/邮箱验证码登录、JWT
+    ├── auth/              # 邮箱/手机号注册、密码/验证码登录、JWT
     ├── users/             # 用户管理
+    ├── sms/               # 短信渠道协议、Adapter、配置和 Mock 渠道
     ├── wallet/            # 钱包/账本（预扣-结算-退回 + 幂等键）
     ├── payments/          # 支付渠道、订单、回调与充值入账
     ├── providers/         # 上游供应商（路由/熔断/限流）
@@ -200,7 +216,7 @@ pnpm lint:fix               # 显式执行 lint 自动修复
 pnpm --filter backend prisma:studio    # Prisma 数据库可视化管理
 pnpm --filter backend prisma:migrate   # 运行数据库迁移
 
-# API/E2E 冒烟（需要 Docker；使用独立命名卷，不复用开发数据）
+# API/E2E 冒烟（需要 Docker；使用独立命名卷，不复用开发数据；Mock SMS 不调用真实供应商）
 pnpm e2e:up
 pnpm e2e:smoke
 pnpm e2e:down
@@ -209,7 +225,7 @@ pnpm e2e:down
 ## 开发顺序
 
 1. ~~项目脚手架~~ ✓
-2. 用户模块 + 邮箱验证码登录（代码已实现；需配置真实 SMTP 并完成端到端验证）
+2. 用户模块 + 邮箱/手机号验证码登录（邮箱保留兼容；短信 E2E 使用 MockSmsAdapter）
 3. 钱包/账本模块（预扣-结算-退回 + 幂等键）
 4. 平台模型 + 上游供应商模块
 5. 聊天页面 + 聊天 API + 流式输出

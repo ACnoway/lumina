@@ -16,6 +16,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
 import { SettingsService } from '../settings/settings.service';
+import { maskPhone } from '../auth/phone.util';
 import {
   ObjectStorageConfigInput,
   ObjectStorageService,
@@ -34,6 +35,8 @@ const CHAT_API_FORMATS = new Set(['openai_chat', 'openai_compatible', 'anthropic
 const adminUserSelect = Prisma.validator<Prisma.UserSelect>()({
   id: true,
   email: true,
+  phone: true,
+  phoneVerifiedAt: true,
   nickname: true,
   avatar: true,
   role: true,
@@ -244,6 +247,7 @@ export class AdminService {
         ? {
             OR: [
               { email: { contains: query.search, mode: 'insensitive' } },
+              { phone: { contains: query.search } },
               { nickname: { contains: query.search, mode: 'insensitive' } },
             ],
           }
@@ -377,6 +381,8 @@ export class AdminService {
     return {
       id: user.id,
       email: user.email,
+      phone: maskPhone(user.phone),
+      phoneVerifiedAt: user.phoneVerifiedAt?.toISOString() ?? null,
       nickname: user.nickname,
       avatar: user.avatar,
       role: user.role,

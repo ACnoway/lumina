@@ -11,6 +11,8 @@ import type {
   ModelType,
   PaymentChannelDto,
   PaymentChannelMetadata,
+  SmsChannelDto,
+  SmsChannelMetadata,
   PlatformModelDto,
   ProviderDto,
   ObjectStorageConfigDto,
@@ -61,7 +63,7 @@ const PROVIDER_DEFAULTS: Record<
   },
 };
 
-type Tab = "overview" | "users" | "config" | "payments" | "audit";
+type Tab = "overview" | "users" | "config" | "payments" | "sms" | "audit";
 type AccessState = "checking" | "allowed" | "forbidden" | "expired";
 type ResourceType = "model" | "provider" | "upstream";
 type DeleteTarget = {
@@ -281,7 +283,7 @@ function Pagination({
 
 export default function AdminPage() {
   const [accessState, setAccessState] = useState<AccessState>("checking");
-  const [actor, setActor] = useState<{ email: string; role: UserRole } | null>(
+  const [actor, setActor] = useState<{ email: string | null; role: UserRole } | null>(
     null,
   );
   const [tab, setTab] = useState<Tab>("overview");
@@ -395,6 +397,16 @@ export default function AdminPage() {
     name: "",
     type: "EPAY" as PaymentChannelDto["type"],
     config: '{\n  "baseUrl": "https://pay.example.com",\n  "pid": "",\n  "key": "",\n  "createEndpoint": "mapi.php",\n  "queryMethod": "POST"\n}',
+    isActive: true,
+  });
+  const [smsAdapters, setSmsAdapters] = useState<SmsChannelMetadata[]>([]);
+  const [smsChannels, setSmsChannels] = useState<SmsChannelDto[]>([]);
+  const [loadingSms, setLoadingSms] = useState(false);
+  const [showSmsChannelForm, setShowSmsChannelForm] = useState(false);
+  const [smsChannelForm, setSmsChannelForm] = useState({
+    name: "",
+    type: "MOCK" as SmsChannelDto["type"],
+    config: "{}",
     isActive: true,
   });
 
@@ -522,6 +534,22 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadSmsChannels = useCallback(async () => {
+    setLoadingSms(true);
+    try {
+      const [adapters, channels] = await Promise.all([
+        adminApi.getSmsAdapters(),
+        adminApi.getSmsChannels(),
+      ]);
+      setSmsAdapters(adapters);
+      setSmsChannels(channels);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, "加载短信渠道失败"));
+    } finally {
+      setLoadingSms(false);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function verifyAccess() {
@@ -565,6 +593,10 @@ export default function AdminPage() {
   useEffect(() => {
     if (accessState === "allowed" && tab === "payments") void loadPayments();
   }, [accessState, loadPayments, tab]);
+
+  useEffect(() => {
+    if (accessState === "allowed" && tab === "sms") void loadSmsChannels();
+  }, [accessState, loadSmsChannels, tab]);
 
   async function selectUser(user: AdminUserDto) {
     setSelectedUser(user);
@@ -1116,6 +1148,50 @@ export default function AdminPage() {
     }
   }
 
+  async function submitSmsChannel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const config = parseObject(smsChannelForm.config, "短信渠道配置");
+      const channel = await adminApi.createSmsChannel({
+        name: smsChannelForm.name.trim(),
+        type: smsChannelForm.type,
+        config,
+        isActive: smsChannelForm.isActive,
+      });
+      setNotice(`已创建短信渠道“${channel.name}”`);
+      setShowSmsChannelForm(false);
+      setSmsChannelForm((current) => ({ ...current, name: "" }));
+      await loadSmsChannels();
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, "创建短信渠道失败"));
+    }
+  }
+
+  async function toggleSmsChannel(channel: SmsChannelDto) {
+    setMutatingResource(`sms:${channel.id}`);
+    try {
+      await adminApi.setSmsChannelActive(channel.id, !channel.isActive);
+      setNotice(`已${channel.isActive ? "停用" : "启用"}短信渠道“${channel.name}”`);
+      await loadSmsChannels();
+    } catch (toggleError) {
+      setError(getErrorMessage(toggleError, "更新短信渠道状态失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
+  async function testSmsChannel(channel: SmsChannelDto) {
+    setMutatingResource(`test-sms:${channel.id}`);
+    try {
+      await adminApi.testSmsChannel(channel.id);
+      setNotice(`短信渠道“${channel.name}”配置验证通过`);
+    } catch (testError) {
+      setError(getErrorMessage(testError, "短信渠道配置验证失败"));
+    } finally {
+      setMutatingResource("");
+    }
+  }
+
   if (accessState === "checking") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f7f7f5] text-sm text-gray-500">
@@ -1183,6 +1259,7 @@ export default function AdminPage() {
                 ["users", "用户与余额"],
                 ["config", "模型与供应商"],
                 ["payments", "支付渠道"],
+                ["sms", "短信渠道"],
                 ["audit", "审计日志"],
             ] as Array<[Tab, string]>
           ).map(([value, label]) => (
@@ -2695,6 +2772,37 @@ export default function AdminPage() {
                   ))}
                 </div>
               )}
+            </section>
+          </section>
+        )}
+
+        {tab === "sms" && (
+          <section className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">SMS Channels</p>
+                <h2 className="mt-1 text-2xl font-semibold">短信渠道</h2>
+                <p className="mt-2 text-sm text-gray-500">验证码由认证服务生成并存储在 Redis，渠道只负责投递；密钥仅在服务端加密保存。</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" disabled={loadingSms} onClick={() => void loadSmsChannels()} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50">{loadingSms ? "刷新中…" : "刷新渠道"}</button>
+                <button type="button" onClick={() => setShowSmsChannelForm((current) => !current)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">{showSmsChannelForm ? "取消" : "新增渠道"}</button>
+              </div>
+            </div>
+            {showSmsChannelForm && (
+              <form className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-5" onSubmit={submitSmsChannel}>
+                <h3 className="font-semibold text-gray-800">新增短信渠道实例</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs text-gray-500"><span className="block font-medium text-gray-700">渠道名称</span><input value={smsChannelForm.name} onChange={(event) => setSmsChannelForm((current) => ({ ...current, name: event.target.value }))} required placeholder="例如：测试短信" className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm" /></label>
+                  <label className="space-y-1 text-xs text-gray-500"><span className="block font-medium text-gray-700">Adapter 类型</span><select value={smsChannelForm.type} onChange={(event) => setSmsChannelForm((current) => ({ ...current, type: event.target.value as SmsChannelDto["type"] }))} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">{smsAdapters.map((adapter) => <option key={adapter.type} value={adapter.type}>{adapter.name}（{adapter.type}）</option>)}</select></label>
+                </div>
+                <label className="block space-y-1 text-xs text-gray-500"><span className="block font-medium text-gray-700">渠道配置 JSON</span><textarea value={smsChannelForm.config} onChange={(event) => setSmsChannelForm((current) => ({ ...current, config: event.target.value }))} rows={10} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs" /><span className="block text-gray-400">Mock 使用 {}；阿里云需要 accessKeyId、accessKeySecret、signName、templateCode；腾讯云需要 secretId、secretKey、sdkAppId、signName、templateId。</span></label>
+                <button type="submit" disabled={loadingSms} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">保存短信渠道</button>
+              </form>
+            )}
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex items-center justify-between"><div><h3 className="font-semibold">已配置渠道</h3><p className="mt-1 text-xs text-gray-400">启用多个渠道时按创建时间选择第一个可用渠道。</p></div><span className="text-sm text-gray-400">共 {smsChannels.length} 个</span></div>
+              {smsChannels.length === 0 ? <p className="rounded-lg bg-gray-50 px-3 py-4 text-sm text-gray-400">暂无短信渠道配置。</p> : <div className="space-y-3">{smsChannels.map((channel) => <div key={channel.id} className="flex flex-col gap-3 rounded-xl border border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-gray-800">{channel.name}</p><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">{channel.type}</span><span className={`rounded-full px-2 py-0.5 text-[11px] ${channel.isActive ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"}`}>{channel.isActive ? "已启用" : "已停用"}</span></div><p className="mt-1 break-all text-xs text-gray-400">{channel.publicConfig ? JSON.stringify(channel.publicConfig) : "无公开配置摘要"}</p></div><div className="flex shrink-0 gap-3 text-sm"><button type="button" disabled={mutatingResource !== ""} onClick={() => void testSmsChannel(channel)} className="text-blue-600 hover:text-blue-800 disabled:opacity-50">{mutatingResource === `test-sms:${channel.id}` ? "验证中…" : "验证配置"}</button><button type="button" disabled={mutatingResource !== ""} onClick={() => void toggleSmsChannel(channel)} className="text-gray-600 hover:text-gray-800 disabled:opacity-50">{channel.isActive ? "停用" : "启用"}</button></div></div>)}</div>}
             </section>
           </section>
         )}
