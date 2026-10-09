@@ -202,7 +202,9 @@ export class AuthService {
     if (target.type === 'email') await this.verifyCode(getEmailCodeKey(target.value, 'login'), code);
     else await this.verifySmsCode(target.value, code, 'login');
     const user = await this.findByTarget(target);
-    if (!user) throw new BadRequestException('该账号尚未注册，请先注册');
+    if (!user) {
+      throw new BadRequestException(target.type === 'email' ? '该邮箱尚未注册，请先注册' : '该账号尚未注册，请先注册');
+    }
     if (target.type === 'phone' && !user.phoneVerifiedAt) throw new BadRequestException('手机号尚未验证，请先绑定');
     return this.issueToken(user);
   }
