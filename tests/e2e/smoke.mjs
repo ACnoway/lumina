@@ -901,7 +901,7 @@ async function main() {
   );
 
   console.log(
-    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, chat SSE, image queue, S3 object storage, history, audit',
+    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, customer support, chat SSE, image queue, S3 object storage, history, audit',
   );
 }
 
