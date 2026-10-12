@@ -15,6 +15,9 @@ const statusLabels: Record<SupportConversationStatus, string> = {
   CLOSED: "已结束",
 };
 
+const SSE_CONNECT_TIMEOUT_MS = 35_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "numeric",
@@ -38,7 +41,9 @@ export default function SupportPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "fallback">("connecting");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const reconnectDelayRef = useRef(1500);
 
   const loadMessages = useCallback(async () => {
     const result = await supportApi.getMessages(1, 100);
@@ -71,10 +76,16 @@ export default function SupportPage() {
     async function consumeEvents() {
       while (!cancelled) {
         const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), SSE_CONNECT_TIMEOUT_MS);
         try {
           for await (const event of supportApi.events(controller.signal)) {
             if (cancelled) return;
-            if (event.conversation) setConversation(event.conversation);
+            if (event.type === "ready") {
+              setRealtimeState("connected");
+              reconnectDelayRef.current = 1500;
+              continue;
+            }
+            if ("conversation" in event && event.conversation) setConversation(event.conversation);
             if (event.type === "message") {
               setMessages((current) => appendMessage(current, event.message));
               if (event.message.senderType === "ADMIN") {
@@ -83,12 +94,17 @@ export default function SupportPage() {
             }
           }
         } catch {
-          // 断线后重新拉取历史，再等待片刻重连，避免遗漏消息。
           if (!cancelled) {
+            setRealtimeState("fallback");
             await loadMessages().catch(() => undefined);
-            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+            await new Promise((resolve) => window.setTimeout(resolve, reconnectDelayRef.current));
+            reconnectDelayRef.current = Math.min(
+              MAX_RECONNECT_DELAY_MS,
+              reconnectDelayRef.current * 2,
+            );
           }
         } finally {
+          window.clearTimeout(timeoutId);
           controller.abort();
         }
       }
@@ -98,6 +114,24 @@ export default function SupportPage() {
       cancelled = true;
     };
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (realtimeState !== "fallback") return undefined;
+    let active = true;
+    let syncing = false;
+    const syncMessages = async () => {
+      if (!active || syncing) return;
+      syncing = true;
+      await loadMessages().catch(() => undefined);
+      syncing = false;
+    };
+    void syncMessages();
+    const intervalId = window.setInterval(() => void syncMessages(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [loadMessages, realtimeState]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -173,6 +207,11 @@ export default function SupportPage() {
             </div>
           </div>
 
+          {realtimeState === "fallback" && (
+            <p className="border-t border-amber-100 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+              实时连接暂时不可用，正在自动同步消息…
+            </p>
+          )}
           {error && <p className="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{error}</p>}
           <div className="border-t border-gray-100 bg-white p-4 sm:p-5">
             <div className="mx-auto flex max-w-2xl gap-3">

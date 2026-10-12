@@ -392,7 +392,11 @@ export interface SupportConversationEvent {
   conversation: SupportConversationDto;
 }
 
-export type SupportSseEvent = SupportMessageEvent | SupportConversationEvent;
+export interface SupportReadyEvent {
+  type: 'ready';
+}
+
+export type SupportSseEvent = SupportMessageEvent | SupportConversationEvent | SupportReadyEvent;
 
 // ==================== 生图相关 DTO ====================
 export interface OptimizePromptDto {

@@ -116,6 +116,7 @@ export const apiClient = {
     return fetch(`${BASE_URL}${path}`, {
       method: 'GET',
       headers: {
+        Accept: 'text/event-stream',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: 'include',

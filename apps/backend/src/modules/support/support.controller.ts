@@ -165,30 +165,42 @@ export class SupportController {
   ): Promise<void> {
     response.status(200);
     response.setHeader('Content-Type', 'text/event-stream');
-    response.setHeader('Cache-Control', 'no-cache, no-transform');
+    response.setHeader('Cache-Control', 'no-cache, no-store, no-transform');
     response.setHeader('Connection', 'keep-alive');
     response.setHeader('X-Accel-Buffering', 'no');
     response.flushHeaders?.();
     response.write('event: ready\ndata: {"type":"ready"}\n\n');
 
     let closed = false;
-    const unsubscribe = await this.supportService.subscribe(channel, (message) => {
-      if (!closed && !response.writableEnded) {
-        response.write(`data: ${message}\n\n`);
-      }
-    });
-    const heartbeat = setInterval(() => {
-      if (!closed && !response.writableEnded) response.write(': heartbeat\n\n');
-    }, 25000);
+    let unsubscribe: () => Promise<void> = async () => undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
 
     const close = () => {
       if (closed) return;
       closed = true;
-      clearInterval(heartbeat);
+      if (heartbeat) clearInterval(heartbeat);
       void unsubscribe();
     };
-    request.on('close', close);
-    response.on('close', close);
+    request.once('close', close);
+    response.once('close', close);
+
+    try {
+      unsubscribe = await this.supportService.subscribe(channel, (message) => {
+        if (!closed && !response.writableEnded) {
+          response.write(`data: ${message}\n\n`);
+        }
+      });
+      if (closed) {
+        await unsubscribe();
+        return;
+      }
+      heartbeat = setInterval(() => {
+        if (!closed && !response.writableEnded) response.write(': heartbeat\n\n');
+      }, 25000);
+    } catch (error) {
+      close();
+      throw error;
+    }
   }
 
   private auditContext(request: Request) {

@@ -27,6 +27,35 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # SSE 必须直通后端，关闭缓存和缓冲，避免边缘代理把长连接误判为无响应。
+    location = /api/support/conversation/events {
+        proxy_pass http://backend:3001/support/conversation/events;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
+    location = /api/support/admin/events {
+        proxy_pass http://backend:3001/support/admin/events;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
     location = /health {
         proxy_pass http://backend:3001/health;
         proxy_http_version 1.1;
@@ -44,8 +73,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
         proxy_buffering off;
+        proxy_cache off;
         proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
     }
 
     location / {

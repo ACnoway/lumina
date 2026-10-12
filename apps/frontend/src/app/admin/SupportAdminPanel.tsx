@@ -14,6 +14,9 @@ const statusLabels: Record<SupportConversationStatus, string> = {
   CLOSED: "已结束",
 };
 
+const SSE_CONNECT_TIMEOUT_MS = 35_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
 function formatDate(value: string | null): string {
   if (!value) return "暂无消息";
   return new Intl.DateTimeFormat("zh-CN", {
@@ -48,7 +51,9 @@ export default function SupportAdminPanel() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "fallback">("connecting");
   const selectedIdRef = useRef<string | null>(null);
+  const reconnectDelayRef = useRef(1500);
 
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedId) || null,
@@ -112,10 +117,16 @@ export default function SupportAdminPanel() {
     async function consumeEvents() {
       while (!cancelled) {
         const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), SSE_CONNECT_TIMEOUT_MS);
         try {
           for await (const event of supportApi.adminEvents(controller.signal)) {
             if (cancelled) return;
-            if (event.conversation) {
+            if (event.type === "ready") {
+              setRealtimeState("connected");
+              reconnectDelayRef.current = 1500;
+              continue;
+            }
+            if ("conversation" in event && event.conversation) {
               setConversations((current) => {
                 const exists = current.some((item) => item.id === event.conversation!.id);
                 return exists
@@ -129,8 +140,18 @@ export default function SupportAdminPanel() {
             }
           }
         } catch {
-          if (!cancelled) await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          if (!cancelled) {
+            setRealtimeState("fallback");
+            await loadConversations().catch(() => undefined);
+            if (selectedIdRef.current) await loadMessages(selectedIdRef.current);
+            await new Promise((resolve) => window.setTimeout(resolve, reconnectDelayRef.current));
+            reconnectDelayRef.current = Math.min(
+              MAX_RECONNECT_DELAY_MS,
+              reconnectDelayRef.current * 2,
+            );
+          }
         } finally {
+          window.clearTimeout(timeoutId);
           controller.abort();
         }
       }
@@ -139,7 +160,26 @@ export default function SupportAdminPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadConversations, loadMessages]);
+
+  useEffect(() => {
+    if (realtimeState !== "fallback") return undefined;
+    let active = true;
+    let syncing = false;
+    const sync = async () => {
+      if (!active || syncing) return;
+      syncing = true;
+      await loadConversations().catch(() => undefined);
+      if (selectedIdRef.current) await loadMessages(selectedIdRef.current);
+      syncing = false;
+    };
+    void sync();
+    const intervalId = window.setInterval(() => void sync(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [loadConversations, loadMessages, realtimeState]);
 
   async function sendReply() {
     if (!selectedId || !draft.trim() || sending || selectedConversation?.status === "CLOSED") return;
@@ -179,6 +219,12 @@ export default function SupportAdminPanel() {
           未读客户消息 <strong>{unreadCount}</strong>
         </div>
       </div>
+
+      {realtimeState === "fallback" && (
+        <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          实时连接暂时不可用，正在自动同步客服队列…
+        </div>
+      )}
 
       {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 

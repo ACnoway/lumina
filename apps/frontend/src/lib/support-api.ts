@@ -37,7 +37,8 @@ async function* parseSse(
     const trimmed = line.trim();
     if (!trimmed.startsWith('data: ')) return null;
     const json = trimmed.slice(6);
-    if (!json || json === '{"type":"ready"}') return null;
+    if (!json) return null;
+    if (json === '{"type":"ready"}') return { type: 'ready' };
     try {
       return JSON.parse(json) as SupportSseEvent;
     } catch {
