@@ -173,6 +173,37 @@ async function requestAuth(token, path, options = {}, expectedStatuses) {
   );
 }
 
+async function waitForSseEvent(response, predicate, deadline = Date.now() + timeoutMs) {
+  assert(response.ok, `SSE connection returned ${response.status}`);
+  assert(response.body, 'SSE connection did not return a body');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (Date.now() < deadline) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        if (!payload) continue;
+        const event = JSON.parse(payload);
+        if (predicate(event)) return event;
+      }
+    }
+  } finally {
+    await reader.cancel();
+  }
+
+  throw new Error('Timed out waiting for SSE event');
+}
+
 async function pollImageTask(token, taskId) {
   return waitFor(`image task ${taskId}`, async () => {
     const result = await requestAuth(token, `/image/tasks/${taskId}`);
@@ -406,6 +437,14 @@ async function main() {
     'admin support read marker did not clear unread count',
   );
 
+  const supportEventsResponse = await fetch(`${baseUrl}/support/conversation/events`, {
+    headers: authHeaders(userToken),
+  });
+  const supportEventPromise = waitForSseEvent(
+    supportEventsResponse,
+    (event) => event.type === 'message' && event.message?.conversationId === supportConversationId,
+  );
+
   const supportAdminReply = await requestAuth(
     adminToken,
     `/support/admin/conversations/${supportConversationId}/messages`,
@@ -418,6 +457,11 @@ async function main() {
     supportAdminReply.data.message.senderType === 'ADMIN' &&
       supportAdminReply.data.conversation.status === 'WAITING_FOR_USER',
     'admin support reply did not update sender or status',
+  );
+  const supportEvent = await supportEventPromise;
+  assert(
+    supportEvent.message.id === supportAdminReply.data.message.id,
+    'user support SSE did not contain the admin reply',
   );
   const supportUserMessages = await requestAuth(userToken, '/support/conversation/messages');
   assert(
