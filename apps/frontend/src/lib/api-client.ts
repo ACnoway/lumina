@@ -104,4 +104,22 @@ export const apiClient = {
       signal: options?.signal,
     });
   },
+
+  /**
+   * GET SSE 流式请求。与原生 EventSource 不同，这里会携带 Bearer Token。
+   */
+  streamGet: async (
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<Response> => {
+    const token = getToken();
+    return fetch(`${BASE_URL}${path}`, {
+      method: 'GET',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      signal: options?.signal,
+    });
+  },
 };

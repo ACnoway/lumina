@@ -20,6 +20,15 @@ const entryCards = [
     symbol: '◌',
     accent: 'from-sky-50 via-white to-blue-50',
   },
+  {
+    href: '/support',
+    eyebrow: '03 / SUPPORT',
+    title: '联系客服',
+    description: '遇到账号、充值或使用问题？给客服留言，我们会在会话中及时回复。',
+    action: '联系人工客服',
+    symbol: '✉',
+    accent: 'from-emerald-50 via-white to-sky-50',
+  },
 ];
 
 export default function Home() {
@@ -31,7 +40,7 @@ export default function Home() {
         items={entryCards.map(({ href, title }, index) => ({
           href,
           label: title,
-          key: index === 0 ? 'image' : 'chat',
+          key: index === 0 ? 'image' : index === 1 ? 'chat' : 'support',
         }))}
       />
 
@@ -76,7 +85,7 @@ export default function Home() {
             <span className="hidden text-sm text-gray-400 sm:block">两个入口，一个创作空间</span>
           </div>
 
-          <div className="grid gap-5 md:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-3">
             {entryCards.map((card) => (
               <Link
                 key={card.href}

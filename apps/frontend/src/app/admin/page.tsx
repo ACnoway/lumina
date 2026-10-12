@@ -26,6 +26,7 @@ import { ApiError } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
 import { formatPhoton, formatPhotonTruncated } from "@/lib/model-pricing";
 import AppHeader from "@/components/AppHeader";
+import SupportAdminPanel from "./SupportAdminPanel";
 
 const PAGE_SIZE = 20;
 const ADMIN_ROLES: UserRole[] = ["ADMIN", "SUPER_ADMIN"];
@@ -63,7 +64,7 @@ const PROVIDER_DEFAULTS: Record<
   },
 };
 
-type Tab = "overview" | "users" | "config" | "payments" | "sms" | "audit";
+type Tab = "overview" | "users" | "config" | "payments" | "sms" | "support" | "audit";
 type AccessState = "checking" | "allowed" | "forbidden" | "expired";
 type ResourceType = "model" | "provider" | "upstream";
 type DeleteTarget = {
@@ -1260,6 +1261,7 @@ export default function AdminPage() {
                 ["config", "模型与供应商"],
                 ["payments", "支付渠道"],
                 ["sms", "短信渠道"],
+                ["support", "客服"],
                 ["audit", "审计日志"],
             ] as Array<[Tab, string]>
           ).map(([value, label]) => (
@@ -1416,6 +1418,8 @@ export default function AdminPage() {
             )}
           </section>
         )}
+
+        {tab === "support" && <SupportAdminPanel />}
 
         {tab === "users" && (
           <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">

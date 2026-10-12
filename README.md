@@ -24,7 +24,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + S3 兼容对象存储
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包、模型/供应商、支付渠道和短信渠道管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
+- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包、模型/供应商、支付渠道、短信渠道和客服队列管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
 - **平台货币**：钱包、账本、模型价格和所有消费统一使用光子（符号 `✦`）；后台汇率 `1 人民币 = N 光子` 只用于充值换算，消费不套用汇率
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
@@ -92,6 +92,17 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 `PAYMENT_CONFIG_ENCRYPTION_KEY` 加密保存，密钥变更前必须完成配置迁移。易支付 `baseUrl`、支付宝 `gateway` 与微信 `baseUrl` 必须是无嵌入凭据、查询串和片段的 HTTPS endpoint；易支付查单携带商户 key，禁止配置 HTTP 地址。
 Docker 生产编排会设置 `TRUST_PROXY=true`，使微信 H5 下单可取得 Nginx 传递的真实客户端 IP；仅当后端只经受信任的反向代理暴露时才应启用该配置。
 
+### 客服
+
+用户可从首页或顶部导航进入 `/support`，每个用户拥有一个独立的客服会话，支持纯文本消息、历史记录、等待客服/等待用户/已结束状态和断线重连后的消息补齐。普通 `POST` 请求写入消息，后端通过 Redis 转发并使用带 Bearer Token 的 SSE 推送实时消息；客服消息不进入 AI 聊天、Provider 或钱包计费链路。
+
+管理员在 `/admin` 的“客服”页签中共享客服队列，可按状态、未读和关键词筛选，查看客户联系方式与消息、回复、标记已读、结束或重新打开会话。管理员回复和状态变更写入审计日志，但审计详情不保存完整消息内容。客服接口包括：
+
+- 用户：`GET /support/conversation`、`GET/POST /support/conversation/messages`、`POST /support/conversation/read`、`GET /support/conversation/events`
+- 管理员：`GET /support/admin/conversations`、`GET /support/admin/conversations/:id/messages`、`POST /support/admin/conversations/:id/messages`、`PATCH /support/admin/conversations/:id/status`、`POST /support/admin/conversations/:id/read`、`GET /support/admin/unread-count`、`GET /support/admin/events`
+
+消息长度限制为 2000 个字符，用户发送频率限制为每分钟 20 条；停用账号不能访问接口，普通用户不能访问管理队列。
+
 ### 手机号与短信认证
 
 认证接口兼容原有邮箱参数，同时支持 `account`（邮箱或手机号）参数：
@@ -137,6 +148,7 @@ pnpm frontend:dev   # 前端 http://localhost:3000
 | http://localhost:3000 | 前端首页 |
 | http://localhost:3000/chat | 聊天页 |
 | http://localhost:3000/image | 生图页 |
+| http://localhost:3000/support | 客服页 |
 | http://localhost:3000/admin | 管理后台 |
 | http://localhost:3000/api/docs | Swagger API 文档（前端代理） |
 | http://localhost:3000/health | 后端健康检查（前端代理） |
@@ -177,6 +189,7 @@ apps/backend/src/
     ├── providers/         # 上游供应商（路由/熔断/限流）
     ├── chat/              # 聊天会话、流式输出
     ├── image/             # 生图任务、异步处理
+    ├── support/           # 客服会话、消息、未读和 SSE
     ├── admin/             # 用户、钱包与运行概览管理 API
     └── audit/             # 管理员操作审计写入与查询 API
 ```
@@ -193,6 +206,7 @@ apps/frontend/src/app/
 ├── image/                 # 生图页
 ├── history/               # 历史记录
 ├── profile/               # 个人中心（充值、钱包和账单）
+├── support/               # 用户客服会话
 └── admin/                 # 管理后台
 ```
 
@@ -233,4 +247,5 @@ pnpm e2e:down
 7. ~~历史记录独立页面~~ ✓（真实后端端到端验证待补）
 8. ~~生图持久化队列~~ ✓（真实 Redis/重启验证待补）
 9. ~~管理端后端 + 审计 + UI~~ ✓（真实环境端到端验证待补）
-10. 验证清单逐条验证
+10. ~~客服会话 + 管理队列 + SSE~~ ✓（远程验证待补）
+11. 验证清单逐条验证

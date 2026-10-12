@@ -16,6 +16,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SmsModule } from './modules/sms/sms.module';
+import { SupportModule } from './modules/support/support.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { SmsModule } from './modules/sms/sms.module';
     AuditModule,
     PaymentsModule,
     SmsModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { UserInfo } from "@lumina/shared";
 import { getStoredUser, logout } from "@/lib/auth";
 
-export type AppNavKey = "home" | "image" | "chat" | "history" | "profile";
+export type AppNavKey = "home" | "image" | "chat" | "history" | "support" | "profile";
 
 interface AppNavItem {
   href: string;
@@ -27,6 +27,7 @@ const defaultItems: AppNavItem[] = [
   { href: "/image", label: "AI 生图", key: "image" },
   { href: "/chat", label: "AI 聊天", key: "chat" },
   { href: "/history", label: "历史记录", key: "history" },
+  { href: "/support", label: "联系客服", key: "support" },
 ];
 
 export default function AppHeader({

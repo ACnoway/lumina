@@ -351,6 +351,105 @@ async function main() {
   const reactivatedBalance = await requestAuth(userToken, '/wallet/balance');
   assert(Number(reactivatedBalance.data.balance) === 10, 'reactivated user wallet access mismatch');
 
+  const supportConversation = await requestAuth(userToken, '/support/conversation');
+  assert(
+    supportConversation.data.conversation?.userId === userId,
+    'support conversation was not created for the current user',
+  );
+  const supportConversationId = supportConversation.data.conversation.id;
+  await requestAuth(userToken, '/support/admin/conversations', {}, [403]);
+
+  const supportUserMessage = await requestAuth(userToken, '/support/conversation/messages', {
+    method: 'POST',
+    body: { content: 'E2E 客服咨询：如何使用客服功能？' },
+  });
+  assert(
+    supportUserMessage.data.message.senderType === 'USER',
+    'support user message sender type mismatch',
+  );
+  assert(
+    supportUserMessage.data.conversation.adminUnreadCount === 1,
+    'support admin unread count did not increase',
+  );
+
+  const supportQueue = await requestAuth(
+    adminToken,
+    '/support/admin/conversations?unread=ADMIN&limit=100',
+  );
+  const queuedSupportConversation = supportQueue.data.items.find(
+    (item) => item.id === supportConversationId,
+  );
+  assert(queuedSupportConversation, 'admin support queue did not contain the user conversation');
+  assert(
+    queuedSupportConversation.adminUnreadCount === 1,
+    'admin support queue unread count mismatch',
+  );
+  const supportUnread = await requestAuth(adminToken, '/support/admin/unread-count');
+  assert(Number(supportUnread.data.unreadCount) >= 1, 'admin support unread total did not increase');
+
+  const supportAdminMessages = await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/messages`,
+  );
+  assert(
+    supportAdminMessages.data.items === undefined &&
+      supportAdminMessages.data.messages.some((item) => item.id === supportUserMessage.data.message.id),
+    'admin support messages did not contain the user message',
+  );
+  const markedSupportRead = await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/read`,
+    { method: 'POST' },
+  );
+  assert(
+    markedSupportRead.data.conversation.adminUnreadCount === 0,
+    'admin support read marker did not clear unread count',
+  );
+
+  const supportAdminReply = await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/messages`,
+    {
+      method: 'POST',
+      body: { content: 'E2E 客服回复：请在客服页面直接发送消息。' },
+    },
+  );
+  assert(
+    supportAdminReply.data.message.senderType === 'ADMIN' &&
+      supportAdminReply.data.conversation.status === 'WAITING_FOR_USER',
+    'admin support reply did not update sender or status',
+  );
+  const supportUserMessages = await requestAuth(userToken, '/support/conversation/messages');
+  assert(
+    supportUserMessages.data.messages.some((item) => item.id === supportAdminReply.data.message.id),
+    'user support messages did not contain the admin reply',
+  );
+
+  const closedSupport = await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/status`,
+    { method: 'PATCH', body: { status: 'CLOSED' } },
+  );
+  assert(
+    closedSupport.data.conversation.status === 'CLOSED',
+    'support conversation did not close',
+  );
+  await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/messages`,
+    { method: 'POST', body: { content: 'closed message' } },
+    [400],
+  );
+  const reopenedSupport = await requestAuth(
+    adminToken,
+    `/support/admin/conversations/${supportConversationId}/status`,
+    { method: 'PATCH', body: { status: 'WAITING_FOR_AGENT' } },
+  );
+  assert(
+    reopenedSupport.data.conversation.status === 'WAITING_FOR_AGENT',
+    'support conversation did not reopen',
+  );
+
   const adjustmentReason = 'E2E balance adjustment';
   const balanceAdjustment = await requestAuth(adminToken, '/admin/wallet/adjustments', {
     method: 'POST',
@@ -770,6 +869,11 @@ async function main() {
     'prompt optimizer setting was not audited',
   );
   assert(actions.includes('currency_settings.updated'), 'currency setting was not audited');
+  assert(actions.includes('support.message.created'), 'support admin reply was not audited');
+  assert(
+    actions.includes('support.conversation.status.updated'),
+    'support status update was not audited',
+  );
   const statusAudits = auditLogs.data.items.filter(
     (item) => item.action === 'user.status.updated' && item.details?.targetId === userId,
   );

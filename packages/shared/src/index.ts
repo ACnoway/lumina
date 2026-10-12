@@ -322,6 +322,78 @@ export interface GetMessagesResponse {
   limit: number;
 }
 
+// ==================== 客服相关 DTO ====================
+export type SupportConversationStatus =
+  | 'WAITING_FOR_AGENT'
+  | 'WAITING_FOR_USER'
+  | 'CLOSED';
+
+export type SupportMessageSenderType = 'USER' | 'ADMIN' | 'SYSTEM';
+
+export interface SupportConversationDto {
+  id: string;
+  userId: string;
+  user: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    nickname: string | null;
+  };
+  status: SupportConversationStatus;
+  lastMessagePreview: string | null;
+  lastMessageAt: string | null;
+  userUnreadCount: number;
+  adminUnreadCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportMessageDto {
+  id: string;
+  conversationId: string;
+  senderType: SupportMessageSenderType;
+  senderId: string | null;
+  content: string;
+  createdAt: string;
+}
+
+export interface SupportConversationResponse {
+  conversation: SupportConversationDto;
+}
+
+export interface SupportMessagesResponse {
+  messages: SupportMessageDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface SupportConversationsResponse {
+  items: SupportConversationDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface SupportUnreadResponse {
+  unreadCount: number;
+}
+
+export interface SupportMessageEvent {
+  type: 'message';
+  message: SupportMessageDto;
+  conversation?: SupportConversationDto;
+}
+
+export interface SupportConversationEvent {
+  type: 'conversation';
+  conversation: SupportConversationDto;
+}
+
+export type SupportSseEvent = SupportMessageEvent | SupportConversationEvent;
+
 // ==================== 生图相关 DTO ====================
 export interface OptimizePromptDto {
   prompt: string;

@@ -42,6 +42,7 @@ async function bootstrap() {
     .addTag('image', '生图功能')
     .addTag('admin', '管理端')
     .addTag('payments', '支付与充值')
+    .addTag('support', '客服')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

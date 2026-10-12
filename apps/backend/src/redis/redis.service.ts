@@ -114,6 +114,33 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.del(key);
   }
 
+  async publish(channel: string, message: string): Promise<void> {
+    await this.client.publish(channel, message);
+  }
+
+  /**
+   * 为长连接创建独立的 Redis 订阅客户端。Redis 客户端进入订阅模式后
+   * 不能再执行普通命令，因此每条 SSE 连接都使用一个短生命周期副本。
+   */
+  async subscribe(
+    channel: string,
+    handler: (message: string) => void,
+  ): Promise<() => Promise<void>> {
+    const subscriber = this.client.duplicate();
+    subscriber.on('error', (error) => {
+      console.error(`Redis subscriber error on ${channel}`, error);
+    });
+    await subscriber.connect();
+    await subscriber.subscribe(channel, handler);
+
+    return async () => {
+      if (subscriber.isOpen) {
+        await subscriber.unsubscribe(channel);
+        await subscriber.disconnect();
+      }
+    };
+  }
+
   /**
    * 原子校验并消费验证码。
    * 返回 1 表示匹配并删除，-1 表示验证码存在但不匹配，0 表示不存在或已过期。
