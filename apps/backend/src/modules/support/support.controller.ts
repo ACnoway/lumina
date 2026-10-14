@@ -169,7 +169,6 @@ export class SupportController {
     response.setHeader('Connection', 'keep-alive');
     response.setHeader('X-Accel-Buffering', 'no');
     response.flushHeaders?.();
-    response.write('event: ready\ndata: {"type":"ready"}\n\n');
 
     let closed = false;
     let unsubscribe: () => Promise<void> = async () => undefined;
@@ -194,6 +193,10 @@ export class SupportController {
         await unsubscribe();
         return;
       }
+      // Only report the connection as ready after the Redis subscription is
+      // active, otherwise the client can miss the first event while the
+      // subscriber is still connecting.
+      response.write('event: ready\ndata: {"type":"ready"}\n\n');
       heartbeat = setInterval(() => {
         if (!closed && !response.writableEnded) response.write(': heartbeat\n\n');
       }, 25000);

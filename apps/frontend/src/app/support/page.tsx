@@ -81,6 +81,7 @@ export default function SupportPage() {
           for await (const event of supportApi.events(controller.signal)) {
             if (cancelled) return;
             if (event.type === "ready") {
+              window.clearTimeout(timeoutId);
               setRealtimeState("connected");
               reconnectDelayRef.current = 1500;
               continue;
@@ -89,7 +90,9 @@ export default function SupportPage() {
             if (event.type === "message") {
               setMessages((current) => appendMessage(current, event.message));
               if (event.message.senderType === "ADMIN") {
-                void supportApi.markRead().catch(() => undefined);
+                void supportApi.markRead()
+                  .then((result) => setConversation(result.conversation))
+                  .catch(() => undefined);
               }
             }
           }

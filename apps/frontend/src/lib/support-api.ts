@@ -60,6 +60,11 @@ async function* parseSse(
 
   const event = readLine(buffer);
   if (event) yield event;
+
+  // A healthy SSE response is expected to stay open. Treat an unexpected
+  // EOF as a connection failure so callers can enter their reconnect path
+  // instead of spinning a new connection without backoff.
+  throw new Error('实时连接已断开');
 }
 
 export const supportApi = {

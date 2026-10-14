@@ -25,6 +25,7 @@ import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api-client";
 import { fetchCurrentUser } from "@/lib/auth";
 import { formatPhoton, formatPhotonTruncated } from "@/lib/model-pricing";
+import { supportApi } from "@/lib/support-api";
 import AppHeader from "@/components/AppHeader";
 import SupportAdminPanel from "./SupportAdminPanel";
 
@@ -98,6 +99,10 @@ const transactionTypeLabels: Record<TransactionType, string> = {
   REFUND: "退款",
   ADMIN_ADJUST: "管理员调整",
 };
+
+function formatSupportUnreadCount(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
 
 function getTransactionDisplay(type: TransactionType, amount: number): {
   amount: number;
@@ -290,6 +295,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
 
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(false);
@@ -598,6 +604,29 @@ export default function AdminPage() {
   useEffect(() => {
     if (accessState === "allowed" && tab === "sms") void loadSmsChannels();
   }, [accessState, loadSmsChannels, tab]);
+
+  useEffect(() => {
+    if (accessState !== "allowed") return undefined;
+    let active = true;
+    const refreshUnreadCount = () => {
+      void supportApi
+        .getUnreadCount()
+        .then(({ unreadCount }) => {
+          if (!active) return;
+          setSupportUnreadCount(
+            Number.isFinite(unreadCount) ? Math.max(0, Math.floor(unreadCount)) : 0,
+          );
+        })
+        .catch(() => undefined);
+    };
+
+    refreshUnreadCount();
+    const intervalId = window.setInterval(refreshUnreadCount, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [accessState]);
 
   async function selectUser(user: AdminUserDto) {
     setSelectedUser(user);
@@ -1271,7 +1300,17 @@ export default function AdminPage() {
               onClick={() => setTab(value)}
               className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === value ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50 hover:text-blue-700"}`}
             >
-              {label}
+              <span className="inline-flex items-center gap-1.5">
+                {label}
+                {value === "support" && supportUnreadCount > 0 && (
+                  <span
+                    aria-label={`未读客户消息 ${supportUnreadCount}`}
+                    className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${tab === value ? "bg-white text-blue-700" : "bg-red-100 text-red-700"}`}
+                  >
+                    {formatSupportUnreadCount(supportUnreadCount)}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
         </div>
@@ -1419,7 +1458,9 @@ export default function AdminPage() {
           </section>
         )}
 
-        {tab === "support" && <SupportAdminPanel />}
+        {tab === "support" && (
+          <SupportAdminPanel onUnreadCountChange={setSupportUnreadCount} />
+        )}
 
         {tab === "users" && (
           <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">

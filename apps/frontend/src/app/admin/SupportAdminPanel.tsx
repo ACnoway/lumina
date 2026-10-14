@@ -17,6 +17,10 @@ const statusLabels: Record<SupportConversationStatus, string> = {
 const SSE_CONNECT_TIMEOUT_MS = 35_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
+type SupportAdminPanelProps = {
+  onUnreadCountChange?: (count: number) => void;
+};
+
 function formatDate(value: string | null): string {
   if (!value) return "暂无消息";
   return new Intl.DateTimeFormat("zh-CN", {
@@ -38,7 +42,7 @@ function appendMessage(current: SupportMessageDto[], message: SupportMessageDto)
   );
 }
 
-export default function SupportAdminPanel() {
+export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminPanelProps) {
   const [conversations, setConversations] = useState<SupportConversationDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SupportMessageDto[]>([]);
@@ -60,6 +64,15 @@ export default function SupportAdminPanel() {
     [conversations, selectedId],
   );
 
+  const applyUnreadCount = useCallback(
+    (count: number) => {
+      const normalized = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+      setUnreadCount(normalized);
+      onUnreadCountChange?.(normalized);
+    },
+    [onUnreadCountChange],
+  );
+
   const loadConversations = useCallback(async () => {
     const result = await supportApi.listConversations({
       page: 1,
@@ -69,12 +82,12 @@ export default function SupportAdminPanel() {
       unread,
     });
     setConversations(result.items);
-    setUnreadCount((await supportApi.getUnreadCount()).unreadCount);
+    applyUnreadCount((await supportApi.getUnreadCount()).unreadCount);
     setSelectedId((current) => {
       if (current && result.items.some((item) => item.id === current)) return current;
       return result.items[0]?.id || null;
     });
-  }, [keyword, status, unread]);
+  }, [applyUnreadCount, keyword, status, unread]);
 
   const loadMessages = useCallback(async (conversationId: string) => {
     setLoadingMessages(true);
@@ -83,13 +96,13 @@ export default function SupportAdminPanel() {
       setMessages(result.messages);
       const read = await supportApi.markAdminRead(conversationId);
       setConversations((current) => current.map((item) => (item.id === read.conversation.id ? read.conversation : item)));
-      setUnreadCount((current) => Math.max(0, current - 1));
+      applyUnreadCount((await supportApi.getUnreadCount()).unreadCount);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载客服消息失败");
     } finally {
       setLoadingMessages(false);
     }
-  }, []);
+  }, [applyUnreadCount]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -122,18 +135,15 @@ export default function SupportAdminPanel() {
           for await (const event of supportApi.adminEvents(controller.signal)) {
             if (cancelled) return;
             if (event.type === "ready") {
+              window.clearTimeout(timeoutId);
               setRealtimeState("connected");
               reconnectDelayRef.current = 1500;
               continue;
             }
             if ("conversation" in event && event.conversation) {
-              setConversations((current) => {
-                const exists = current.some((item) => item.id === event.conversation!.id);
-                return exists
-                  ? current.map((item) => (item.id === event.conversation!.id ? event.conversation! : item))
-                  : [event.conversation!, ...current];
-              });
-              void supportApi.getUnreadCount().then((result) => setUnreadCount(result.unreadCount)).catch(() => undefined);
+              // Re-query the filtered/sorted queue so unread filters and
+              // server-side ordering remain authoritative after an event.
+              void loadConversations().catch(() => undefined);
             }
             if (event.type === "message" && event.message.conversationId === selectedIdRef.current) {
               setMessages((current) => appendMessage(current, event.message));
@@ -142,8 +152,6 @@ export default function SupportAdminPanel() {
         } catch {
           if (!cancelled) {
             setRealtimeState("fallback");
-            await loadConversations().catch(() => undefined);
-            if (selectedIdRef.current) await loadMessages(selectedIdRef.current);
             await new Promise((resolve) => window.setTimeout(resolve, reconnectDelayRef.current));
             reconnectDelayRef.current = Math.min(
               MAX_RECONNECT_DELAY_MS,
