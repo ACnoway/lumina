@@ -45,6 +45,8 @@ function appendMessage(current: SupportMessageDto[], message: SupportMessageDto)
 export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminPanelProps) {
   const [conversations, setConversations] = useState<SupportConversationDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedConversationSnapshot, setSelectedConversationSnapshot] =
+    useState<SupportConversationDto | null>(null);
   const [messages, setMessages] = useState<SupportMessageDto[]>([]);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState<SupportConversationStatus | "">("");
@@ -53,15 +55,19 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [markingRead, setMarkingRead] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "fallback">("connecting");
   const selectedIdRef = useRef<string | null>(null);
+  const conversationsRequestRef = useRef(0);
   const reconnectDelayRef = useRef(1500);
 
   const selectedConversation = useMemo(
-    () => conversations.find((item) => item.id === selectedId) || null,
-    [conversations, selectedId],
+    () =>
+      conversations.find((item) => item.id === selectedId) ||
+      (selectedConversationSnapshot?.id === selectedId ? selectedConversationSnapshot : null),
+    [conversations, selectedConversationSnapshot, selectedId],
   );
 
   const applyUnreadCount = useCallback(
@@ -74,6 +80,7 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
   );
 
   const loadConversations = useCallback(async () => {
+    const requestId = ++conversationsRequestRef.current;
     const result = await supportApi.listConversations({
       page: 1,
       limit: 100,
@@ -81,10 +88,19 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
       status,
       unread,
     });
+    const unreadResult = await supportApi.getUnreadCount();
+    if (requestId !== conversationsRequestRef.current) return;
+    const currentSelectedId = selectedIdRef.current;
+    const selectedFromResult = result.items.find((item) => item.id === currentSelectedId);
+    if (selectedFromResult) {
+      setSelectedConversationSnapshot(selectedFromResult);
+    } else if (!currentSelectedId) {
+      setSelectedConversationSnapshot(result.items[0] || null);
+    }
     setConversations(result.items);
-    applyUnreadCount((await supportApi.getUnreadCount()).unreadCount);
+    applyUnreadCount(unreadResult.unreadCount);
     setSelectedId((current) => {
-      if (current && result.items.some((item) => item.id === current)) return current;
+      if (current) return current;
       return result.items[0]?.id || null;
     });
   }, [applyUnreadCount, keyword, status, unread]);
@@ -94,15 +110,21 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
     try {
       const result = await supportApi.getAdminMessages(conversationId, 1, 100);
       setMessages(result.messages);
-      const read = await supportApi.markAdminRead(conversationId);
-      setConversations((current) => current.map((item) => (item.id === read.conversation.id ? read.conversation : item)));
-      applyUnreadCount((await supportApi.getUnreadCount()).unreadCount);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载客服消息失败");
     } finally {
       setLoadingMessages(false);
     }
-  }, [applyUnreadCount]);
+  }, []);
+
+  const updateConversation = useCallback((conversation: SupportConversationDto) => {
+    setConversations((current) =>
+      current.map((item) => (item.id === conversation.id ? conversation : item)),
+    );
+    setSelectedConversationSnapshot((current) =>
+      current?.id === conversation.id ? conversation : current,
+    );
+  }, []);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -196,7 +218,7 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
     try {
       const result = await supportApi.sendAdminMessage(selectedId, draft.trim());
       setMessages((current) => appendMessage(current, result.message));
-      setConversations((current) => current.map((item) => (item.id === result.conversation.id ? result.conversation : item)));
+      updateConversation(result.conversation);
       setDraft("");
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "发送回复失败");
@@ -205,11 +227,27 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
     }
   }
 
+  async function markSelectedRead() {
+    if (!selectedId || !selectedConversation || selectedConversation.adminUnreadCount <= 0 || markingRead) return;
+    setMarkingRead(true);
+    setError("");
+    try {
+      const result = await supportApi.markAdminRead(selectedId);
+      updateConversation(result.conversation);
+      applyUnreadCount((await supportApi.getUnreadCount()).unreadCount);
+      await loadConversations();
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "标记已读失败");
+    } finally {
+      setMarkingRead(false);
+    }
+  }
+
   async function changeStatus(nextStatus: SupportConversationStatus) {
     if (!selectedId) return;
     try {
       const result = await supportApi.updateStatus(selectedId, nextStatus);
-      setConversations((current) => current.map((item) => (item.id === result.conversation.id ? result.conversation : item)));
+      updateConversation(result.conversation);
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "更新会话状态失败");
     }
@@ -268,7 +306,10 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
               <button
                 type="button"
                 key={item.id}
-                onClick={() => setSelectedId(item.id)}
+                onClick={() => {
+                  setSelectedId(item.id);
+                  setSelectedConversationSnapshot(item);
+                }}
                 className={`w-full border-b border-gray-100 px-4 py-4 text-left transition ${selectedId === item.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -300,6 +341,16 @@ export default function SupportAdminPanel({ onUnreadCountChange }: SupportAdminP
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-700">{statusLabels[selectedConversation.status]}</span>
+                  {selectedConversation.adminUnreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void markSelectedRead()}
+                      disabled={markingRead}
+                      className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      {markingRead ? "标记中…" : "标记已读"}
+                    </button>
+                  )}
                   {selectedConversation.status === "CLOSED" ? (
                     <button type="button" onClick={() => void changeStatus("WAITING_FOR_AGENT")} className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50">重新打开</button>
                   ) : (
