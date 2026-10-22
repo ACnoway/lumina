@@ -845,6 +845,9 @@ async function main() {
     const form = new FormData();
     form.append('model', imageModel.data.name);
     form.append('prompt', 'edit the reference image');
+    form.append('originalPrompt', 'original edit request');
+    form.append('negativePrompt', 'blurry');
+    form.append('aspectRatio', '1:1');
     form.append('imageCount', '2');
     form.append('referenceImage', new Blob([bytes], { type: mimeType }), 'reference.png');
     return form;
@@ -874,6 +877,7 @@ async function main() {
   await postReference(duplicateReference, 400);
   const referenceTask = await postReference(referenceForm(), 201);
   const completedReference = await pollImageTask(userToken, referenceTask.id);
+  assert(completedReference.originalPrompt === 'original edit request' && completedReference.negativePrompt === 'blurry', 'multipart optional prompts were not preserved');
   assert(completedReference.referenceImage?.mimeType === 'image/png', 'reference MIME type missing from task');
   assert(completedReference.referenceImage?.size === validPng.length, 'reference size missing from task');
   assert(completedReference.images?.length === 2 && Number(completedReference.cost) === 0.02, 'reference images were not generated and billed per output');
