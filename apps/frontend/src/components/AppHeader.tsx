@@ -80,11 +80,11 @@ export default function AppHeader({
   return (
     <header className="border-b border-gray-200 bg-white">
       <div
-        className={`mx-auto flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 ${
+        className={`mx-auto grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 px-4 py-3 sm:flex sm:flex-wrap sm:justify-between sm:gap-4 sm:px-6 sm:py-4 ${
           maxWidth === "7xl" ? "max-w-7xl" : "max-w-6xl"
         }`}
       >
-        <div>
+        <div className="min-w-0">
           <Link
             href="/"
             className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600 transition hover:text-blue-700"
@@ -94,9 +94,9 @@ export default function AppHeader({
           <h1 className="mt-1 text-xl font-semibold tracking-tight">{title}</h1>
         </div>
 
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3 sm:gap-4">
-          <nav
-            className="flex max-w-full flex-wrap items-center gap-1 text-sm text-gray-600"
+        <div className="contents sm:flex sm:min-w-0 sm:max-w-full sm:flex-wrap sm:items-center sm:gap-4">
+          {items.length > 0 && <nav
+            className="col-span-2 row-start-2 flex min-w-0 items-center gap-1 overflow-x-auto text-sm text-gray-600 sm:max-w-full sm:flex-wrap sm:overflow-visible"
             aria-label="主导航"
           >
             {items.map((item) => {
@@ -116,18 +116,18 @@ export default function AppHeader({
                 </Link>
               );
             })}
-          </nav>
+          </nav>}
           {trailing}
           {showUserMenu &&
             (user ? (
-              <div ref={menuRef} className="relative">
+              <div ref={menuRef} className="relative min-w-0 justify-self-end">
                 <button
                   type="button"
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
                   aria-label={`${userDisplayName} 用户菜单`}
                   onClick={() => setMenuOpen((current) => !current)}
-                  className={`inline-flex min-h-11 max-w-[min(15rem,70vw)] items-center gap-2 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 ${
+                  className={`inline-flex min-h-11 max-w-[40vw] items-center gap-2 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 sm:max-w-[15rem] ${
                     active === "profile"
                       ? "bg-blue-50 font-medium text-blue-700"
                       : "text-gray-600 hover:bg-gray-50 hover:text-blue-700"
