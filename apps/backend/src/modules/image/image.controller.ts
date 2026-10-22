@@ -77,7 +77,9 @@ export class ImageController {
       files: 1,
       fields: 6,
       fieldSize: 64 * 1024,
-      parts: 7,
+      // Busboy emits partsLimit on reaching the boundary, so leave one slot
+      // beyond the six fields and one file; fields/files still enforce both caps.
+      parts: 8,
     },
   }))
   async createTask(
