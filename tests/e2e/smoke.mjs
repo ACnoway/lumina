@@ -247,6 +247,7 @@ async function main() {
 
   const smsAdapterList = await requestAuth(adminToken, '/admin/sms-channels/adapters');
   assert(smsAdapterList.data.some((adapter) => adapter.type === 'MOCK'), 'Mock SMS adapter is not registered');
+  assert(smsAdapterList.data.some((adapter) => adapter.type === 'CHUANGLAN'), 'Chuanglan SMS adapter is not registered');
   const smsChannel = await requestAuth(adminToken, '/admin/sms-channels', {
     method: 'POST',
     body: { name: 'E2E Mock SMS', type: 'MOCK', config: {}, isActive: true },
@@ -254,6 +255,19 @@ async function main() {
   assert(smsChannel.data.type === 'MOCK', 'Mock SMS channel was not created');
   const smsChannelTest = await requestAuth(adminToken, `/admin/sms-channels/${smsChannel.data.id}/test`, { method: 'POST' });
   assert(smsChannelTest.data.ok === true, 'Mock SMS channel test failed');
+  const chuanglanSmsChannel = await requestAuth(adminToken, '/admin/sms-channels', {
+    method: 'POST',
+    body: {
+      name: 'E2E Chuanglan SMS',
+      type: 'CHUANGLAN',
+      config: { appId: 'e2e-chuanglan-appid', appSecret: 'e2e-chuanglan-secret', templateCode: 'e2e-template' },
+      isActive: false,
+    },
+  });
+  assert(chuanglanSmsChannel.data.type === 'CHUANGLAN', 'Chuanglan SMS channel was not created');
+  assert(!JSON.stringify(chuanglanSmsChannel.data).includes('e2e-chuanglan-secret'), 'Chuanglan app secret leaked in admin response');
+  const chuanglanSmsChannelTest = await requestAuth(adminToken, `/admin/sms-channels/${chuanglanSmsChannel.data.id}/test`, { method: 'POST' });
+  assert(chuanglanSmsChannelTest.data.ok === true, 'Chuanglan SMS configuration test failed');
 
   const phone = `+86138${String(Date.now()).slice(-8)}`;
   await requestJson('/auth/register/send-code', { method: 'POST', body: { phone } });

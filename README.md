@@ -114,7 +114,7 @@ Docker 生产编排会设置 `TRUST_PROXY=true`，使微信 H5 下单可取得 N
 
 手机号注册用户可以不填写邮箱；邮箱注册用户可以在个人中心绑定手机号。邮箱和手机号在数据库中均为可选唯一字段，但业务层保证至少有一个，短信登录只允许已验证手机号。`/auth/me`、`/users/me` 和管理端用户接口只返回脱敏手机号（例如 `138****1234`），不会返回短信渠道密钥或验证码。
 
-短信渠道位于 `apps/backend/src/modules/sms/`，包含 `MockSmsAdapter`、`AliyunSmsAdapter` 和 `TencentSmsAdapter`。管理端“短信渠道”页提供 Adapter 能力、渠道 CRUD、启停和配置测试；配置采用独立的 `SMS_CONFIG_ENCRYPTION_KEY` 加密，列表只返回脱敏摘要。Mock 渠道会把最近验证码短暂写入 Redis 的 `sms:mock:last-code:*`，仅用于测试，不写入数据库。
+短信渠道位于 `apps/backend/src/modules/sms/`，包含 `MockSmsAdapter`、`AliyunSmsAdapter`、`TencentSmsAdapter` 和 `ChuanglanSmsAdapter`。创蓝使用统一应用 API Key 鉴权，请配置 `appId`、`appSecret` 和已审核的 `verify` 类型 `templateCode`；`endpoint` 可选，默认 `https://smssh.253.com`。管理端“短信渠道”页提供 Adapter 能力、渠道 CRUD、启停和配置验证；创蓝的验证只检查配置格式，不会发送短信。配置采用独立的 `SMS_CONFIG_ENCRYPTION_KEY` 加密，列表只返回脱敏摘要。Mock 渠道会把最近验证码短暂写入 Redis 的 `sms:mock:last-code:*`，仅用于测试，不写入数据库。
 
 老用户迁移由 `20261009000000_add_phone_sms_auth` 完成：原有邮箱值保留，`email` 改为可空并新增可空唯一 `phone` 与 `phoneVerifiedAt`，管理员邮箱初始化逻辑不变。部署时先执行 `prisma migrate deploy`，再启动应用。
 

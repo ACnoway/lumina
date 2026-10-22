@@ -248,6 +248,7 @@ enum SmsChannelType {
   MOCK
   ALIYUN
   TENCENT
+  CHUANGLAN
 }
 
 model SmsChannel {

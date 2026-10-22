@@ -18,7 +18,7 @@ export interface CurrencySettingsDto {
 
 // ==================== 支付相关类型 ====================
 export type PaymentChannelType = 'EPAY' | 'ALIPAY' | 'WECHAT';
-export type SmsChannelType = 'MOCK' | 'ALIYUN' | 'TENCENT';
+export type SmsChannelType = 'MOCK' | 'ALIYUN' | 'TENCENT' | 'CHUANGLAN';
 export type PaymentMethod = 'ALIPAY' | 'WECHAT';
 export type PaymentScene = 'WEB' | 'H5' | 'QR' | 'JSAPI' | 'APP';
 export type PaymentOrderStatus =

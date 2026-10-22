@@ -1,0 +1,1 @@
+ALTER TYPE "SmsChannelType" ADD VALUE 'CHUANGLAN';

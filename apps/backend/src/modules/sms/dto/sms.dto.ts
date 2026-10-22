@@ -6,8 +6,8 @@ export class CreateSmsChannelDto {
   @MaxLength(100)
   name!: string;
 
-  @IsIn(['MOCK', 'ALIYUN', 'TENCENT'])
-  type!: 'MOCK' | 'ALIYUN' | 'TENCENT';
+  @IsIn(['MOCK', 'ALIYUN', 'TENCENT', 'CHUANGLAN'])
+  type!: 'MOCK' | 'ALIYUN' | 'TENCENT' | 'CHUANGLAN';
 
   @IsObject()
   config!: Record<string, unknown>;
