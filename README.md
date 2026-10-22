@@ -118,6 +118,8 @@ AI 聊天输入框支持 JPEG、PNG 和 WebP 图片，单张不超过 5 MiB，�
 
 手机号注册用户可以不填写邮箱；邮箱注册用户可以在个人中心绑定手机号。邮箱和手机号在数据库中均为可选唯一字段，但业务层保证至少有一个，短信登录只允许已验证手机号。`/auth/me`、`/users/me` 和管理端用户接口只返回脱敏手机号（例如 `138****1234`），不会返回短信渠道密钥或验证码。
 
+登录用户的顶部导航菜单优先显示昵称；未设置昵称时依次显示邮箱、脱敏手机号。
+
 短信渠道位于 `apps/backend/src/modules/sms/`，包含 `MockSmsAdapter`、`AliyunSmsAdapter`、`TencentSmsAdapter` 和 `ChuanglanSmsAdapter`。创蓝使用统一应用 API Key 鉴权，请配置 `appId`、`appSecret` 和已审核的 `verify` 类型 `templateCode`；`endpoint` 可选，默认 `https://smssh.253.com`，只接受 HTTPS 域名基础地址，不要粘贴发送接口路径。模板须仅包含一个验证码变量，长度至少 6 位，有效期文案应为 5 分钟。管理端“短信渠道”的“验证配置”会只读检查鉴权、模板审核状态及变量兼容性，不发送短信；配置错误会显示具体原因。配置采用独立的 `SMS_CONFIG_ENCRYPTION_KEY` 加密，列表只返回脱敏摘要。Mock 渠道会把最近验证码短暂写入 Redis 的 `sms:mock:last-code:*`，仅用于测试，不写入数据库。
 
 浏览器和公网代理使用 `POST /api/auth/register/send-code`，JSON 请求体为 `{"phone":"13800138000"}`；直接访问后端时去掉 `/api`。浏览器地址栏发出的 GET 返回 404 属于预期。供应商发送失败返回 503（`SMS_CONFIG_INVALID` 或 `SMS_UNAVAILABLE`），手机号格式和限流校验仍返回 400。创蓝 `201124`、模板配置与隔离测试方法见 [短信排障文档](docs/sms-chuanglan-troubleshooting.md)。

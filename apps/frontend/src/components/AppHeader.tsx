@@ -50,6 +50,8 @@ export default function AppHeader({
     return () => window.removeEventListener("storage", syncUser);
   }, []);
 
+  const userDisplayName = user?.nickname?.trim() || user?.email || user?.phone || "用户";
+
   useEffect(() => {
     if (!menuOpen) return;
 
@@ -123,7 +125,7 @@ export default function AppHeader({
                   type="button"
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
-                  aria-label={`${user.email} 用户菜单`}
+                  aria-label={`${userDisplayName} 用户菜单`}
                   onClick={() => setMenuOpen((current) => !current)}
                   className={`inline-flex max-w-[15rem] items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 ${
                     active === "profile"
@@ -131,7 +133,7 @@ export default function AppHeader({
                       : "text-gray-600 hover:bg-gray-50 hover:text-blue-700"
                   }`}
                 >
-                  <span className="max-w-[12rem] truncate">{user.email}</span>
+                  <span className="max-w-[12rem] truncate">{userDisplayName}</span>
                   <span
                     aria-hidden="true"
                     className={`text-xs transition-transform ${menuOpen ? "rotate-180" : ""}`}
@@ -148,7 +150,7 @@ export default function AppHeader({
                     <div className="border-b border-gray-100 px-4 py-3">
                       <p className="text-xs text-gray-400">当前账号</p>
                       <p className="mt-1 truncate text-sm font-medium text-gray-700">
-                        {user.email}
+                        {userDisplayName}
                       </p>
                     </div>
                     <Link
