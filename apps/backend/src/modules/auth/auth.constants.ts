@@ -1,5 +1,6 @@
 export type AuthCodePurpose = 'login' | 'register' | 'bind';
 
+export const VERIFICATION_CODE_LENGTH = 6;
 export const VERIFICATION_CODE_TTL_SECONDS = 300;
 export const SEND_COOLDOWN_TTL_SECONDS = 60;
 export const PHONE_RATE_LIMIT_TTL_SECONDS = 3600;

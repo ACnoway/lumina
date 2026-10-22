@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { User, UserRole } from '@prisma/client';
@@ -9,10 +9,12 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { AuditService } from '../../audit/audit.service';
 import { CreateSmsChannelDto, UpdateSmsChannelDto } from '../dto/sms.dto';
 import { SmsChannelService } from '../services/sms-channel.service';
+import { SmsChannelExceptionFilter } from './sms-channel-exception.filter';
 
 @ApiTags('admin')
 @Controller('admin/sms-channels')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseFilters(SmsChannelExceptionFilter)
 @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
 @ApiBearerAuth()
 export class AdminSmsChannelsController {

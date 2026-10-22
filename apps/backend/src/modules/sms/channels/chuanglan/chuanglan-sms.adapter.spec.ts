@@ -77,6 +77,51 @@ describe('ChuanglanSmsAdapter', () => {
     });
   });
 
+  it('identifies a white-template mismatch without hiding its remediation', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: { code: '201124', msg: '白模板匹配错误' },
+    } as never);
+
+    await expect(adapter.sendVerificationCode('+8613800000000', '123456', 'register', config)).rejects.toMatchObject({
+      code: 'TEMPLATE_MISMATCH',
+      message: expect.stringContaining('6 位'),
+    });
+  });
+
+  it('detects an approved template whose variable only allows four digits', async () => {
+    const post = jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        code: '000000',
+        data: { status: '1', content: '您的验证码为 {s}。', variableParams: [{ length: '4' }] },
+      },
+    } as never);
+
+    await expect(adapter.testConnection(config)).rejects.toMatchObject({
+      code: 'INVALID_CHANNEL_CONFIG',
+      message: expect.stringContaining('变量长度为 4 位'),
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0]).toContain('/template/detail');
+  });
+
+  it.each(['没有验证码变量', '验证码 {s}，有效期 {s} 分钟'])('rejects incompatible template content: %s', async (content) => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: { code: '000000', data: { status: '1', content } } } as never);
+    await expect(adapter.testConnection(config)).rejects.toMatchObject({ code: 'INVALID_CHANNEL_CONFIG' });
+  });
+
+  it('accepts a six-digit variable and rejects an unapproved template', async () => {
+    jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({
+        data: { code: '000000', data: { status: 1, content: '验证码 {s}，5 分钟内有效', variableParams: [{ length: 6 }] } },
+      } as never)
+      .mockResolvedValueOnce({ data: { code: '000000', data: { status: '2' } } } as never);
+    await expect(adapter.testConnection(config)).resolves.toBeUndefined();
+    await expect(adapter.testConnection(config)).rejects.toMatchObject({
+      code: 'CHANNEL_REQUEST_FAILED',
+      message: expect.stringContaining('模板未审核通过'),
+    });
+  });
+
   it('masks AppID and never includes the AppSecret in public config', () => {
     const publicConfig = adapter.getPublicConfig(config);
     expect(publicConfig).toMatchObject({ appId: 'te****id', templateCode: config.templateCode, secretConfigured: true });
@@ -88,6 +133,9 @@ describe('ChuanglanSmsAdapter', () => {
       code: 'INVALID_CHANNEL_CONFIG',
     });
     await expect(adapter.validateConfig({ ...config, endpoint: 'https://user:secret@smssh.253.com' })).rejects.toMatchObject({
+      code: 'INVALID_CHANNEL_CONFIG',
+    });
+    await expect(adapter.validateConfig({ ...config, endpoint: 'https://smssh.253.com/sms/v2/batch-send' })).rejects.toMatchObject({
       code: 'INVALID_CHANNEL_CONFIG',
     });
   });

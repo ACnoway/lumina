@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, randomInt } from 'crypto';
 import { SmsChannelType } from '@prisma/client';
+import { VERIFICATION_CODE_LENGTH } from '../../../auth/auth.constants';
 import { maskSecret } from '../../../auth/phone.util';
 import { SmsChannelAdapter, SmsChannelMetadata, SmsPurpose } from '../../core/sms.types';
 import { SmsChannelError, SmsErrorCode } from '../../core/sms.errors';
@@ -31,7 +32,11 @@ interface ChuanglanSendResponse {
 interface ChuanglanTemplateResponse {
   code?: string;
   msg?: string;
-  data?: { status?: string | number } | null;
+  data?: {
+    status?: string | number;
+    content?: string;
+    variableParams?: { length?: string | number }[] | null;
+  } | null;
 }
 
 @Injectable()
@@ -75,6 +80,12 @@ export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig
     try {
       const response = await this.post<ChuanglanSendResponse>(config, SEND_PATH, body);
       if (response.code !== '000000') {
+        if (response.code === '201124') {
+          throw new SmsChannelError(
+            SmsErrorCode.TEMPLATE_MISMATCH,
+            `创蓝白模板匹配错误（201124）：请检查 verify 模板是否只有一个验证码变量，且变量长度至少为 ${VERIFICATION_CODE_LENGTH} 位，并确认模板与 API Key 属于同一账号`,
+          );
+        }
         throw new Error(`code=${response.code ?? 'unknown'} msg=${response.msg ?? 'empty response'}`);
       }
       const successNum = Number(response.data?.successNum ?? 0);
@@ -83,6 +94,7 @@ export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig
         throw new Error(`创蓝未确认短信发送成功: successNum=${successNum} failNum=${failNum}`);
       }
     } catch (error) {
+      if (error instanceof SmsChannelError) throw error;
       throw new SmsChannelError(
         SmsErrorCode.CHANNEL_REQUEST_FAILED,
         `创蓝短信发送失败：${this.describeError(error)}`,
@@ -104,7 +116,22 @@ export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig
       if (String(response.data?.status ?? '') !== '1') {
         throw new Error(`模板未审核通过: status=${response.data?.status ?? 'unknown'}`);
       }
+      const template = response.data;
+      const variableCount = typeof template?.content === 'string'
+        ? (template.content.match(/\{s\}/g) ?? []).length
+        : template?.variableParams?.length;
+      if (variableCount !== undefined && variableCount !== 1) {
+        throw new SmsChannelError(SmsErrorCode.INVALID_CHANNEL_CONFIG, '创蓝验证码模板必须包含且只包含一个 {s} 验证码变量');
+      }
+      const variableLength = Number(template?.variableParams?.[0]?.length);
+      if (Number.isFinite(variableLength) && variableLength > 0 && variableLength < VERIFICATION_CODE_LENGTH) {
+        throw new SmsChannelError(
+          SmsErrorCode.INVALID_CHANNEL_CONFIG,
+          `创蓝模板验证码变量长度为 ${variableLength} 位，Lumina 需要 ${VERIFICATION_CODE_LENGTH} 位；请在创蓝控制台调整模板后重新审核`,
+        );
+      }
     } catch (error) {
+      if (error instanceof SmsChannelError) throw error;
       throw new SmsChannelError(
         SmsErrorCode.CHANNEL_REQUEST_FAILED,
         `创蓝短信配置验证失败：${this.describeError(error)}`,
@@ -164,7 +191,8 @@ export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig
   private isSecureEndpoint(value: string): boolean {
     try {
       const url = new URL(value);
-      return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password && !url.search && !url.hash;
+      return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password
+        && (!url.pathname || /^\/+$/u.test(url.pathname)) && !url.search && !url.hash;
     } catch {
       return false;
     }

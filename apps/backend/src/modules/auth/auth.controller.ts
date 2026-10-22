@@ -30,9 +30,9 @@ export class AuthController {
    */
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
-  async sendCode(@Body() dto: SendCodeDto): Promise<{ message: string }> {
+  async sendCode(@Body() dto: SendCodeDto, @Req() request: Request): Promise<{ message: string }> {
     if (dto.phone || (dto.account && !dto.account.includes('@'))) {
-      await this.authService.sendSmsCode(dto.phone || dto.account!, 'login');
+      await this.authService.sendSmsCode(dto.phone || dto.account!, 'login', request.ip);
       return { message: '如果账号存在，验证码将发送到对应手机号' };
     }
     await this.authService.sendCode(dto.email || dto.account!, 'login');
@@ -44,9 +44,9 @@ export class AuthController {
    */
   @Post('register/send-code')
   @HttpCode(HttpStatus.OK)
-  async sendRegisterCode(@Body() dto: SendCodeDto): Promise<{ message: string }> {
+  async sendRegisterCode(@Body() dto: SendCodeDto, @Req() request: Request): Promise<{ message: string }> {
     if (dto.phone || (dto.account && !dto.account.includes('@'))) {
-      await this.authService.sendSmsCode(dto.phone || dto.account!, 'register');
+      await this.authService.sendSmsCode(dto.phone || dto.account!, 'register', request.ip);
       return { message: '注册短信验证码已发送' };
     }
     await this.authService.sendCode(dto.email || dto.account!, 'register');

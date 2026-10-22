@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   Optional,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -11,9 +12,11 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import * as bcrypt from 'bcrypt';
 import { Prisma, User } from '@prisma/client';
+import { randomInt } from 'crypto';
 import { RedisService } from '../../redis/redis.service';
 import { UsersService } from '../users/users.service';
 import { SmsChannelService } from '../sms/services/sms-channel.service';
+import { SmsChannelError, SmsErrorCode } from '../sms/core/sms.errors';
 import {
   AuthCodePurpose,
   IP_RATE_LIMIT,
@@ -21,6 +24,7 @@ import {
   PHONE_RATE_LIMIT,
   PHONE_RATE_LIMIT_TTL_SECONDS,
   SEND_COOLDOWN_TTL_SECONDS,
+  VERIFICATION_CODE_LENGTH,
   VERIFICATION_CODE_TTL_SECONDS,
   getEmailCodeKey,
   getEmailCooldownKey,
@@ -68,7 +72,7 @@ export class AuthService {
   }
 
   private generateCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(10 ** (VERIFICATION_CODE_LENGTH - 1), 10 ** VERIFICATION_CODE_LENGTH).toString();
   }
 
   private normalizeEmail(email: string): string {
@@ -166,7 +170,12 @@ export class AuthService {
     } catch (error) {
       await this.clearSendState(codeKey, cooldownKey);
       this.logger.error(`Failed to send verification SMS: ${String(error)}`);
-      throw new BadRequestException('短信发送失败，请稍后重试');
+      const templateMismatch = error instanceof SmsChannelError
+        && (error.code === SmsErrorCode.TEMPLATE_MISMATCH || error.code === SmsErrorCode.INVALID_CHANNEL_CONFIG);
+      throw new ServiceUnavailableException({
+        code: templateMismatch ? 'SMS_CONFIG_INVALID' : 'SMS_UNAVAILABLE',
+        message: templateMismatch ? '短信模板配置有误，请联系管理员' : '短信服务暂不可用，请稍后重试',
+      });
     }
   }
 

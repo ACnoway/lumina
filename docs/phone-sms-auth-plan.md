@@ -68,7 +68,7 @@ SmsChannelAdapter
 - 渠道连通性测试；
 - 公共配置脱敏输出。
 
-创蓝 Adapter 使用统一应用 AppID/AppSecret 模式，按 `SHA1(AppSecret + Nonce + CurTime)` 生成鉴权头，通过模板发送验证码。Lumina 的登录、注册和绑定验证码均使用创蓝 `verify` 产品类型；须预先在创蓝控制台申请并审核该产品类型下的模板。配置字段为 `appId`、`appSecret`、`templateCode`，可选 `endpoint`（默认 `https://smssh.253.com`）。发送使用 `/sms/v2/batch-send`，验证码按 `param1` 传入模板变量；国内手机号发给创蓝时去掉 `+86`，改用 11 位号码。管理端“验证配置”调用模板详情接口验证鉴权和审核状态，不发送短信。
+创蓝 Adapter 使用统一应用 AppID/AppSecret 模式，按 `SHA1(AppSecret + Nonce + CurTime)` 生成鉴权头，通过模板发送验证码。Lumina 的登录、注册和绑定验证码均使用创蓝 `verify` 产品类型；须预先在创蓝控制台申请并审核该产品类型下的模板。配置字段为 `appId`、`appSecret`、`templateCode`，可选 `endpoint`（默认 `https://smssh.253.com`，仅允许 HTTPS 域名基础地址）。发送使用 `/sms/v2/batch-send`，验证码按 `param1` 传入模板变量；国内手机号发给创蓝时去掉 `+86`，改用 11 位号码。验证码为安全随机生成的 6 位数字，实际有效期 300 秒；模板只包含一个 `{s}` 变量，变量长度至少 6 位，固定文案使用 5 分钟。管理端“验证配置”调用模板详情接口验证鉴权、审核状态、变量数量和长度，不发送短信。创蓝白模板匹配错误 `201124` 会保留在后端诊断中；公开发送接口返回 503 和安全的配置错误提示，管理接口返回可操作的详细原因。详细证据和配置示例见 [创蓝短信排障](sms-chuanglan-troubleshooting.md)。
 
 每个具体短信供应商单独实现 Adapter，不让认证模块直接依赖供应商 SDK。
 

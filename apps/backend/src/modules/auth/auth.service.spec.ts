@@ -6,6 +6,8 @@ import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
 import { RedisService } from '../../redis/redis.service';
 import { UsersService } from '../users/users.service';
+import { SmsChannelService } from '../sms/services/sms-channel.service';
+import { SmsChannelError, SmsErrorCode } from '../sms/core/sms.errors';
 import { AuthService } from './auth.service';
 
 jest.mock('nodemailer', () => ({
@@ -15,6 +17,7 @@ jest.mock('nodemailer', () => ({
 class InMemoryAuthRedis {
   private readonly values = new Map<string, string>();
   private readonly expiresAt = new Map<string, number>();
+  isRateLimited = jest.fn().mockResolvedValue(false);
 
   async get(key: string): Promise<string | null> {
     this.removeIfExpired(key);
@@ -104,6 +107,7 @@ function createService(existingUser: User | null = null) {
 
   const users = {
     findByEmail: jest.fn().mockResolvedValue(existingUser),
+    findByPhone: jest.fn().mockResolvedValue(existingUser),
     create: jest.fn().mockImplementation(async (data: Partial<User>) =>
       createUser({
         email: data.email,
@@ -116,13 +120,15 @@ function createService(existingUser: User | null = null) {
   const jwt = {
     sign: jest.fn().mockReturnValue('jwt-token'),
   } as unknown as JwtService;
+  const smsChannels = { sendVerificationCode: jest.fn().mockResolvedValue(undefined) };
 
   return {
-    service: new AuthService(redis as unknown as RedisService, users, jwt, config),
+    service: new AuthService(redis as unknown as RedisService, users, jwt, config, smsChannels as unknown as SmsChannelService),
     redis,
     sendMail,
     users,
     jwt,
+    smsChannels,
   };
 }
 
@@ -145,6 +151,35 @@ describe('AuthService verification codes', () => {
     await expect(store.redis.get('auth:code:register:user@example.com')).resolves.toMatch(/^\d{6}$/);
     await expect(store.redis.ttl('auth:code:register:user@example.com')).resolves.toBe(300);
     await expect(store.redis.ttl('auth:code:cooldown:register:user@example.com')).resolves.toBe(60);
+  });
+
+  it('stores a six-digit SMS registration code for five minutes only after delivery', async () => {
+    const store = createService();
+    await store.service.sendSmsCode('13800000000', 'register', '192.0.2.10');
+
+    const code = await store.redis.get('auth:sms:code:register:+8613800000000');
+    expect(code).toMatch(/^\d{6}$/);
+    expect(store.smsChannels.sendVerificationCode).toHaveBeenCalledWith('+8613800000000', code, 'register');
+    await expect(store.redis.ttl('auth:sms:code:register:+8613800000000')).resolves.toBe(300);
+    expect(store.redis.isRateLimited).toHaveBeenCalledWith('auth:sms:rate:ip:192.0.2.10', 30, 3600);
+  });
+
+  it.each([
+    [SmsErrorCode.TEMPLATE_MISMATCH, 'SMS_CONFIG_INVALID'],
+    [SmsErrorCode.CHANNEL_REQUEST_FAILED, 'SMS_UNAVAILABLE'],
+  ])('clears failed SMS state and allows retry after %s', async (providerCode, responseCode) => {
+    const store = createService();
+    store.smsChannels.sendVerificationCode.mockRejectedValueOnce(new SmsChannelError(providerCode, 'provider-only diagnostics'));
+    await expect(store.service.sendSmsCode('13800000000', 'register', '192.0.2.10')).rejects.toMatchObject({
+      status: 503,
+      response: { code: responseCode },
+    });
+    await expect(store.redis.get('auth:sms:code:register:+8613800000000')).resolves.toBeNull();
+    await expect(store.redis.get('auth:sms:cooldown:register:+8613800000000')).resolves.toBeNull();
+
+    await store.service.sendSmsCode('13800000000', 'register', '192.0.2.10');
+    expect(store.smsChannels.sendVerificationCode).toHaveBeenCalledTimes(2);
+    await expect(store.redis.get('auth:sms:code:register:+8613800000000')).resolves.toMatch(/^\d{6}$/);
   });
 
   it('only sends login codes to existing users', async () => {
