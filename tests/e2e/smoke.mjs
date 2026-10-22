@@ -266,8 +266,6 @@ async function main() {
   });
   assert(chuanglanSmsChannel.data.type === 'CHUANGLAN', 'Chuanglan SMS channel was not created');
   assert(!JSON.stringify(chuanglanSmsChannel.data).includes('e2e-chuanglan-secret'), 'Chuanglan app secret leaked in admin response');
-  const chuanglanSmsChannelTest = await requestAuth(adminToken, `/admin/sms-channels/${chuanglanSmsChannel.data.id}/test`, { method: 'POST' });
-  assert(chuanglanSmsChannelTest.data.ok === true, 'Chuanglan SMS configuration test failed');
 
   const phone = `+86138${String(Date.now()).slice(-8)}`;
   await requestJson('/auth/register/send-code', { method: 'POST', body: { phone } });

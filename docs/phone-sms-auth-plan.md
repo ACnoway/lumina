@@ -68,7 +68,7 @@ SmsChannelAdapter
 - 渠道连通性测试；
 - 公共配置脱敏输出。
 
-创蓝 Adapter 使用统一应用 AppID/AppSecret 模式，按 `SHA1(AppSecret + Nonce + CurTime)` 生成鉴权头，通过模板发送验证码。Lumina 的登录、注册和绑定验证码均使用创蓝 `verify` 产品类型；须预先在创蓝控制台申请并审核该产品类型下的模板。配置字段为 `appId`、`appSecret`、`templateCode`，可选 `endpoint`（默认 `https://smssh.253.com`）。发送使用 `/sms/v2/batch-send`，验证码按 `param1` 传入模板变量；管理端“验证配置”只做本地配置校验，不会调用创蓝或发送短信。
+创蓝 Adapter 使用统一应用 AppID/AppSecret 模式，按 `SHA1(AppSecret + Nonce + CurTime)` 生成鉴权头，通过模板发送验证码。Lumina 的登录、注册和绑定验证码均使用创蓝 `verify` 产品类型；须预先在创蓝控制台申请并审核该产品类型下的模板。配置字段为 `appId`、`appSecret`、`templateCode`，可选 `endpoint`（默认 `https://smssh.253.com`）。发送使用 `/sms/v2/batch-send`，验证码按 `param1` 传入模板变量；国内手机号发给创蓝时去掉 `+86`，改用 11 位号码。管理端“验证配置”调用模板详情接口验证鉴权和审核状态，不发送短信。
 
 每个具体短信供应商单独实现 Adapter，不让认证模块直接依赖供应商 SDK。
 
@@ -176,7 +176,7 @@ SmsChannelAdapter
 E2E 测试：
 
 - 使用 `MockSmsAdapter`，不调用真实短信供应商；
-- 创蓝 Adapter 单测 mock HTTP，校验鉴权签名、模板参数和供应商失败响应；E2E 创建停用的创蓝测试渠道并验证配置，不发送真实短信；
+- 创蓝 Adapter 单测 mock HTTP，校验鉴权签名、国内手机号格式、模板参数、只读配置验证和供应商失败响应；E2E 创建停用的创蓝测试渠道并检查密钥掩码，不调用真实创蓝接口或发送短信；
 - 验证手机号注册；
 - 验证手机号密码登录；
 - 验证短信验证码登录；

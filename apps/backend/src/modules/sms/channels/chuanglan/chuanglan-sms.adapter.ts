@@ -28,6 +28,12 @@ interface ChuanglanSendResponse {
   } | null;
 }
 
+interface ChuanglanTemplateResponse {
+  code?: string;
+  msg?: string;
+  data?: { status?: string | number } | null;
+}
+
 @Injectable()
 export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig> {
   readonly type = SmsChannelType.CHUANGLAN;
@@ -59,47 +65,96 @@ export class ChuanglanSmsAdapter implements SmsChannelAdapter<ChuanglanSmsConfig
 
   async sendVerificationCode(phone: string, code: string, _purpose: SmsPurpose, config: ChuanglanSmsConfig): Promise<void> {
     await this.validateConfig(config);
-    const nonce = this.createNonce();
-    const curTime = Math.floor(Date.now() / 1000).toString();
-    const checkSum = createHash('sha1').update(`${config.appSecret}${nonce}${curTime}`).digest('hex');
     const body = {
       productType: 'verify',
-      phoneNumbers: phone,
+      phoneNumbers: this.toChuanglanPhoneNumber(phone),
       templateCode: config.templateCode,
       templateParam: JSON.stringify([{ param1: code }]),
     };
 
     try {
-      const response = await axios.post<ChuanglanSendResponse>(
-        `${(config.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, '')}${SEND_PATH}`,
-        body,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            AppID: config.appId,
-            Nonce: nonce,
-            CurTime: curTime,
-            CheckSum: checkSum,
-          },
-          timeout: config.timeout ?? 15000,
-        },
-      );
-      if (response.data?.code !== '000000') {
-        throw new Error(`code=${response.data?.code ?? 'unknown'} msg=${response.data?.msg ?? 'empty response'}`);
+      const response = await this.post<ChuanglanSendResponse>(config, SEND_PATH, body);
+      if (response.code !== '000000') {
+        throw new Error(`code=${response.code ?? 'unknown'} msg=${response.msg ?? 'empty response'}`);
       }
-      const successNum = Number(response.data.data?.successNum ?? 0);
-      const failNum = Number(response.data.data?.failNum ?? 0);
+      const successNum = Number(response.data?.successNum ?? 0);
+      const failNum = Number(response.data?.failNum ?? 0);
       if (!Number.isFinite(successNum) || !Number.isFinite(failNum) || successNum < 1 || failNum > 0) {
         throw new Error(`创蓝未确认短信发送成功: successNum=${successNum} failNum=${failNum}`);
       }
     } catch (error) {
-      throw new SmsChannelError(SmsErrorCode.CHANNEL_REQUEST_FAILED, '创蓝短信发送失败', error);
+      throw new SmsChannelError(
+        SmsErrorCode.CHANNEL_REQUEST_FAILED,
+        `创蓝短信发送失败：${this.describeError(error)}`,
+        error,
+      );
     }
   }
 
   async testConnection(config: ChuanglanSmsConfig): Promise<void> {
     await this.validateConfig(config);
+    try {
+      const response = await this.post<ChuanglanTemplateResponse>(config, '/sms/v2/template/detail', {
+        productType: 'verify',
+        templateCode: config.templateCode,
+      });
+      if (response.code !== '000000') {
+        throw new Error(`code=${response.code ?? 'unknown'} msg=${response.msg ?? 'empty response'}`);
+      }
+      if (String(response.data?.status ?? '') !== '1') {
+        throw new Error(`模板未审核通过: status=${response.data?.status ?? 'unknown'}`);
+      }
+    } catch (error) {
+      throw new SmsChannelError(
+        SmsErrorCode.CHANNEL_REQUEST_FAILED,
+        `创蓝短信配置验证失败：${this.describeError(error)}`,
+        error,
+      );
+    }
+  }
+
+  private async post<T>(config: ChuanglanSmsConfig, path: string, body: Record<string, string>): Promise<T> {
+    const nonce = this.createNonce();
+    const curTime = Math.floor(Date.now() / 1000).toString();
+    const checkSum = createHash('sha1').update(`${config.appSecret}${nonce}${curTime}`).digest('hex');
+    const response = await axios.post<T>(
+      `${(config.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, '')}${path}`,
+      body,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          AppID: config.appId,
+          Nonce: nonce,
+          CurTime: curTime,
+          CheckSum: checkSum,
+        },
+        timeout: config.timeout ?? 15000,
+      },
+    );
+    return response.data;
+  }
+
+  private toChuanglanPhoneNumber(phone: string): string {
+    // Chuanglan's domestic SMS API expects an 11-digit mainland number.
+    return phone.replace(/^\+86(?=1[3-9]\d{9}$)/, '');
+  }
+
+  private describeError(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const responseData = error.response?.data as { code?: unknown; msg?: unknown } | undefined;
+      const code = typeof responseData?.code === 'string' ? responseData.code : undefined;
+      const msg = typeof responseData?.msg === 'string' ? responseData.msg : undefined;
+      if (error.response) {
+        return [
+          `HTTP ${error.response.status}`,
+          code ? `code=${code}` : undefined,
+          msg ? `msg=${msg}` : undefined,
+        ].filter(Boolean).join(' ');
+      }
+      return [error.code, error.message].filter(Boolean).join(': ');
+    }
+    return error instanceof Error ? error.message : String(error);
   }
 
   private createNonce(): string {

@@ -23,7 +23,7 @@ describe('ChuanglanSmsAdapter', () => {
     expect(url).toBe('https://smssh.253.com/sms/v2/batch-send');
     expect(body).toEqual({
       productType: 'verify',
-      phoneNumbers: '+8613800000000',
+      phoneNumbers: '13800000000',
       templateCode: 'verify-template',
       templateParam: '[{"param1":"123456"}]',
     });
@@ -49,6 +49,31 @@ describe('ChuanglanSmsAdapter', () => {
     } as never);
     await expect(adapter.sendVerificationCode('+8613800000000', '123456', 'login', config)).rejects.toMatchObject({
       code: 'CHANNEL_REQUEST_FAILED',
+    });
+  });
+
+  it('checks credentials and the approved template without sending an SMS', async () => {
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({
+      data: { code: '000000', data: { status: '1' } },
+    } as never);
+
+    await adapter.testConnection(config);
+
+    expect(post).toHaveBeenCalledWith(
+      'https://smssh.253.com/sms/v2/template/detail',
+      { productType: 'verify', templateCode: config.templateCode },
+      expect.objectContaining({ headers: expect.objectContaining({ AppID: config.appId }) }),
+    );
+  });
+
+  it('includes the provider code in send failures for backend diagnostics', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: { code: '201500', msg: '统一应用不存在' },
+    } as never);
+
+    await expect(adapter.sendVerificationCode('+8613800000000', '123456', 'register', config)).rejects.toMatchObject({
+      code: 'CHANNEL_REQUEST_FAILED',
+      message: expect.stringContaining('code=201500'),
     });
   });
 
