@@ -153,7 +153,10 @@ export class ChatController {
   @UseInterceptors(
     FilesInterceptor('images', MAX_CHAT_IMAGES_PER_MESSAGE, {
       limits: {
-        fileSize: MAX_CHAT_IMAGE_SIZE_BYTES,
+        // Busboy marks a file truncated when it reaches the configured limit.
+        // Allow one extra byte through the parser so a file exactly at the
+        // documented maximum remains valid; validateChatImages rejects it.
+        fileSize: MAX_CHAT_IMAGE_SIZE_BYTES + 1,
         files: MAX_CHAT_IMAGES_PER_MESSAGE,
         fields: 5,
         fieldSize: 64 * 1024,
