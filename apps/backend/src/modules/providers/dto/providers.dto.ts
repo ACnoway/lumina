@@ -165,6 +165,11 @@ export class CreatePlatformModelDto {
   @IsBoolean({ message: 'supportsVision 必须是布尔值' })
   supportsVision?: boolean;
 
+  @ApiProperty({ description: '生图模型是否支持参考图及图片编辑', default: false, required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'supportsReferenceImage 必须是布尔值' })
+  supportsReferenceImage?: boolean;
+
   @ApiProperty({ description: '是否启用', default: true, required: false })
   @IsOptional()
   @IsBoolean({ message: 'isActive 必须是布尔值' })

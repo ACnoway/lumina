@@ -20,8 +20,15 @@ export const imageApi = {
     return apiClient.post('/image/optimize-prompt', { prompt });
   },
 
-  generate(data: CreateImageTaskDto): Promise<ImageTaskResponse> {
-    return apiClient.post('/image/generate', data);
+  generate(data: CreateImageTaskDto, referenceImage?: File): Promise<ImageTaskResponse> {
+    if (!referenceImage) return apiClient.post('/image/generate', data);
+
+    const form = new FormData();
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) form.append(key, String(value));
+    }
+    form.append('referenceImage', referenceImage);
+    return apiClient.post('/image/generate', form);
   },
 
   getTask(taskId: string): Promise<ImageTaskResponse> {

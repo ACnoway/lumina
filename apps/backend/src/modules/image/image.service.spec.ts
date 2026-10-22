@@ -18,6 +18,11 @@ const imageModel = {
   pricing: { perImage: 0.5 },
 };
 
+const referenceBuffer = Buffer.from('89504e470d0a1a0a', 'hex');
+const referenceImage = {
+  buffer: referenceBuffer, size: referenceBuffer.length, mimetype: 'image/png', originalname: 'ref.png',
+};
+
 const promptOptimizerModel = {
   id: 'model-chat-1',
   name: 'chat-model',
@@ -130,6 +135,8 @@ function createService() {
   };
   const minio = {
     upload: jest.fn(),
+    download: jest.fn().mockResolvedValue(referenceBuffer),
+    delete: jest.fn().mockResolvedValue(undefined),
     getPresignedUrl: jest.fn().mockResolvedValue('https://minio.test/image.png'),
   };
   const queue = {
@@ -152,6 +159,111 @@ function createService() {
 }
 
 describe('ImageService durable queue integration', () => {
+  it('rejects references on models without the capability before storage or billing', async () => {
+    const { service, prisma, minio, wallet } = createService();
+    await expect(service.createImageTask('user-1', { prompt: 'edit', model: 'image-model' }, referenceImage)).rejects.toThrow('不支持参考图');
+    expect(prisma.imageGeneration.create).not.toHaveBeenCalled();
+    expect(minio.upload).not.toHaveBeenCalled();
+    expect(wallet.preDeduct).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...referenceImage, buffer: Buffer.from('invalid') },
+    { ...referenceImage, mimetype: 'image/jpeg' },
+    { ...referenceImage, size: 5 * 1024 * 1024 + 1 },
+  ])('rejects invalid reference contents, MIME types, or size', async (file) => {
+    const { service, providers, minio } = createService();
+    providers.getPlatformModelByName.mockResolvedValue({ ...imageModel, supportsReferenceImage: true });
+    await expect(service.createImageTask('user-1', { prompt: 'edit', model: 'image-model' }, file)).rejects.toThrow();
+    expect(minio.upload).not.toHaveBeenCalled();
+  });
+
+  it('stores reference metadata before enqueueing and refreshes history URLs', async () => {
+    const { service, prisma, providers, minio, queue } = createService();
+    providers.getPlatformModelByName.mockResolvedValue({ ...imageModel, supportsReferenceImage: true });
+    prisma.imageGeneration.create.mockImplementation(async ({ data }) => ({ ...queuedTask, ...data }));
+    const task = await service.createImageTask('user-1', { prompt: 'edit', model: 'image-model' }, referenceImage);
+    const key = minio.upload.mock.calls[0][0];
+    expect(key).toMatch(/^images\/references\/user-1\/.+\.png$/);
+    expect(prisma.imageGeneration.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ referenceImageKey: key, referenceImageMimeType: 'image/png', referenceImageSize: 8 }),
+    }));
+    expect(queue.enqueue).toHaveBeenCalledWith('task-1');
+    expect(task.referenceImage).toEqual({ url: 'https://minio.test/image.png', mimeType: 'image/png', size: 8 });
+    expect(task).not.toHaveProperty('referenceImageKey');
+    minio.getPresignedUrl.mockResolvedValue('https://minio.test/refreshed');
+    prisma.imageGeneration.findUnique.mockResolvedValue({ ...queuedTask, referenceImageKey: key, referenceImageMimeType: 'image/png', referenceImageSize: 8 });
+    expect((await service.getTask('user-1', 'task-1')).referenceImage?.url).toBe('https://minio.test/refreshed');
+  });
+
+  it('cleans up an uploaded reference if task persistence fails', async () => {
+    const { service, prisma, providers, minio, queue } = createService();
+    providers.getPlatformModelByName.mockResolvedValue({ ...imageModel, supportsReferenceImage: true });
+    prisma.imageGeneration.create.mockRejectedValue(new Error('database unavailable'));
+    await expect(service.createImageTask('user-1', { prompt: 'edit', model: 'image-model' }, referenceImage)).rejects.toThrow('database unavailable');
+    expect(minio.delete).toHaveBeenCalledWith(minio.upload.mock.calls[0][0]);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('reloads the persisted reference and sends it to every image in a queued task', async () => {
+    const { service, prisma, providers, minio } = createService();
+    prisma.imageGeneration.findUnique.mockResolvedValue({ ...queuedTask,
+      referenceImageKey: 'reference.png', referenceImageMimeType: 'image/png',
+      parameters: { ...queuedTask.parameters, imageCount: 2 },
+    });
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'provider', config: {}, apiFormat: 'openai_image' },
+      upstreamModel: { upstreamModelId: 'upstream-image' },
+      recordResult: jest.fn().mockResolvedValue(undefined),
+    });
+    const callImage = jest.spyOn(service as any, 'callOpenAIImage').mockResolvedValue({ imageBuffer: Buffer.from('result') });
+    await service.processQueuedTask('task-1');
+    expect(minio.download).toHaveBeenCalledWith('reference.png');
+    expect(callImage).toHaveBeenCalledTimes(2);
+    for (const call of callImage.mock.calls) {
+      expect(call[5]).toMatchObject({ buffer: referenceBuffer, mimetype: 'image/png' });
+    }
+  });
+
+  it('sends multipart OpenAI edits with the reference bytes and idempotency key', async () => {
+    const { service } = createService();
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: [{ b64_json: 'aW1hZ2U=' }] } });
+    try {
+      await (service as any).callOpenAIImage({}, 'gpt-image-1', 'edit', { width: 1024, height: 1024 }, 'ref-key', referenceImage);
+      const [url, body, options] = post.mock.calls[0];
+      const form = body as FormData;
+      expect(url).toBe('https://api.openai.com/v1/images/edits');
+      expect(form).toBeInstanceOf(FormData);
+      expect(form.get('prompt')).toBe('edit');
+      expect(form.has('response_format')).toBe(false);
+      expect(Buffer.from(await (form.get('image') as Blob).arrayBuffer())).toEqual(referenceBuffer);
+      expect(options?.headers?.['Idempotency-Key']).toBe('ref-key');
+    } finally { post.mockRestore(); }
+  });
+
+  it('sends the reference and image-to-image parameters to Stability', async () => {
+    const { service } = createService();
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: Buffer.from('result') });
+    try {
+      await (service as any).callStabilityImage({}, 'sd3', 'edit', 'blur', { width: 1024, height: 1024 }, 'ref-key', referenceImage);
+      const form = post.mock.calls[0][1] as FormData;
+      expect(form.get('mode')).toBe('image-to-image');
+      expect(form.get('strength')).toBe('0.7');
+      expect(form.get('negative_prompt')).toBe('blur');
+      expect(Buffer.from(await (form.get('image') as Blob).arrayBuffer())).toEqual(referenceBuffer);
+    } finally { post.mockRestore(); }
+  });
+
+  it('allows GPT Image text-only generation without unsupported response_format', async () => {
+    const { service } = createService();
+    const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: { data: [{ b64_json: 'aW1hZ2U=' }] } });
+    try {
+      await (service as any).callOpenAIImage({}, 'gpt-image-1', 'draw', { width: 1024, height: 1024 }, 'text-key');
+      expect(post.mock.calls[0][0]).toBe('https://api.openai.com/v1/images/generations');
+      expect(post.mock.calls[0][1]).not.toHaveProperty('response_format');
+    } finally { post.mockRestore(); }
+  });
+
   it('uses the configured existing chat model to optimize a prompt and settle actual usage', async () => {
     const { service, wallet, providers, adapter, settings } = createService();
     const recordResult = jest.fn().mockResolvedValue(undefined);
@@ -212,6 +324,7 @@ describe('ImageService durable queue integration', () => {
     ).resolves.toEqual({
       ...publicTask,
       modelDisplayName: '图片模型',
+      referenceImage: null,
     });
 
     expect(prisma.imageGeneration.create).toHaveBeenCalledWith(
@@ -342,6 +455,7 @@ describe('ImageService durable queue integration', () => {
       'a blue house',
       { width: 1024, height: 1024 },
       'image:task-1:0',
+      undefined,
     );
     expect(prisma.imageGeneration.update).toHaveBeenCalledWith(
       expect.objectContaining({

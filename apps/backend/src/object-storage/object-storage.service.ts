@@ -321,7 +321,7 @@ export class ObjectStorageService implements OnModuleInit {
       throw new BadRequestException(`无法读取原对象存储，迁移已中止：${this.describeError(error)}`);
     }
 
-    const [generationRows, imageRows, chatRows] = await Promise.all([
+    const [generationRows, imageRows, chatRows, referenceRows] = await Promise.all([
       this.prisma.imageGeneration.findMany({
         where: { imageKey: { not: null } },
         select: { imageKey: true },
@@ -333,11 +333,16 @@ export class ObjectStorageService implements OnModuleInit {
       this.prisma.chatAttachment.findMany({
         select: { objectKey: true },
       }),
+      this.prisma.imageGeneration.findMany({
+        where: { referenceImageKey: { not: null } },
+        select: { referenceImageKey: true },
+      }),
     ]);
     const keys = [
       ...generationRows.map((row) => row.imageKey),
       ...imageRows.map((row) => row.imageKey),
       ...chatRows.map((row) => row.objectKey),
+      ...referenceRows.map((row) => row.referenceImageKey),
     ].filter((key): key is string => Boolean(key));
     const uniqueKeys = [...new Set(keys)];
 

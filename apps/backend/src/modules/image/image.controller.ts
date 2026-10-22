@@ -7,17 +7,23 @@ import {
   Query,
   UseGuards,
   Logger,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
   ApiQuery,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
 import { ImageService } from './image.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '@prisma/client';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { MAX_CHAT_IMAGE_SIZE_BYTES, UploadedChatImage } from '../chat/chat-image';
 import {
   OptimizePromptDto,
   CreateImageTaskDto,
@@ -49,14 +55,40 @@ export class ImageController {
 
   @Post('generate')
   @ApiOperation({ summary: '创建生图任务（异步处理）' })
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['prompt', 'model'],
+      properties: {
+        prompt: { type: 'string', maxLength: 4000 },
+        originalPrompt: { type: 'string' },
+        negativePrompt: { type: 'string' },
+        model: { type: 'string' },
+        aspectRatio: { type: 'string', enum: ['1:1', '9:16', '16:9', '4:3', '3:4'] },
+        imageCount: { type: 'integer', minimum: 1, maximum: 4 },
+        referenceImage: { type: 'string', format: 'binary', description: '可选，单张 JPEG/PNG/WebP，最大 5 MiB' },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('referenceImage', {
+    limits: {
+      fileSize: MAX_CHAT_IMAGE_SIZE_BYTES + 1,
+      files: 1,
+      fields: 6,
+      fieldSize: 64 * 1024,
+      parts: 7,
+    },
+  }))
   async createTask(
     @CurrentUser() user: User,
     @Body() dto: CreateImageTaskDto,
+    @UploadedFile() referenceImage?: UploadedChatImage,
   ) {
     this.logger.log(
       `创建生图任务: userId=${user.id}, model=${dto.model}`,
     );
-    return this.imageService.createImageTask(user.id, dto);
+    return this.imageService.createImageTask(user.id, dto, referenceImage);
   }
 
   @Get('tasks/:id')

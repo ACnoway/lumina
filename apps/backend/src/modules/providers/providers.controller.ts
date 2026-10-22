@@ -336,12 +336,14 @@ export class ProvidersController {
     name: string;
     type: ModelType;
     isActive: boolean;
+    supportsReferenceImage?: boolean;
   }): Record<string, unknown> {
     return {
       id: model.id,
       name: model.name,
       type: model.type,
       isActive: model.isActive,
+      supportsReferenceImage: model.supportsReferenceImage ?? false,
     };
   }
 

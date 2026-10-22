@@ -42,11 +42,14 @@ function buildHeaders(custom?: Record<string, string>): Record<string, string> {
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options;
+  const isFormData = body instanceof FormData;
+  const requestHeaders = buildHeaders(headers);
+  if (isFormData) delete requestHeaders['Content-Type'];
 
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: buildHeaders(headers),
-    body: body ? JSON.stringify(body) : undefined,
+    headers: requestHeaders,
+    body: isFormData ? body : body ? JSON.stringify(body) : undefined,
     credentials: 'include',
   });
 

@@ -16,6 +16,7 @@ import ImageLightbox, {
   ImageDownloadButton,
   type PreviewImage,
 } from "@/components/ImageLightbox";
+import ReferenceImagePreview from "@/components/ReferenceImagePreview";
 
 const PAGE_SIZE = 12;
 
@@ -506,6 +507,7 @@ export default function HistoryPage() {
                           void handleCopyPrompt(copyKey, value)
                         }
                       />
+                      <ReferenceImagePreview image={task.referenceImage} onPreview={setLightboxImage} />
                       {task.originalPrompt && (
                         <PromptCopyField
                           label="原始提示词"

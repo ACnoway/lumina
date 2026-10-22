@@ -8,6 +8,7 @@ import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
 import { formatImageModelPricing, formatPhoton } from '@/lib/model-pricing';
 import { walletApi } from '@/lib/wallet-api';
 import AppHeader from '@/components/AppHeader';
+import ReferenceImagePreview from '@/components/ReferenceImagePreview';
 import ImageLightbox, {
   ImageDownloadButton,
   type PreviewImage,
@@ -170,6 +171,8 @@ export default function ImagePage() {
   const [prompt, setPrompt] = useState('');
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
+  const [referenceImage, setReferenceImage] = useState<File | null>(null);
+  const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [imageCount, setImageCount] = useState(1);
   const [task, setTask] = useState<ImageTask | null>(null);
@@ -187,6 +190,16 @@ export default function ImagePage() {
   const [lightboxImage, setLightboxImage] = useState<PreviewImage | null>(null);
   const pollRunRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!referenceImage) {
+      setReferencePreviewUrl('');
+      return;
+    }
+    const url = URL.createObjectURL(referenceImage);
+    setReferencePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [referenceImage]);
 
   const loadBalance = useCallback(async () => {
     try {
@@ -306,7 +319,25 @@ export default function ImagePage() {
 
   function handleModelChange(modelName: string) {
     setSelectedModel(modelName);
+    if (!models.find((model) => model.name === modelName)?.supportsReferenceImage) {
+      if (referenceImage) setNotice('已移除参考图：所选模型不支持参考图');
+      setReferenceImage(null);
+    }
     localStorage.setItem(MODEL_STORAGE_KEY, modelName);
+  }
+
+  function handleReferenceImage(file?: File) {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('参考图仅支持 JPEG、PNG 和 WebP 图片');
+      return;
+    }
+    if (!file.size || file.size > 5 * 1024 * 1024) {
+      setError('参考图大小必须大于 0，且不能超过 5 MiB');
+      return;
+    }
+    setError('');
+    setReferenceImage(file);
   }
 
   async function handleOptimize() {
@@ -345,7 +376,7 @@ export default function ImagePage() {
           model: selectedModel,
           aspectRatio,
           imageCount,
-        }),
+        }, referenceImage || undefined),
       );
       setTask(createdTask);
       localStorage.setItem(ACTIVE_TASK_STORAGE_KEY, createdTask.id);
@@ -482,6 +513,42 @@ export default function ImagePage() {
               />
             </div>
 
+            <div>
+              <label htmlFor="reference-image" className="mb-2 block text-sm font-medium text-gray-700">
+                参考图 <span className="font-normal text-gray-400">（可选）</span>
+              </label>
+              <input
+                id="reference-image"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={busy || !selectedModelInfo?.supportsReferenceImage}
+                onChange={(event) => {
+                  handleReferenceImage(event.target.files?.[0]);
+                  event.target.value = '';
+                }}
+                className="block w-full rounded-xl border border-gray-300 p-2 text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <p className="mt-2 text-xs text-gray-400">
+                {selectedModelInfo?.supportsReferenceImage
+                  ? '上传一张 JPEG、PNG 或 WebP 图片（最大 5 MiB），在提示词中描述要参考的内容或修改要求。'
+                  : '当前模型不支持参考图，请选择已启用参考图的模型。'}
+              </p>
+              {referenceImage && referencePreviewUrl && (
+                <div className="mt-3 flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <button
+                    type="button"
+                    aria-label="预览待上传的参考图"
+                    onClick={() => setLightboxImage({ src: referencePreviewUrl, alt: '待上传的参考图', filename: referenceImage.name })}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={referencePreviewUrl} alt="待上传的参考图" className="h-20 w-20 rounded-lg object-contain" />
+                  </button>
+                  <p className="min-w-0 flex-1 break-all text-xs text-gray-600">{referenceImage.name}</p>
+                  <button type="button" disabled={busy} onClick={() => setReferenceImage(null)} className="text-xs font-medium text-red-600 disabled:opacity-40">移除</button>
+                </div>
+              )}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label
@@ -503,7 +570,7 @@ export default function ImagePage() {
                   ) : hasModels ? (
                     models.map((model) => (
                       <option key={model.id} value={model.name}>
-                        {model.displayName}
+                        {model.displayName}{model.supportsReferenceImage ? ' · 支持参考图' : ''}
                       </option>
                     ))
                   ) : (
@@ -707,6 +774,7 @@ export default function ImagePage() {
                   copiedPrompt={copiedPrompt}
                   onCopy={(copyKey, value) => void handleCopyPrompt(copyKey, value)}
                 />
+                <ReferenceImagePreview image={task.referenceImage} onPreview={setLightboxImage} />
                 {task.originalPrompt && (
                   <PromptField
                     label="原始提示词"

@@ -101,7 +101,23 @@ async function handle(request, response) {
 
   let payload;
   try {
-    payload = await readJson(request);
+    if (url.pathname === '/v1/images/edits') {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const form = await new Response(Buffer.concat(chunks), {
+        headers: { 'Content-Type': request.headers['content-type'] || '' },
+      }).formData();
+      const image = form.get('image');
+      if (!image || typeof image.arrayBuffer !== 'function' || image.type !== 'image/png' ||
+          !Buffer.from(await image.arrayBuffer()).equals(imagePng) || !form.get('prompt') ||
+          !form.get('model') || form.get('n') !== '1' || !request.headers['idempotency-key']) {
+        sendJson(response, 400, { error: { message: 'Missing or corrupted reference image edit fields' } });
+        return;
+      }
+      payload = Object.fromEntries(form);
+    } else {
+      payload = await readJson(request);
+    }
   } catch {
     sendJson(response, 400, { error: { message: 'Invalid JSON' } });
     return;
@@ -130,7 +146,7 @@ async function handle(request, response) {
     return;
   }
 
-  if (url.pathname === '/v1/images/generations') {
+  if (url.pathname === '/v1/images/generations' || url.pathname === '/v1/images/edits') {
     const idempotencyKey = request.headers['idempotency-key'];
     const cachedResponse =
       typeof idempotencyKey === 'string' ? imageResponses.get(idempotencyKey) : undefined;

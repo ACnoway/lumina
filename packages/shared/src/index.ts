@@ -443,6 +443,7 @@ export interface ImageTaskDto {
   prompt: string;
   originalPrompt: string | null;
   negativePrompt: string | null;
+  referenceImage: { url: string; mimeType: string; size: number } | null;
   modelDisplayName: string;
   status: ImageStatus;
   imageUrl: string | null;
@@ -580,6 +581,7 @@ interface PlatformModelDtoBase {
   isActive: boolean;
   maxTokens?: number | null;
   supportsVision: boolean;
+  supportsReferenceImage: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -634,6 +636,7 @@ export interface CreatePlatformModelDto {
   pricing: Record<string, any>;
   maxTokens?: number;
   supportsVision?: boolean;
+  supportsReferenceImage?: boolean;
   isActive?: boolean;
 }
 

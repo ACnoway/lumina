@@ -841,6 +841,48 @@ async function main() {
     'provider sliding-window rate limit did not reject the second request',
   );
 
+  function referenceForm(bytes = validPng, mimeType = 'image/png') {
+    const form = new FormData();
+    form.append('model', imageModel.data.name);
+    form.append('prompt', 'edit the reference image');
+    form.append('imageCount', '2');
+    form.append('referenceImage', new Blob([bytes], { type: mimeType }), 'reference.png');
+    return form;
+  }
+  async function postReference(form, expectedStatus, token = userToken) {
+    const response = await fetch(`${baseUrl}/image/generate`, {
+      method: 'POST', headers: authHeaders(token), body: form,
+    });
+    const body = await response.json();
+    assert(response.status === expectedStatus, `reference upload expected ${expectedStatus}, got ${response.status}: ${JSON.stringify(body)}`);
+    return body;
+  }
+
+  assert(imageModel.data.supportsReferenceImage === false, 'reference capability should default off');
+  await postReference(referenceForm(), 400);
+  const enabledReferenceModel = await requestAuth(adminToken, `/providers/models/${imageModel.data.id}`, {
+    method: 'PATCH', body: { supportsReferenceImage: true },
+  });
+  assert(enabledReferenceModel.data.supportsReferenceImage === true, 'reference capability was not saved');
+  const referenceModels = await requestAuth(userToken, '/providers/models?type=IMAGE');
+  assert(referenceModels.data.some((model) => model.id === imageModel.data.id && model.supportsReferenceImage), 'public models did not expose reference capability');
+  await postReference(referenceForm(Buffer.from('not an image')), 400);
+  await postReference(referenceForm(validPng, 'image/jpeg'), 400);
+  await postReference(referenceForm(Buffer.concat([validPng, Buffer.alloc(5 * 1024 * 1024)])), 413);
+  const duplicateReference = referenceForm();
+  duplicateReference.append('referenceImage', new Blob([validPng], { type: 'image/png' }), 'second.png');
+  await postReference(duplicateReference, 400);
+  const referenceTask = await postReference(referenceForm(), 201);
+  const completedReference = await pollImageTask(userToken, referenceTask.id);
+  assert(completedReference.referenceImage?.mimeType === 'image/png', 'reference MIME type missing from task');
+  assert(completedReference.referenceImage?.size === validPng.length, 'reference size missing from task');
+  assert(completedReference.images?.length === 2 && Number(completedReference.cost) === 0.02, 'reference images were not generated and billed per output');
+  const storedReference = await fetch(completedReference.referenceImage.url);
+  assert(storedReference.ok && Buffer.from(await storedReference.arrayBuffer()).equals(validPng), 'reference object contents were not preserved');
+  const referenceHistory = await requestAuth(userToken, '/image/history');
+  assert(referenceHistory.data.items.some((item) => item.id === referenceTask.id && item.referenceImage?.url), 'history did not return reference image');
+  await requestAuth(adminToken, `/image/tasks/${referenceTask.id}`, {}, [400]);
+
   const imageTask = await requestAuth(userToken, '/image/generate', {
     method: 'POST',
     body: {

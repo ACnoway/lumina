@@ -16,6 +16,8 @@ import { Prisma } from '@prisma/client';
 import axios from 'axios';
 import { ImageQueueService } from './image-queue.service';
 import { SettingsService } from '../settings/settings.service';
+import { randomUUID } from 'crypto';
+import { UploadedChatImage, validateChatImages } from '../chat/chat-image';
 
 // 比例 → 尺寸映射
 const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
@@ -199,6 +201,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       aspectRatio?: string;
       imageCount?: number;
     },
+    referenceImage?: UploadedChatImage,
   ) {
     // 验证模型存在且是生图类型
     const platformModel = await this.providersService.getPlatformModelByName(data.model);
@@ -213,35 +216,63 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       throw new BadRequestException(`模型 "${data.model}" 不是生图模型`);
     }
 
+    if (referenceImage) {
+      if (!platformModel.supportsReferenceImage) {
+        throw new BadRequestException('当前模型不支持参考图，请选择支持参考图的模型');
+      }
+      validateChatImages([referenceImage]);
+    }
+
     const imageCount = this.normalizeImageCount(data.imageCount);
 
     // 获取定价
     const pricing = (platformModel.pricing as any) || {};
     const perImagePrice = this.normalizeImagePrice(pricing.perImage, data.model);
 
-    // 创建任务记录
-    const task = await this.prisma.imageGeneration.create({
-      data: {
-        userId,
-        prompt: data.prompt,
-        originalPrompt: data.originalPrompt || null,
-        negativePrompt: data.negativePrompt || null,
-        model: data.model,
-        provider: '', // 异步处理时填充
-        status: 'PENDING',
-        parameters: {
-          aspectRatio: data.aspectRatio || '1:1',
-          perImagePrice,
-          imageCount,
-          retryCount: 0,
+    // 先保存参考图，再写入任务；任务创建失败时清理对象，排队失败则保留历史。
+    const referenceImageKey = referenceImage
+      ? `images/references/${userId}/${randomUUID()}.${referenceImage.mimetype.split('/')[1]}`
+      : null;
+    let task;
+    try {
+      if (referenceImage && referenceImageKey) {
+        await this.objectStorageService.upload(
+          referenceImageKey, referenceImage.buffer, referenceImage.size, referenceImage.mimetype,
+        );
+      }
+      task = await this.prisma.imageGeneration.create({
+        data: {
+          userId,
+          prompt: data.prompt,
+          originalPrompt: data.originalPrompt || null,
+          negativePrompt: data.negativePrompt || null,
+          referenceImageKey,
+          referenceImageMimeType: referenceImage?.mimetype || null,
+          referenceImageSize: referenceImage?.size || null,
+          model: data.model,
+          provider: '', // 异步处理时填充
+          status: 'PENDING',
+          parameters: {
+            aspectRatio: data.aspectRatio || '1:1',
+            perImagePrice,
+            imageCount,
+            retryCount: 0,
+          },
+          images: {
+            create: Array.from({ length: imageCount }, (_, sequence) => ({
+              sequence,
+            })),
+          },
         },
-        images: {
-          create: Array.from({ length: imageCount }, (_, sequence) => ({
-            sequence,
-          })),
-        },
-      },
-    });
+      });
+    } catch (error) {
+      if (referenceImageKey) {
+        await this.objectStorageService.delete(referenceImageKey).catch((cleanupError: unknown) => {
+          this.logger.warn(`清理参考图失败: ${this.describeError(cleanupError)}`);
+        });
+      }
+      throw error;
+    }
 
     try {
       await this.imageQueueService.enqueue(task.id);
@@ -360,6 +391,17 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     try {
       const perImagePrice = await this.getTaskPrice(task.model, parameters);
+      let referenceImage: UploadedChatImage | undefined;
+      if (task.referenceImageKey) {
+        const buffer = await this.objectStorageService.download(task.referenceImageKey);
+        referenceImage = {
+          buffer,
+          size: buffer.length,
+          mimetype: task.referenceImageMimeType || '',
+          originalname: 'reference',
+        };
+        validateChatImages([referenceImage]);
+      }
       await this.processImageTask(
         task.userId,
         task.id,
@@ -369,6 +411,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         parameters.aspectRatio,
         perImagePrice,
         parameters,
+        referenceImage,
       );
     } catch (error) {
       const message = this.describeError(error, '任务初始化失败');
@@ -504,6 +547,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     aspectRatio: string | undefined,
     perImagePrice: number,
     taskParameters: ImageTaskParameters,
+    referenceImage?: UploadedChatImage,
   ): Promise<void> {
     const chargeAmount = this.normalizeImagePrice(perImagePrice, modelName);
     const imageCount = this.normalizeImageCount(taskParameters.imageCount);
@@ -525,6 +569,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
           aspectRatio,
           chargeAmount,
           imageCount,
+          referenceImage,
         );
       } catch (error) {
         const message = this.describeError(error);
@@ -643,6 +688,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     aspectRatio: string | undefined,
     chargeAmount: number,
     imageCount: number = 1,
+    referenceImage?: UploadedChatImage,
   ): Promise<void> {
     const claim = await this.prisma.imageGenerationImage.updateMany({
       where: {
@@ -674,7 +720,17 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       });
 
       const providerConfig = (resolved.provider.config as Record<string, any>) || {};
-      const size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
+      let size = ASPECT_RATIO_SIZES[aspectRatio || '1:1'] || ASPECT_RATIO_SIZES['1:1'];
+      if (
+        ['openai_image', 'openai_compatible'].includes(resolved.provider.apiFormat) &&
+        /^(gpt-image-1(?:[.-]|$)|chatgpt-image-)/.test(resolved.upstreamModel.upstreamModelId) &&
+        size.width !== size.height
+      ) {
+        // GPT Image 1 系列只接受三档尺寸，按画面方向选择并保存实际请求尺寸。
+        size = size.width > size.height
+          ? { width: 1536, height: 1024 }
+          : { width: 1024, height: 1536 };
+      }
       let imageBuffer: Buffer;
 
       switch (resolved.provider.apiFormat) {
@@ -686,6 +742,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             prompt,
             size,
             idempotencyKey,
+            referenceImage,
           ));
           upstreamSucceeded = true;
           break;
@@ -697,6 +754,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
             negativePrompt,
             size,
             idempotencyKey,
+            referenceImage,
           ));
           upstreamSucceeded = true;
           break;
@@ -832,6 +890,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     prompt: string,
     size: { width: number; height: number },
     idempotencyKey: string,
+    referenceImage?: UploadedChatImage,
   ): Promise<{ imageUrl: string; imageBuffer: Buffer }> {
     const baseUrl = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
     const apiKey = config.apiKey;
@@ -839,20 +898,32 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     // OpenAI size 参数格式: "1024x1024"
     const sizeStr = `${size.width}x${size.height}`;
+    let body: FormData | Record<string, unknown>;
+    if (referenceImage) {
+      const form = new FormData();
+      form.append('model', model);
+      form.append('prompt', prompt);
+      form.append('n', '1');
+      form.append('size', sizeStr);
+      form.append('image', new Blob([new Uint8Array(referenceImage.buffer)], {
+        type: referenceImage.mimetype,
+      }), `reference.${referenceImage.mimetype.split('/')[1]}`);
+      // GPT Image 返回 Base64，不接受 response_format；兼容模型使用端点默认值。
+      body = form;
+    } else {
+      body = {
+        model, prompt, n: 1, size: sizeStr,
+        ...(/^(gpt-image-|chatgpt-image-)/.test(model) ? {} : { response_format: 'url' }),
+      };
+    }
 
     const response = await axios.post(
-      `${baseUrl}/images/generations`,
-      {
-        model,
-        prompt,
-        n: 1,
-        size: sizeStr,
-        response_format: 'url',
-      },
+      `${baseUrl}/images/${referenceImage ? 'edits' : 'generations'}`,
+      body,
       {
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
+          ...(referenceImage ? {} : { 'Content-Type': 'application/json' }),
           [UPSTREAM_IDEMPOTENCY_HEADER]: idempotencyKey,
         },
         timeout,
@@ -897,6 +968,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     negativePrompt: string | undefined,
     size: { width: number; height: number },
     idempotencyKey: string,
+    referenceImage?: UploadedChatImage,
   ): Promise<{ imageUrl: string; imageBuffer: Buffer }> {
     const baseUrl = (config.baseUrl || 'https://api.stability.ai').replace(/\/+$/, '');
     const apiKey = config.apiKey;
@@ -907,6 +979,13 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     formData.append('model', model);
     formData.append('width', String(size.width));
     formData.append('height', String(size.height));
+    if (referenceImage) {
+      formData.append('image', new Blob([new Uint8Array(referenceImage.buffer)], {
+        type: referenceImage.mimetype,
+      }), `reference.${referenceImage.mimetype.split('/')[1]}`);
+      formData.append('mode', 'image-to-image');
+      formData.append('strength', '0.7');
+    }
     if (negativePrompt) {
       formData.append('negative_prompt', negativePrompt);
     }
@@ -1072,10 +1151,18 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
 
     const publicTask = { ...task };
     delete publicTask.model;
+    delete publicTask.referenceImageKey;
+    delete publicTask.referenceImageMimeType;
+    delete publicTask.referenceImageSize;
 
     return {
       ...publicTask,
       modelDisplayName: modelDisplayName || '已下线模型',
+      referenceImage: task.referenceImageKey ? {
+        url: await this.objectStorageService.getPresignedUrl(task.referenceImageKey),
+        mimeType: task.referenceImageMimeType,
+        size: task.referenceImageSize,
+      } : null,
       imageUrl: await resolveImageUrl(task.imageKey, task.imageUrl),
       images,
     };

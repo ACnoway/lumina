@@ -359,6 +359,7 @@ export default function AdminPage() {
     },
     maxTokens: "",
     supportsVision: false,
+    supportsReferenceImage: false,
     isActive: true,
   });
   const [providerForm, setProviderForm] = useState({
@@ -705,6 +706,7 @@ export default function AdminPage() {
       pricing: { input: "0.001", output: "0.002", perImage: "0.50" },
       maxTokens: "",
       supportsVision: false,
+      supportsReferenceImage: false,
       isActive: true,
     });
     setShowModelForm(true);
@@ -724,6 +726,7 @@ export default function AdminPage() {
       },
       maxTokens: model.maxTokens ? String(model.maxTokens) : "",
       supportsVision: model.type === "CHAT" && model.supportsVision,
+      supportsReferenceImage: model.type === "IMAGE" && model.supportsReferenceImage,
       isActive: model.isActive,
     });
     setShowModelForm(true);
@@ -860,6 +863,7 @@ export default function AdminPage() {
         pricing,
         maxTokens,
         supportsVision: modelForm.type === "CHAT" && modelForm.supportsVision,
+        supportsReferenceImage: modelForm.type === "IMAGE" && modelForm.supportsReferenceImage,
         isActive: modelForm.isActive,
       };
       if (editingModelId) {
@@ -2030,6 +2034,19 @@ export default function AdminPage() {
                           此模型支持图片输入
                         </label>
                         <p className="mt-1 text-xs text-gray-400">仅在该模型和对应上游均支持识图时开启。</p>
+                      </div>
+                    )}
+                    {modelForm.type === "IMAGE" && (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                        <label className="flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={modelForm.supportsReferenceImage}
+                            onChange={(event) => setModelForm((current) => ({ ...current, supportsReferenceImage: event.target.checked }))}
+                          />
+                          此模型支持参考图 / 图片编辑
+                        </label>
+                        <p className="mt-1 text-xs text-gray-400">仅在该模型及其所有可用上游均支持参考图时开启。</p>
                       </div>
                     )}
                     {modelForm.type === "CHAT" ? (

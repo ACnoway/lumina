@@ -54,6 +54,8 @@ export interface PlatformModelPayload {
   type: ModelType;
   pricing: PlatformModelPricing;
   maxTokens?: number;
+  supportsVision?: boolean;
+  supportsReferenceImage?: boolean;
   isActive: boolean;
 }
 

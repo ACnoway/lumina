@@ -219,6 +219,9 @@ model ImageGeneration {
   prompt       String @db.Text
   originalPrompt String? @db.Text  // 用户原始输入（优化前）
   negativePrompt String? @db.Text
+  referenceImageKey String? // 参考图对象 key
+  referenceImageMimeType String?
+  referenceImageSize Int?
   model        String // 平台模型名
   provider     String // 实际上游供应商名
   
@@ -449,6 +452,7 @@ model PlatformModel {
   pricing     Json                            // 计费标准 { input: number, output: number } 或 { perImage: number }
   maxTokens   Int?                            // 平台限制的最大 token
   supportsVision Boolean @default(false)      // 是否支持图片输入
+  supportsReferenceImage Boolean @default(false) // 生图模型是否支持参考图/图片编辑
 
   upstreamModels UpstreamModel[]
   promptOptimizerConfigs SystemConfig[]

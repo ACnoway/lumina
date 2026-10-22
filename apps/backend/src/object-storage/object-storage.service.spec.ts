@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ObjectStorageService } from './object-storage.service';
+import { Readable } from 'stream';
 
 const bucketExists = jest.fn();
 const putObject = jest.fn();
@@ -61,6 +62,21 @@ describe('ObjectStorageService', () => {
     putObject.mockResolvedValue(undefined);
     statObject.mockResolvedValue({});
     removeObject.mockResolvedValue(undefined);
+  });
+
+  it('migrates stored reference images when changing the bucket', async () => {
+    const { service, prisma } = createService();
+    await service.saveConfig(input);
+    const savedConfig = prisma.systemConfig.upsert.mock.calls[0][0].create;
+    prisma.systemConfig.findUnique.mockResolvedValue({ ...savedConfig, updatedAt: new Date() });
+    prisma.imageGeneration.findMany.mockImplementation(async ({ select }) =>
+      select.referenceImageKey ? [{ referenceImageKey: 'images/references/ref.png' }] : [],
+    );
+    getObject.mockImplementation(async () => Readable.from([Buffer.from('reference')]));
+    const result = await service.saveConfig({ ...input, bucket: 'new-bucket' });
+    expect(result.migratedObjectCount).toBe(1);
+    expect(putObject).toHaveBeenCalledWith('new-bucket', 'images/references/ref.png', Buffer.from('reference'), 9);
+    expect(removeObject).toHaveBeenCalledWith(input.bucket, 'images/references/ref.png');
   });
 
   it('validates an existing bucket without creating it', async () => {
