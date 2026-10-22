@@ -94,9 +94,9 @@ export default function AppHeader({
           <h1 className="mt-1 text-xl font-semibold tracking-tight">{title}</h1>
         </div>
 
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3 sm:gap-4">
           <nav
-            className="flex flex-wrap items-center gap-1 text-sm text-gray-500"
+            className="flex max-w-full flex-wrap items-center gap-1 text-sm text-gray-600"
             aria-label="主导航"
           >
             {items.map((item) => {
@@ -106,7 +106,7 @@ export default function AppHeader({
                   key={item.href}
                   href={item.href}
                   aria-current={isActive ? "page" : undefined}
-                  className={`rounded-lg px-2.5 py-1.5 transition ${
+                  className={`inline-flex min-h-11 items-center whitespace-nowrap rounded-xl px-3 py-2 transition ${
                     isActive
                       ? "bg-blue-50 font-medium text-blue-700"
                       : "hover:bg-gray-50 hover:text-blue-600"
@@ -127,7 +127,7 @@ export default function AppHeader({
                   aria-haspopup="menu"
                   aria-label={`${userDisplayName} 用户菜单`}
                   onClick={() => setMenuOpen((current) => !current)}
-                  className={`inline-flex max-w-[15rem] items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 ${
+                  className={`inline-flex min-h-11 max-w-[min(15rem,70vw)] items-center gap-2 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-offset-2 ${
                     active === "profile"
                       ? "bg-blue-50 font-medium text-blue-700"
                       : "text-gray-600 hover:bg-gray-50 hover:text-blue-700"
@@ -148,7 +148,7 @@ export default function AppHeader({
                     className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
                   >
                     <div className="border-b border-gray-100 px-4 py-3">
-                      <p className="text-xs text-gray-400">当前账号</p>
+                      <p className="ui-caption">当前账号</p>
                       <p className="mt-1 truncate text-sm font-medium text-gray-700">
                         {userDisplayName}
                       </p>
@@ -176,13 +176,13 @@ export default function AppHeader({
               <div className="flex items-center gap-2">
                 <Link
                   href="/register"
-                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 hover:text-blue-700"
+                  className="ui-button text-gray-600 hover:bg-gray-50 hover:text-blue-700"
                 >
                   注册
                 </Link>
                 <Link
                   href="/login"
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-blue-300 hover:text-blue-700"
+                  className="ui-button-secondary"
                 >
                   登录
                 </Link>

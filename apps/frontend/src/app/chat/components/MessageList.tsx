@@ -20,26 +20,26 @@ export default function MessageList({ messages, loading }: MessageListProps) {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#fdfdfc]">
-        <div className="text-sm text-gray-400">加载中...</div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-[#fdfdfc] p-5" role="status">
+        <div className="text-sm text-gray-500">正在加载对话…</div>
       </div>
     );
   }
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#fdfdfc] px-5 py-10">
-        <div className="w-full max-w-md rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-[#fdfdfc] px-4 py-6">
+        <div className="w-full max-w-md px-4 py-6 text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-blue-600">✦</div>
           <p className="font-medium text-gray-600">开始一段新对话</p>
-          <p className="mt-2 text-sm text-gray-400">输入消息，按回车发送，Shift+回车换行</p>
+          <p className="mt-2 text-sm leading-6 text-gray-500">提一个问题，或分享你的灵感。<br />选择支持图片的模型，还可以一起聊聊图片。</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#fdfdfc] px-4 py-6 sm:px-6">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#fdfdfc] px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-3xl space-y-4">
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
@@ -59,7 +59,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-3 text-white shadow-sm">
+        <div className="min-w-0 max-w-[92%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-3 text-white shadow-sm sm:max-w-[85%]">
           {(message.attachments ?? []).length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {(message.attachments ?? []).map((attachment) => (
@@ -79,7 +79,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <div className="flex justify-start">
       <div
-        className={`max-w-[80%] rounded-2xl rounded-bl-md px-4 py-2.5 ${
+        className={`min-w-0 max-w-[92%] rounded-2xl rounded-bl-md px-4 py-3 sm:max-w-[85%] ${
           isError
             ? 'border border-red-100 bg-red-50 text-red-600'
             : 'border border-gray-100 bg-white text-gray-800 shadow-sm'
@@ -98,7 +98,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {!isPending &&
           !isError &&
           (message.tokens !== null || message.cost !== null) && (
-            <div className="mt-1.5 border-t border-gray-200 pt-1 text-xs text-gray-400">
+            <div className="ui-caption mt-2 border-t border-gray-100 pt-2">
               {message.tokens !== null && `${message.tokens} tokens`}
               {message.tokens !== null && message.cost != null && ' · '}
               {message.cost != null && `实际费用 ${formatPhoton(message.cost)}`}

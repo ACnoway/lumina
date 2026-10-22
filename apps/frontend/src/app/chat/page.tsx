@@ -10,6 +10,7 @@ import Sidebar from "./components/Sidebar";
 import MessageList from "./components/MessageList";
 import MessageInput from "./components/MessageInput";
 import TopBar from "./components/TopBar";
+import SessionDrawer from "./components/SessionDrawer";
 
 const MODEL_STORAGE_KEY = "lumina_chat_model";
 
@@ -27,6 +28,10 @@ function ChatPageContent() {
   // 模型状态
   const [models, setModels] = useState<ChatModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [modelError, setModelError] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const closeSessions = useCallback(() => setSessionsOpen(false), []);
 
   // 余额
   const [balance, setBalance] = useState<number | null>(null);
@@ -107,6 +112,8 @@ function ChatPageContent() {
   }
 
   async function loadModels() {
+    setLoadingModels(true);
+    setModelError(false);
     try {
       const list = await chatApi.getChatModels();
       setModels(list);
@@ -118,7 +125,9 @@ function ChatPageContent() {
         setSelectedModel(list[0].name);
       }
     } catch {
-      setError("加载模型列表失败");
+      setModelError(true);
+    } finally {
+      setLoadingModels(false);
     }
   }
 
@@ -151,6 +160,7 @@ function ChatPageContent() {
 
   // 创建新会话
   async function handleNewSession() {
+    setSessionsOpen(false);
     // 中止当前流式请求
     abortRef.current?.abort();
     interactionVersionRef.current += 1;
@@ -164,6 +174,7 @@ function ChatPageContent() {
 
   // 切换会话
   function handleSelectSession(sessionId: string) {
+    setSessionsOpen(false);
     if (sessionId === currentSessionId) return;
     abortRef.current?.abort();
     interactionVersionRef.current += 1;
@@ -357,8 +368,8 @@ function ChatPageContent() {
     <main className="min-h-screen bg-[#f7f7f5] text-gray-900">
       <AppHeader title="AI 聊天" active="chat" />
 
-      <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <div className="hidden lg:block">
+      <div className="mx-auto grid max-w-6xl items-stretch gap-4 px-3 py-4 sm:gap-6 sm:px-6 sm:py-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="hidden min-h-0 lg:block">
           <Sidebar
             sessions={sessions}
             currentSessionId={currentSessionId}
@@ -368,17 +379,21 @@ function ChatPageContent() {
           />
         </div>
 
-        <section className="flex min-h-[calc(100vh-148px)] min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <section className="flex h-[calc(100dvh-200px)] min-h-[480px] min-w-0 flex-col rounded-2xl border border-gray-200 bg-white shadow-sm lg:h-[calc(100dvh-148px)]">
           <TopBar
             models={models}
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
             balance={balance}
             userEmail={user?.email ?? null}
+            loadingModels={loadingModels}
+            modelError={modelError}
+            onRetryModels={loadModels}
+            onOpenSessions={() => setSessionsOpen(true)}
           />
 
           {error && (
-            <div className="mx-5 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+            <div className="mx-5 mt-4 shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
               {error}
             </div>
           )}
@@ -388,15 +403,19 @@ function ChatPageContent() {
           <MessageInput
             onSend={handleSend}
             disabled={sending || !selectedModel}
+            sending={sending}
             allowImages={models.find((model) => model.name === selectedModel)?.supportsVision ?? false}
             placeholder={
               !selectedModel
                 ? "请先选择模型"
-                : "输入消息，回车发送，Shift+回车换行"
+                : "输入消息，聊聊你的想法…"
             }
           />
         </section>
       </div>
+      <SessionDrawer open={sessionsOpen} onClose={closeSessions}>
+        <Sidebar sessions={sessions} currentSessionId={currentSessionId} onNewSession={handleNewSession} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
+      </SessionDrawer>
     </main>
   );
 }

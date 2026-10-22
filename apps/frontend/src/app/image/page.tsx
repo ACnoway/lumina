@@ -8,6 +8,7 @@ import { imageApi, type ImageTaskResponse } from '@/lib/image-api';
 import { formatImageModelPricing, formatPhoton } from '@/lib/model-pricing';
 import { walletApi } from '@/lib/wallet-api';
 import AppHeader from '@/components/AppHeader';
+import UiIcon from '@/components/UiIcon';
 import ReferenceImagePreview from '@/components/ReferenceImagePreview';
 import ImageLightbox, {
   ImageDownloadButton,
@@ -173,6 +174,8 @@ export default function ImagePage() {
   const [negativePrompt, setNegativePrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
+  const [referenceError, setReferenceError] = useState('');
+  const referenceInputRef = useRef<HTMLInputElement>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [imageCount, setImageCount] = useState(1);
   const [task, setTask] = useState<ImageTask | null>(null);
@@ -319,6 +322,7 @@ export default function ImagePage() {
 
   function handleModelChange(modelName: string) {
     setSelectedModel(modelName);
+    setReferenceError('');
     if (!models.find((model) => model.name === modelName)?.supportsReferenceImage) {
       if (referenceImage) setNotice('已移除参考图：所选模型不支持参考图');
       setReferenceImage(null);
@@ -329,14 +333,14 @@ export default function ImagePage() {
   function handleReferenceImage(file?: File) {
     if (!file) return;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setError('参考图仅支持 JPEG、PNG 和 WebP 图片');
+      setReferenceError('未添加此图片：仅支持 JPEG、PNG 和 WebP');
       return;
     }
     if (!file.size || file.size > 5 * 1024 * 1024) {
-      setError('参考图大小必须大于 0，且不能超过 5 MiB');
+      setReferenceError('未添加此图片：图片不能为空，且每张不能超过 5 MiB');
       return;
     }
-    setError('');
+    setReferenceError('');
     setReferenceImage(file);
   }
 
@@ -426,7 +430,7 @@ export default function ImagePage() {
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm text-gray-500">Describe a scene and let Lumina make it real.</p>
+              <p className="text-sm text-gray-500">描述你的灵感，让画面从这里开始。</p>
               <h2 className="mt-1 text-2xl font-semibold tracking-tight">创作一张新图片</h2>
             </div>
             <div className="shrink-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-right">
@@ -514,10 +518,12 @@ export default function ImagePage() {
             </div>
 
             <div>
-              <label htmlFor="reference-image" className="mb-2 block text-sm font-medium text-gray-700">
-                参考图 <span className="font-normal text-gray-400">（可选）</span>
-              </label>
+              <p id="reference-image-label" className="mb-2 text-sm font-medium text-gray-700">
+                参考图 <span className="font-normal text-gray-500">（可选）</span>
+              </p>
+              <div className="ui-upload-card" role="group" aria-labelledby="reference-image-label">
               <input
+                ref={referenceInputRef}
                 id="reference-image"
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -526,15 +532,28 @@ export default function ImagePage() {
                   handleReferenceImage(event.target.files?.[0]);
                   event.target.value = '';
                 }}
-                className="block w-full rounded-xl border border-gray-300 p-2 text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="选择参考图"
+                className="hidden"
               />
-              <p className="mt-2 text-xs text-gray-400">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-blue-600"><UiIcon name="image" /></span>
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">{referenceImage ? '已选 1/1 张参考图' : '添加一张参考图'}</p>
+                    <p className="ui-caption">JPEG、PNG、WebP · 每张 ≤ 5 MiB</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => referenceInputRef.current?.click()} disabled={busy || !selectedModelInfo?.supportsReferenceImage} aria-describedby="reference-image-hint" className="ui-button-secondary">
+                  <UiIcon name="plus" className="h-4 w-4" />{referenceImage ? '更换图片' : '上传参考图'}
+                </button>
+              </div>
+              <p id="reference-image-hint" className="ui-caption mt-3">
                 {selectedModelInfo?.supportsReferenceImage
-                  ? '上传一张 JPEG、PNG 或 WebP 图片（最大 5 MiB），在提示词中描述要参考的内容或修改要求。'
-                  : '当前模型不支持参考图，请选择已启用参考图的模型。'}
+                  ? '在提示词中描述要参考的内容或修改要求，参考图会随任务一起上传。'
+                  : loadingModels ? '正在加载模型能力…' : '当前模型不支持参考图，请在下方选择标有“支持参考图”的模型。'}
               </p>
               {referenceImage && referencePreviewUrl && (
-                <div className="mt-3 flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="mt-3 flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3">
                   <button
                     type="button"
                     aria-label="预览待上传的参考图"
@@ -543,10 +562,15 @@ export default function ImagePage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={referencePreviewUrl} alt="待上传的参考图" className="h-20 w-20 rounded-lg object-contain" />
                   </button>
-                  <p className="min-w-0 flex-1 break-all text-xs text-gray-600">{referenceImage.name}</p>
-                  <button type="button" disabled={busy} onClick={() => setReferenceImage(null)} className="text-xs font-medium text-red-600 disabled:opacity-40">移除</button>
+                  <div className="min-w-0 flex-1">
+                    <p className="break-all text-xs font-medium text-gray-700">{referenceImage.name}</p>
+                    <p className="ui-caption mt-1">{(referenceImage.size / 1024 / 1024).toFixed(1)} MiB · 点击缩略图预览</p>
+                  </div>
+                  <button type="button" disabled={busy} onClick={() => { setReferenceImage(null); setReferenceError(''); }} className="ui-icon-button hover:bg-red-50 hover:text-red-600" aria-label="移除参考图" title="移除参考图"><UiIcon name="close" /></button>
                 </div>
               )}
+              {referenceError && <p className="mt-3 break-words text-xs leading-5 text-red-700" role="alert">{referenceError}</p>}
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
@@ -639,7 +663,7 @@ export default function ImagePage() {
               type="button"
               onClick={() => void handleGenerate()}
               disabled={!prompt.trim() || !selectedModel || busy || !hasModels}
-              className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+              className="ui-button-primary w-full"
             >
               {submitting ? '提交任务中...' : polling ? '图片生成中...' : '生成图片'}
             </button>
