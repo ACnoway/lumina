@@ -745,15 +745,61 @@ async function main() {
     method: 'POST',
     body: { title: 'E2E chat' },
   });
+  const unsupportedImageForm = new FormData();
+  unsupportedImageForm.append('sessionId', session.data.id);
+  unsupportedImageForm.append('content', '不支持识图的模型');
+  unsupportedImageForm.append('model', chatModel.data.name);
+  unsupportedImageForm.append('images', new Blob(['not an image'], { type: 'image/png' }), 'bad.png');
+  const invalidImageResponse = await fetch(`${baseUrl}/chat/messages`, {
+    method: 'POST',
+    headers: authHeaders(userToken),
+    body: unsupportedImageForm,
+  });
+  assert(invalidImageResponse.status === 400, `invalid image type returned ${invalidImageResponse.status}`);
+
+  const validPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const unsupportedModelForm = new FormData();
+  unsupportedModelForm.append('sessionId', session.data.id);
+  unsupportedModelForm.append('content', '未启用识图的模型');
+  unsupportedModelForm.append('model', chatModel.data.name);
+  unsupportedModelForm.append('images', new Blob([validPng], { type: 'image/png' }), 'valid.png');
+  const unsupportedModelResponse = await fetch(`${baseUrl}/chat/messages`, {
+    method: 'POST',
+    headers: authHeaders(userToken),
+    body: unsupportedModelForm,
+  });
+  assert(unsupportedModelResponse.status === 400, `model without vision returned ${unsupportedModelResponse.status}`);
+
+  await requestAuth(adminToken, `/providers/models/${chatModel.data.id}`, {
+    method: 'PATCH',
+    body: { supportsVision: true },
+  });
+
+  const oversizedForm = new FormData();
+  oversizedForm.append('sessionId', session.data.id);
+  oversizedForm.append('content', '图片尺寸校验');
+  oversizedForm.append('model', chatModel.data.name);
+  const oversizedPng = Buffer.alloc(5 * 1024 * 1024 + 1);
+  validPng.copy(oversizedPng);
+  oversizedForm.append('images', new Blob([oversizedPng], { type: 'image/png' }), 'oversized.png');
+  const oversizedResponse = await fetch(`${baseUrl}/chat/messages`, {
+    method: 'POST',
+    headers: authHeaders(userToken),
+    body: oversizedForm,
+  });
+  assert([400, 413].includes(oversizedResponse.status), `oversized image returned unexpected status ${oversizedResponse.status}`);
+
+  const streamForm = new FormData();
+  streamForm.append('sessionId', session.data.id);
+  streamForm.append('content', '请描述这张 E2E 图片');
+  streamForm.append('model', chatModel.data.name);
+  streamForm.append('maxTokens', '40');
+  const testPng = Buffer.concat([validPng, Buffer.alloc(5 * 1024 * 1024 - validPng.length)]);
+  streamForm.append('images', new Blob([testPng], { type: 'image/png' }), 'e2e.png');
   const streamResponse = await fetch(`${baseUrl}/chat/messages`, {
     method: 'POST',
-    headers: { ...authHeaders(userToken), 'content-type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: session.data.id,
-      content: '请回复 E2E',
-      model: chatModel.data.name,
-      maxTokens: 40,
-    }),
+    headers: authHeaders(userToken),
+    body: streamForm,
   });
   const streamText = await streamResponse.text();
   assert(streamResponse.ok, `chat stream returned ${streamResponse.status}: ${streamText}`);
@@ -764,14 +810,19 @@ async function main() {
     .filter((event) => event.type === 'content')
     .map((event) => event.content)
     .join('');
-  assert(streamedContent.includes('E2E mock reply'), 'chat SSE did not contain mock content');
+  assert(streamedContent.includes('E2E mock reply with image'), 'chat SSE did not forward the uploaded image to the provider');
   assert(
     streamEvents.some((event) => event.type === 'done'),
     'chat SSE did not finish with done event',
   );
+  assert(streamEvents.some((event) => event.type === 'accepted' && event.attachments?.length === 1), 'chat SSE did not return the uploaded image');
 
   const messages = await requestAuth(userToken, `/chat/sessions/${session.data.id}/messages`);
   assert(messages.data.total === 2, `expected two chat messages, got ${messages.data.total}`);
+  const userMessageWithImage = messages.data.messages.find((message) => message.role === 'USER');
+  assert(userMessageWithImage?.attachments?.length === 1, 'chat history did not preserve the uploaded image');
+  const storedChatImage = await fetch(userMessageWithImage.attachments[0].url);
+  assert(storedChatImage.ok, `stored chat image was not accessible: ${storedChatImage.status}`);
 
   const rateLimitedChat = await requestAuth(
     userToken,

@@ -62,10 +62,11 @@ export class SendMessageDto {
   @IsString({ message: '会话 ID 必须是字符串' })
   sessionId!: string;
 
-  @ApiProperty({ description: '消息内容' })
+  @ApiProperty({ description: '消息内容', required: false })
+  @IsOptional()
   @IsString({ message: '消息内容必须是字符串' })
   @MaxLength(10000, { message: '消息内容最多10000个字符' })
-  content!: string;
+  content?: string;
 
   @ApiProperty({ description: '平台模型名', example: 'gpt-4o' })
   @IsString({ message: '模型名必须是字符串' })

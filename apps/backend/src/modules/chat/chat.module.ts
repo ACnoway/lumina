@@ -5,9 +5,10 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AdaptersModule } from './adapters/adapters.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { ObjectStorageModule } from '../../object-storage/object-storage.module';
 
 @Module({
-  imports: [PrismaModule, AdaptersModule, WalletModule, ProvidersModule],
+  imports: [PrismaModule, AdaptersModule, WalletModule, ProvidersModule, ObjectStorageModule],
   controllers: [ChatController],
   providers: [ChatService],
   exports: [ChatService],

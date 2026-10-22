@@ -93,13 +93,14 @@ export const apiClient = {
     options?: { signal?: AbortSignal },
   ): Promise<Response> => {
     const token = getToken();
+    const isFormData = body instanceof FormData;
     return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: isFormData ? body : JSON.stringify(body),
       credentials: 'include',
       signal: options?.signal,
     });

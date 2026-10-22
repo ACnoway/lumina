@@ -27,6 +27,11 @@ function createService() {
       {} as WalletService,
       {} as ProvidersService,
       {} as AdapterFactory,
+      {
+        getPresignedUrl: jest.fn().mockResolvedValue('https://storage.example/image'),
+        download: jest.fn().mockResolvedValue(Buffer.from('')),
+        delete: jest.fn().mockResolvedValue(undefined),
+      } as any,
     ),
     prisma,
   };
@@ -44,6 +49,7 @@ describe('ChatService', () => {
         tokens: 12,
         cost: new Decimal('0.0123'),
         createdAt,
+        attachments: [],
       },
     ]);
 
@@ -56,6 +62,7 @@ describe('ChatService', () => {
           tokens: 12,
           cost: 0.0123,
           createdAt,
+          attachments: [],
         },
       ],
       total: 1,

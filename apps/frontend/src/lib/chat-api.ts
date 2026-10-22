@@ -95,17 +95,20 @@ export const chatApi = {
       temperature?: number;
       maxTokens?: number;
       signal?: AbortSignal;
+      images?: File[];
     },
   ): AsyncGenerator<SSEEvent> {
+    const form = new FormData();
+    form.append('sessionId', sessionId);
+    form.append('content', content);
+    form.append('model', model);
+    if (options?.temperature !== undefined) form.append('temperature', String(options.temperature));
+    if (options?.maxTokens !== undefined) form.append('maxTokens', String(options.maxTokens));
+    for (const image of options?.images ?? []) form.append('images', image);
+
     const res = await apiClient.stream(
       '/chat/messages',
-      {
-        sessionId,
-        content,
-        model,
-        temperature: options?.temperature,
-        maxTokens: options?.maxTokens,
-      },
+      form,
       { signal: options?.signal },
     );
 

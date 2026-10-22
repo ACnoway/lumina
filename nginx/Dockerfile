@@ -67,6 +67,7 @@ server {
 
     # /api/foo -> backend /foo，保持与 Nest 路由一致。
     location /api/ {
+        client_max_body_size 22m;
         proxy_pass http://backend:3001/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

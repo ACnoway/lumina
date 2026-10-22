@@ -301,6 +301,14 @@ export interface ChatMessageDto {
   tokens: number | null;
   cost: number | null;
   createdAt: string;
+  attachments?: ChatAttachmentDto[];
+}
+
+export interface ChatAttachmentDto {
+  id: string;
+  mimeType: string;
+  size: number;
+  url: string;
 }
 
 export interface CreateChatMessageDto {
@@ -571,6 +579,7 @@ interface PlatformModelDtoBase {
   displayName: string;
   isActive: boolean;
   maxTokens?: number | null;
+  supportsVision: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -624,6 +633,7 @@ export interface CreatePlatformModelDto {
   type: ModelType;
   pricing: Record<string, any>;
   maxTokens?: number;
+  supportsVision?: boolean;
   isActive?: boolean;
 }
 

@@ -8,6 +8,7 @@ import {
   StreamCallbacks,
   IChatAdapter,
   TokenUsage,
+  toAnthropicContent,
 } from './types';
 
 export class AnthropicAdapter implements IChatAdapter {
@@ -35,17 +36,19 @@ export class AnthropicAdapter implements IChatAdapter {
    */
   private transformMessages(
     messages: ChatMessage[],
-  ): { system: string | undefined; messages: Array<{ role: string; content: string }> } {
+  ): { system: string | undefined; messages: Array<{ role: string; content: string | object[] }> } {
     const systemMessages = messages.filter((m) => m.role === 'system');
     const chatMessages = messages.filter((m) => m.role !== 'system');
 
-    const system = systemMessages.map((m) => m.content).join('\n') || undefined;
+    const system = systemMessages
+      .map((m) => typeof m.content === 'string' ? m.content : '')
+      .join('\n') || undefined;
 
     return {
       system,
       messages: chatMessages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: toAnthropicContent(m.content),
       })),
     };
   }

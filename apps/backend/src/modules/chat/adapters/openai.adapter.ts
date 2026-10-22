@@ -7,6 +7,7 @@ import {
   StreamCallbacks,
   IChatAdapter,
   TokenUsage,
+  toOpenAIContent,
 } from './types';
 
 export class OpenAIAdapter implements IChatAdapter {
@@ -38,7 +39,7 @@ export class OpenAIAdapter implements IChatAdapter {
           model: request.model,
           messages: request.messages.map((m) => ({
             role: m.role,
-            content: m.content,
+            content: toOpenAIContent(m.content),
           })),
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens,
@@ -88,7 +89,7 @@ export class OpenAIAdapter implements IChatAdapter {
           model: request.model,
           messages: request.messages.map((m) => ({
             role: m.role,
-            content: m.content,
+            content: toOpenAIContent(m.content),
           })),
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens,

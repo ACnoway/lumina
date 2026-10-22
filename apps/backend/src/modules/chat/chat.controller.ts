@@ -10,12 +10,17 @@ import {
   Res,
   UseGuards,
   Logger,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
   ApiQuery,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ChatService } from './chat.service';
@@ -29,6 +34,11 @@ import {
   GetMessagesQueryDto,
   SendMessageDto,
 } from './dto/chat.dto';
+import {
+  MAX_CHAT_IMAGE_SIZE_BYTES,
+  MAX_CHAT_IMAGES_PER_MESSAGE,
+  UploadedChatImage,
+} from './chat-image';
 
 @ApiTags('chat')
 @ApiBearerAuth()
@@ -125,14 +135,41 @@ export class ChatController {
 
   @Post('messages')
   @ApiOperation({ summary: '发送消息（SSE 流式响应）' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        content: { type: 'string' },
+        model: { type: 'string' },
+        temperature: { type: 'number' },
+        maxTokens: { type: 'integer' },
+        images: { type: 'array', maxItems: MAX_CHAT_IMAGES_PER_MESSAGE, items: { type: 'string', format: 'binary' } },
+      },
+      required: ['sessionId', 'model'],
+    },
+  })
+  @UseInterceptors(
+    FilesInterceptor('images', MAX_CHAT_IMAGES_PER_MESSAGE, {
+      limits: {
+        fileSize: MAX_CHAT_IMAGE_SIZE_BYTES,
+        files: MAX_CHAT_IMAGES_PER_MESSAGE,
+        fields: 5,
+        fieldSize: 64 * 1024,
+        parts: MAX_CHAT_IMAGES_PER_MESSAGE + 5,
+      },
+    }),
+  )
   async sendMessage(
     @CurrentUser() user: User,
     @Body() dto: SendMessageDto,
     @Res() res: Response,
+    @UploadedFiles() images: UploadedChatImage[] = [],
   ): Promise<void> {
     this.logger.log(
       `发送消息: userId=${user.id}, sessionId=${dto.sessionId}, model=${dto.model}`,
     );
-    await this.chatService.sendMessageStream(user.id, dto, res);
+    await this.chatService.sendMessageStream(user.id, dto, images, res);
   }
 }

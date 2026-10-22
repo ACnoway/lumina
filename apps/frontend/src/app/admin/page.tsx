@@ -358,6 +358,7 @@ export default function AdminPage() {
       perImage: "0.50",
     },
     maxTokens: "",
+    supportsVision: false,
     isActive: true,
   });
   const [providerForm, setProviderForm] = useState({
@@ -703,6 +704,7 @@ export default function AdminPage() {
       type: "CHAT",
       pricing: { input: "0.001", output: "0.002", perImage: "0.50" },
       maxTokens: "",
+      supportsVision: false,
       isActive: true,
     });
     setShowModelForm(true);
@@ -721,6 +723,7 @@ export default function AdminPage() {
           model.type === "IMAGE" ? String(model.pricing.perImage) : "0.50",
       },
       maxTokens: model.maxTokens ? String(model.maxTokens) : "",
+      supportsVision: model.type === "CHAT" && model.supportsVision,
       isActive: model.isActive,
     });
     setShowModelForm(true);
@@ -856,6 +859,7 @@ export default function AdminPage() {
         type: modelForm.type,
         pricing,
         maxTokens,
+        supportsVision: modelForm.type === "CHAT" && modelForm.supportsVision,
         isActive: modelForm.isActive,
       };
       if (editingModelId) {
@@ -2015,6 +2019,19 @@ export default function AdminPage() {
                         />
                       )}
                     </div>
+                    {modelForm.type === "CHAT" && (
+                      <div>
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={modelForm.supportsVision}
+                            onChange={(event) => setModelForm((current) => ({ ...current, supportsVision: event.target.checked }))}
+                          />
+                          此模型支持图片输入
+                        </label>
+                        <p className="mt-1 text-xs text-gray-400">仅在该模型和对应上游均支持识图时开启。</p>
+                      </div>
+                    )}
                     {modelForm.type === "CHAT" ? (
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs text-gray-500">

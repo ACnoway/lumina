@@ -5,6 +5,7 @@
 import type {
   ChatSessionDto,
   ChatMessageDto,
+  ChatAttachmentDto,
   ChatModelPricing,
   MessageRole,
 } from '@lumina/shared';
@@ -12,12 +13,14 @@ import type {
 export type ChatSession = ChatSessionDto;
 
 export type ChatMessage = ChatMessageDto;
+export type ChatAttachment = ChatAttachmentDto;
 
 export interface ChatModel {
   id: string;
   name: string;
   displayName: string;
   pricing: ChatModelPricing;
+  supportsVision: boolean;
 }
 
 export interface BalanceInfo {
@@ -27,6 +30,7 @@ export interface BalanceInfo {
 
 /** SSE 流式事件 */
 export type SSEEvent =
+  | { type: 'accepted'; attachments: ChatAttachment[] }
   | { type: 'content'; content: string }
   | {
       type: 'done';

@@ -60,6 +60,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl rounded-br-md bg-blue-600 px-4 py-3 text-white shadow-sm">
+          {(message.attachments ?? []).length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {(message.attachments ?? []).map((attachment) => (
+                <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer">
+                  <img src={attachment.url} alt="用户上传的图片" className="max-h-72 max-w-full rounded-lg object-contain" />
+                </a>
+              ))}
+            </div>
+          )}
           <MarkdownContent content={message.content} />
         </div>
       </div>

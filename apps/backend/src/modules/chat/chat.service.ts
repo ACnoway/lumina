@@ -11,8 +11,11 @@ import { Response } from 'express';
 import { WalletService } from '../wallet/wallet.service';
 import { ProvidersService } from '../providers/providers.service';
 import { AdapterFactory } from './adapters/adapter-factory';
-import { TokenUsage } from './adapters/types';
+import { ChatContentPart, TokenUsage } from './adapters/types';
 import { SendMessageDto } from './dto/chat.dto';
+import { ObjectStorageService } from '../../object-storage/object-storage.service';
+import { randomUUID } from 'crypto';
+import { UploadedChatImage, validateChatImages } from './chat-image';
 
 // 上下文消息数量
 const CONTEXT_MESSAGES_COUNT = 20;
@@ -30,6 +33,7 @@ export class ChatService {
     private readonly walletService: WalletService,
     private readonly providersService: ProvidersService,
     private readonly adapterFactory: AdapterFactory,
+    private readonly objectStorage: ObjectStorageService,
   ) {}
 
   // ==================== 会话管理 ====================
@@ -108,9 +112,25 @@ export class ChatService {
   async deleteSession(userId: string, sessionId: string) {
     await this.getSession(userId, sessionId);
 
+    const messages = await this.prisma.chatMessage.findMany({
+      where: { sessionId },
+      select: { attachments: { select: { objectKey: true } } },
+    });
+
     await this.prisma.chatSession.delete({
       where: { id: sessionId },
     });
+
+    const objectKeys = messages.flatMap((message) =>
+      message.attachments.map((attachment) => attachment.objectKey),
+    );
+    await Promise.all(
+      objectKeys.map((key) =>
+        this.objectStorage.delete(key).catch((error) => {
+          this.logger.warn(`会话已删除，但聊天图片清理失败: ${error instanceof Error ? error.message : String(error)}`);
+        }),
+      ),
+    );
 
     this.logger.log(`删除会话: userId=${userId}, sessionId=${sessionId}`);
   }
@@ -136,6 +156,7 @@ export class ChatService {
         orderBy: { createdAt: 'asc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: { attachments: true },
       }),
       this.prisma.chatMessage.count({ where }),
     ]);
@@ -143,10 +164,16 @@ export class ChatService {
     // Prisma Decimal 在 JSON 序列化时会变成字符串，接口契约要求 cost 为 number。
     // 在后端边界统一转换，避免前端对历史消息调用 toFixed 时发生类型错误。
     return {
-      messages: messages.map((message) => ({
+      messages: await Promise.all(messages.map(async (message) => ({
         ...message,
         cost: message.cost === null ? null : Number(message.cost.toString()),
-      })),
+        attachments: await Promise.all((message.attachments ?? []).map(async (attachment) => ({
+          id: attachment.id,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          url: await this.objectStorage.getPresignedUrl(attachment.objectKey),
+        }))),
+      }))),
       total,
       page,
       limit,
@@ -162,44 +189,19 @@ export class ChatService {
   async sendMessageStream(
     userId: string,
     dto: SendMessageDto,
+    images: UploadedChatImage[],
     res: Response,
   ): Promise<void> {
+    const content = dto.content?.trim() ?? '';
+    validateChatImages(images);
+    if (!content && images.length === 0) {
+      throw new BadRequestException('请输入消息或上传图片');
+    }
+
     // ---- 1. 验证会话所有权 ----
     const session = await this.getSession(userId, dto.sessionId);
 
-    // ---- 2. 统计现有消息数（用于判断是否需要自动标题） ----
-    const existingCount = await this.prisma.chatMessage.count({
-      where: { sessionId: session.id },
-    });
-
-    // ---- 3. 保存用户消息 ----
-    const userMessage = await this.prisma.chatMessage.create({
-      data: {
-        sessionId: session.id,
-        role: 'USER',
-        content: dto.content,
-      },
-    });
-
-    // ---- 4. 自动更新标题（第一条消息时） ----
-    if (existingCount === 0 && session.title === '新对话') {
-      const autoTitle =
-        dto.content.length > AUTO_TITLE_LENGTH
-          ? dto.content.slice(0, AUTO_TITLE_LENGTH) + '...'
-          : dto.content;
-      await this.prisma.chatSession.update({
-        where: { id: session.id },
-        data: { title: autoTitle },
-      }).catch((err) => {
-        this.logger.warn(`自动更新标题失败: ${err.message}`);
-      });
-    }
-
-    // ---- 5. 获取平台模型（含定价） ----
-    const platformModel = await this.providersService.getPlatformModelByName(
-      dto.model,
-    );
-
+    const platformModel = await this.providersService.getPlatformModelByName(dto.model);
     if (!platformModel) {
       throw new NotFoundException(`模型 "${dto.model}" 不存在`);
     }
@@ -209,17 +211,82 @@ export class ChatService {
     if (platformModel.type !== 'CHAT') {
       throw new BadRequestException(`模型 "${dto.model}" 不是聊天模型`);
     }
+    if (images.length > 0 && !platformModel.supportsVision) {
+      throw new BadRequestException('当前模型未启用图片识别，请在模型配置中开启识图能力');
+    }
 
-    // ---- 6. 构建上下文消息列表 ----
+    // ---- 2. 统计现有消息数（用于判断是否需要自动标题） ----
+    const existingCount = await this.prisma.chatMessage.count({
+      where: { sessionId: session.id },
+    });
+
+    // ---- 3. 保存图片对象和用户消息 ----
+    const storedImages: Array<{ objectKey: string; mimeType: string; size: number; buffer: Buffer }> = [];
+    try {
+      for (const image of images) {
+        const objectKey = `chat/${session.id}/${randomUUID()}`;
+        storedImages.push({ objectKey, mimeType: image.mimetype, size: image.size, buffer: image.buffer });
+        await this.objectStorage.upload(objectKey, image.buffer, image.size, image.mimetype);
+      }
+    } catch (error) {
+      await Promise.all(storedImages.map(({ objectKey }) => this.objectStorage.delete(objectKey).catch(() => undefined)));
+      throw error;
+    }
+
+    const userMessage = await this.prisma.chatMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'USER',
+        content,
+        attachments: {
+          create: storedImages.map(({ objectKey, mimeType, size }) => ({ objectKey, mimeType, size })),
+        },
+      },
+      include: { attachments: true },
+    }).catch(async (error) => {
+      await Promise.all(storedImages.map(({ objectKey }) => this.objectStorage.delete(objectKey).catch(() => undefined)));
+      throw error;
+    });
+
+    // ---- 4. 自动更新标题（第一条消息时） ----
+    if (existingCount === 0 && session.title === '新对话') {
+      const titleSource = content || '图片消息';
+      const autoTitle = titleSource.length > AUTO_TITLE_LENGTH
+        ? titleSource.slice(0, AUTO_TITLE_LENGTH) + '...'
+        : titleSource;
+      await this.prisma.chatSession.update({
+        where: { id: session.id },
+        data: { title: autoTitle },
+      }).catch((err) => {
+        this.logger.warn(`自动更新标题失败: ${err.message}`);
+      });
+    }
+
+    // ---- 5. 构建上下文消息列表 ----
     const history = await this.prisma.chatMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: 'asc' },
       take: CONTEXT_MESSAGES_COUNT,
+      include: { attachments: true },
     });
 
-    const messages = history.map((m) => ({
-      role: m.role.toLowerCase() as 'user' | 'assistant' | 'system',
-      content: m.content,
+    const uploadedByKey = new Map(storedImages.map((image) => [image.objectKey, image.buffer]));
+    const messages = await Promise.all(history.map(async (message) => {
+      let messageContent: string | ChatContentPart[] = message.content;
+      if (message.attachments.length > 0) {
+        const parts: ChatContentPart[] = [];
+        if (message.content) parts.push({ type: 'text', text: message.content });
+        for (const attachment of message.attachments) {
+          const image = uploadedByKey.get(attachment.objectKey)
+            ?? await this.objectStorage.download(attachment.objectKey);
+          parts.push({ type: 'image', mimeType: attachment.mimeType, data: image.toString('base64') });
+        }
+        messageContent = parts;
+      }
+      return {
+        role: message.role.toLowerCase() as 'user' | 'assistant' | 'system',
+        content: messageContent,
+      };
     }));
 
     // ---- 7. 预估成本并预扣 ----
@@ -229,7 +296,9 @@ export class ChatService {
 
     // 粗略预估：输入字符数/2 + 预估输出 token
     const estimatedInputTokens = Math.ceil(
-      messages.reduce((sum, m) => sum + m.content.length, 0) / 2,
+      messages.reduce((sum, message) => sum + (typeof message.content === 'string'
+        ? message.content.length / 2
+        : message.content.reduce((partSum, part) => partSum + (part.type === 'text' ? part.text.length / 2 : 1000), 0)), 0),
     );
     const estimatedOutputTokens = dto.maxTokens || DEFAULT_ESTIMATED_OUTPUT_TOKENS;
     const estimatedCost =
@@ -294,6 +363,18 @@ export class ChatService {
         // 响应可能已关闭
       }
     };
+
+    if (userMessage.attachments.length > 0) {
+      writeSSE({
+        type: 'accepted',
+        attachments: await Promise.all(userMessage.attachments.map(async (attachment) => ({
+          id: attachment.id,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          url: await this.objectStorage.getPresignedUrl(attachment.objectKey),
+        }))),
+      });
+    }
 
     const endResponse = (data?: Record<string, any>): void => {
       if (responseEnded) return;

@@ -33,6 +33,7 @@ function ChatPageContent() {
 
   // 发送状态
   const [sending, setSending] = useState(false);
+  const tempImageUrlsRef = useRef(new Map<string, string[]>());
 
   // 错误提示
   const [error, setError] = useState("");
@@ -195,8 +196,8 @@ function ChatPageContent() {
 
   // 发送消息
   const handleSend = useCallback(
-    async (content: string) => {
-      if (!content.trim() || sending) return;
+    async (content: string, images: File[] = []) => {
+      if ((!content.trim() && images.length === 0) || sending) return;
 
       const interactionVersion = interactionVersionRef.current;
 
@@ -239,7 +240,14 @@ function ChatPageContent() {
         tokens: null,
         cost: null,
         createdAt: new Date().toISOString(),
+        attachments: images.map((file, index) => ({
+          id: `temp-attachment-${index}`,
+          mimeType: file.type,
+          size: file.size,
+          url: URL.createObjectURL(file),
+        })),
       };
+      tempImageUrlsRef.current.set(tempUserMsg.id, (tempUserMsg.attachments ?? []).map((attachment) => attachment.url));
 
       // 空的 AI 消息占位（流式填充）
       const tempAiMsg: ChatMessage = {
@@ -265,7 +273,7 @@ function ChatPageContent() {
           sessionId,
           content,
           selectedModel,
-          { signal: controller.signal },
+          { signal: controller.signal, images },
         );
 
         let aiContent = "";
@@ -274,6 +282,14 @@ function ChatPageContent() {
           if (controller.signal.aborted) break;
 
           switch (event.type) {
+            case "accepted": {
+              tempImageUrlsRef.current.get(tempUserMsg.id)?.forEach(URL.revokeObjectURL);
+              tempImageUrlsRef.current.delete(tempUserMsg.id);
+              setMessages((prev) => prev.map((message) =>
+                message.id === tempUserMsg.id ? { ...message, attachments: event.attachments } : message,
+              ));
+              break;
+            }
             case "content":
               aiContent += event.content;
               setMessages((prev) =>
@@ -372,6 +388,7 @@ function ChatPageContent() {
           <MessageInput
             onSend={handleSend}
             disabled={sending || !selectedModel}
+            allowImages={models.find((model) => model.name === selectedModel)?.supportsVision ?? false}
             placeholder={
               !selectedModel
                 ? "请先选择模型"

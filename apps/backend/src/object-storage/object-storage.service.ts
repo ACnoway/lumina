@@ -205,9 +205,20 @@ export class ObjectStorageService implements OnModuleInit {
     this.clients = this.createClients(config);
   }
 
-  async upload(objectName: string, stream: Buffer | NodeJS.ReadableStream, size?: number) {
+  async upload(
+    objectName: string,
+    stream: Buffer | NodeJS.ReadableStream,
+    size?: number,
+    contentType?: string,
+  ) {
     const { config, clients } = this.requireActiveStorage();
-    await clients.client.putObject(config.bucket, objectName, stream as any, size);
+    await clients.client.putObject(
+      config.bucket,
+      objectName,
+      stream as any,
+      size,
+      contentType ? { 'Content-Type': contentType } : undefined,
+    );
     return objectName;
   }
 
@@ -217,6 +228,12 @@ export class ObjectStorageService implements OnModuleInit {
   ): Promise<string> {
     const { config, clients } = this.requireActiveStorage();
     return clients.publicClient.presignedGetObject(config.bucket, objectName, expiry);
+  }
+
+  async download(objectName: string): Promise<Buffer> {
+    const { config, clients } = this.requireActiveStorage();
+    const stream = await clients.client.getObject(config.bucket, objectName);
+    return this.readStream(stream);
   }
 
   async delete(objectName: string): Promise<void> {
@@ -304,7 +321,7 @@ export class ObjectStorageService implements OnModuleInit {
       throw new BadRequestException(`无法读取原对象存储，迁移已中止：${this.describeError(error)}`);
     }
 
-    const [generationRows, imageRows] = await Promise.all([
+    const [generationRows, imageRows, chatRows] = await Promise.all([
       this.prisma.imageGeneration.findMany({
         where: { imageKey: { not: null } },
         select: { imageKey: true },
@@ -313,10 +330,14 @@ export class ObjectStorageService implements OnModuleInit {
         where: { imageKey: { not: null } },
         select: { imageKey: true },
       }),
+      this.prisma.chatAttachment.findMany({
+        select: { objectKey: true },
+      }),
     ]);
     const keys = [
       ...generationRows.map((row) => row.imageKey),
       ...imageRows.map((row) => row.imageKey),
+      ...chatRows.map((row) => row.objectKey),
     ].filter((key): key is string => Boolean(key));
     const uniqueKeys = [...new Set(keys)];
 

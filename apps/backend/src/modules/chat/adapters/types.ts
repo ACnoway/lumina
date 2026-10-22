@@ -2,10 +2,37 @@
  * 上游聊天适配器统一类型定义
  */
 
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; data: string };
+
 /** 单条消息 */
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | ChatContentPart[];
+}
+
+export function toOpenAIContent(content: ChatMessage['content']): string | object[] {
+  if (typeof content === 'string') return content;
+  return content.map((part) =>
+    part.type === 'text'
+      ? { type: 'text', text: part.text }
+      : {
+          type: 'image_url',
+          image_url: { url: `data:${part.mimeType};base64,${part.data}` },
+        },
+  );
+}
+
+export function toAnthropicContent(content: ChatMessage['content']): string | object[] {
+  if (typeof content === 'string') return content;
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: part.mimeType, data: part.data },
+    };
+  });
 }
 
 /** 聊天请求参数 */

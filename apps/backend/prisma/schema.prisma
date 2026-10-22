@@ -131,12 +131,27 @@ model ChatMessage {
   // 计费信息
   tokens    Int?        // 消耗的 token 数
   cost      Decimal?    @db.Decimal(18, 6) // 本条消息的成本（光子）
+
+  attachments ChatAttachment[]
   
   createdAt DateTime @default(now())
   
   @@index([sessionId])
   @@index([createdAt])
   @@map("chat_messages")
+}
+
+model ChatAttachment {
+  id          String      @id @default(cuid())
+  messageId   String
+  message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  objectKey   String      @unique
+  mimeType    String
+  size        Int
+  createdAt   DateTime    @default(now())
+
+  @@index([messageId])
+  @@map("chat_attachments")
 }
 
 // ==================== 客服 ====================
@@ -433,6 +448,7 @@ model PlatformModel {
   isActive    Boolean  @default(true)
   pricing     Json                            // 计费标准 { input: number, output: number } 或 { perImage: number }
   maxTokens   Int?                            // 平台限制的最大 token
+  supportsVision Boolean @default(false)      // 是否支持图片输入
 
   upstreamModels UpstreamModel[]
   promptOptimizerConfigs SystemConfig[]

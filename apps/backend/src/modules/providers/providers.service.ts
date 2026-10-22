@@ -96,6 +96,7 @@ export class ProvidersService {
     type: ModelType;
     pricing: Record<string, any>;
     maxTokens?: number;
+    supportsVision?: boolean;
     isActive?: boolean;
   }): Promise<PlatformModel> {
     assertValidPlatformModelPricing(data.type, data.pricing);
@@ -115,6 +116,7 @@ export class ProvidersService {
         type: data.type,
         pricing: data.pricing,
         maxTokens: data.maxTokens,
+        supportsVision: data.type === ModelType.CHAT && (data.supportsVision ?? false),
         isActive: data.isActive ?? true,
       },
     });
@@ -131,6 +133,7 @@ export class ProvidersService {
       type: ModelType;
       pricing: Record<string, any>;
       maxTokens: number;
+      supportsVision: boolean;
       isActive: boolean;
     }>,
   ): Promise<PlatformModel> {
@@ -160,6 +163,9 @@ export class ProvidersService {
         ...(data.type !== undefined && { type: data.type }),
         ...(data.pricing !== undefined && { pricing: data.pricing }),
         ...(data.maxTokens !== undefined && { maxTokens: data.maxTokens }),
+        ...((data.supportsVision !== undefined || nextType !== model.type) && {
+          supportsVision: nextType === ModelType.CHAT && (data.supportsVision ?? model.supportsVision),
+        }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
     });

@@ -37,8 +37,12 @@ function readJson(request) {
 function chatContent(payload) {
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
   const lastMessage = messages.at(-1);
-  const content = typeof lastMessage?.content === 'string' ? lastMessage.content : '';
-  return `E2E mock reply: ${content}`;
+  const parts = Array.isArray(lastMessage?.content) ? lastMessage.content : [];
+  const content = typeof lastMessage?.content === 'string'
+    ? lastMessage.content
+    : parts.filter((part) => part.type === 'text').map((part) => part.text).join(' ');
+  const imageMarker = parts.some((part) => part.type === 'image_url') ? ' with image' : '';
+  return `E2E mock reply${imageMarker}: ${content}`;
 }
 
 function writeChatStream(response, payload) {

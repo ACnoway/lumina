@@ -160,6 +160,11 @@ export class CreatePlatformModelDto {
   @Min(1, { message: 'maxTokens 必须大于0' })
   maxTokens?: number;
 
+  @ApiProperty({ description: '聊天模型是否支持图片输入', default: false, required: false })
+  @IsOptional()
+  @IsBoolean({ message: 'supportsVision 必须是布尔值' })
+  supportsVision?: boolean;
+
   @ApiProperty({ description: '是否启用', default: true, required: false })
   @IsOptional()
   @IsBoolean({ message: 'isActive 必须是布尔值' })

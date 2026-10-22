@@ -29,6 +29,7 @@ function createService() {
     systemConfig,
     imageGeneration: { findMany: jest.fn().mockResolvedValue([]) },
     imageGenerationImage: { findMany: jest.fn().mockResolvedValue([]) },
+    chatAttachment: { findMany: jest.fn().mockResolvedValue([]) },
   };
   const config = {
     get: jest.fn().mockReturnValue('test-object-storage-root-key'),
