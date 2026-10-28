@@ -127,7 +127,7 @@ function getTransactionDisplay(type: TransactionType, amount: number): {
 
 function formatModelPricing(model: PlatformModelDto): string {
   if (model.type === "CHAT") {
-    return `输入 ${formatPhoton(model.pricing.input)} / 千 token · 输出 ${formatPhoton(model.pricing.output)} / 千 token`;
+    return `输入 ${formatPhoton(model.pricing.input)} / 百万 token · 输出 ${formatPhoton(model.pricing.output)} / 百万 token`;
   }
   return `${formatPhoton(model.pricing.perImage)} / 张`;
 }
@@ -353,8 +353,8 @@ export default function AdminPage() {
     displayName: "",
     type: "CHAT" as ModelType,
     pricing: {
-      input: "0.001",
-      output: "0.002",
+      input: "1",
+      output: "2",
       perImage: "0.50",
     },
     maxTokens: "",
@@ -703,7 +703,7 @@ export default function AdminPage() {
       name: "",
       displayName: "",
       type: "CHAT",
-      pricing: { input: "0.001", output: "0.002", perImage: "0.50" },
+      pricing: { input: "1", output: "2", perImage: "0.50" },
       maxTokens: "",
       supportsVision: false,
       supportsReferenceImage: false,
@@ -719,8 +719,8 @@ export default function AdminPage() {
       displayName: model.displayName,
       type: model.type,
       pricing: {
-        input: model.type === "CHAT" ? String(model.pricing.input) : "0.001",
-        output: model.type === "CHAT" ? String(model.pricing.output) : "0.002",
+        input: model.type === "CHAT" ? String(model.pricing.input) : "1",
+        output: model.type === "CHAT" ? String(model.pricing.output) : "2",
         perImage:
           model.type === "IMAGE" ? String(model.pricing.perImage) : "0.50",
       },
@@ -2053,7 +2053,7 @@ export default function AdminPage() {
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1 text-xs text-gray-500">
                           <span className="block font-medium text-gray-700">
-                            输入价格（光子 / 千 token）
+                            输入价格（光子 / 百万 token）
                           </span>
                           <input
                             value={modelForm.pricing.input}
@@ -2075,7 +2075,7 @@ export default function AdminPage() {
                         </label>
                         <label className="space-y-1 text-xs text-gray-500">
                           <span className="block font-medium text-gray-700">
-                            输出价格（光子 / 千 token）
+                            输出价格（光子 / 百万 token）
                           </span>
                           <input
                             value={modelForm.pricing.output}

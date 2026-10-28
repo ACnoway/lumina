@@ -192,6 +192,40 @@ describe('WalletService reservations', () => {
     expect(store.wallet.balance.toNumber()).toBe(9);
   });
 
+  it('settles above the reservation when unreserved balance is available', async () => {
+    const store = createTestStore();
+    const service = createWalletService(store);
+    await service.preDeduct('user-1', 2, 'first');
+    await service.preDeduct('user-1', 4, 'second');
+    await service.settle('user-1', 6, 'first', 'test');
+    expect(store.wallet.balance.toNumber()).toBe(4);
+    await service.settle('user-1', 4, 'second', 'test');
+    expect(store.wallet.balance.toNumber()).toBe(0);
+  });
+
+  it('does not spend another request’s reservation when actual cost exceeds the estimate', async () => {
+    const store = createTestStore();
+    const service = createWalletService(store);
+    await service.preDeduct('user-1', 2, 'first');
+    await service.preDeduct('user-1', 4, 'second');
+    await expect(service.settle('user-1', 7, 'first', 'test')).rejects.toThrow('余额不足');
+    expect(store.wallet.balance.toNumber()).toBe(10);
+    expect(store.transactions).toHaveLength(0);
+    await service.settle('user-1', 4, 'second', 'test');
+  });
+
+  it('settles rounded and zero amounts consistently', async () => {
+    const store = createTestStore();
+    const service = createWalletService(store);
+    await service.preDeduct('user-1', 1, 'rounded');
+    await service.settle('user-1', 0.1234567, 'rounded', 'test');
+    expect(store.wallet.balance.toString()).toBe('9.876543');
+    await service.preDeduct('user-1', 1, 'free');
+    await service.settle('user-1', 0, 'free', 'test');
+    expect(store.wallet.balance.toString()).toBe('9.876543');
+    expect(store.transactions).toHaveLength(2);
+  });
+
   it('makes refund retries idempotent without changing the balance', async () => {
     const store = createTestStore();
     const service = createWalletService(store);

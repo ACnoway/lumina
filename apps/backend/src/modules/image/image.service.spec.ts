@@ -29,7 +29,7 @@ const promptOptimizerModel = {
   displayName: '聊天模型',
   type: 'CHAT',
   isActive: true,
-  pricing: { input: 0.01, output: 0.02 },
+  pricing: { input: 10, output: 20 },
 };
 
 const queuedTask = {

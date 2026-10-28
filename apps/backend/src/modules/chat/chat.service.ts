@@ -16,6 +16,7 @@ import { SendMessageDto } from './dto/chat.dto';
 import { ObjectStorageService } from '../../object-storage/object-storage.service';
 import { randomUUID } from 'crypto';
 import { UploadedChatImage, validateChatImages } from './chat-image';
+import { calculateTokenCost } from '../wallet/token-cost';
 
 // 上下文消息数量
 const CONTEXT_MESSAGES_COUNT = 20;
@@ -289,9 +290,17 @@ export class ChatService {
       };
     }));
 
+    // 先解析上游，让预扣和实际请求使用相同的输出上限。
+    const resolved = await this.providersService.resolveUpstream(dto.model);
+    const maxTokens = dto.maxTokens || resolved.upstreamModel.maxTokens ||
+      platformModel.maxTokens || DEFAULT_ESTIMATED_OUTPUT_TOKENS;
+    const providerConfig = (resolved.provider.config as Record<string, any>) || {};
+    const adapter = this.adapterFactory.createAdapter(resolved.provider.apiFormat, providerConfig);
+    const upstreamModelId = resolved.upstreamModel.upstreamModelId;
+
     // ---- 7. 预估成本并预扣 ----
     const pricing = (platformModel.pricing as any) || {};
-    const inputPrice = Number(pricing.input) || 0; // 每千 token 价格
+    const inputPrice = Number(pricing.input) || 0; // 每百万 token 价格
     const outputPrice = Number(pricing.output) || 0;
 
     // 粗略预估：输入字符数/2 + 预估输出 token
@@ -300,10 +309,7 @@ export class ChatService {
         ? message.content.length / 2
         : message.content.reduce((partSum, part) => partSum + (part.type === 'text' ? part.text.length / 2 : 1000), 0)), 0),
     );
-    const estimatedOutputTokens = dto.maxTokens || DEFAULT_ESTIMATED_OUTPUT_TOKENS;
-    const estimatedCost =
-      (estimatedInputTokens / 1000) * inputPrice +
-      (estimatedOutputTokens / 1000) * outputPrice;
+    const estimatedCost = calculateTokenCost(estimatedInputTokens, maxTokens, inputPrice, outputPrice);
 
     // 预扣至少 0.01 光子，避免极小金额
     const preDeductAmount = Math.max(estimatedCost, 0.01);
@@ -318,34 +324,6 @@ export class ChatService {
       preDeductAmount,
       idempotencyKey,
     );
-
-    // ---- 8. 路由上游 ----
-    let resolved;
-    try {
-      resolved = await this.providersService.resolveUpstream(dto.model);
-    } catch (error) {
-      // 路由失败，退回预扣
-      const errMsg = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`路由失败，退回预扣: ${errMsg}`);
-      await this.walletService.refund(userId, idempotencyKey, '路由失败');
-      throw error;
-    }
-
-    // ---- 9. 创建适配器 ----
-    const providerConfig = (resolved.provider.config as Record<string, any>) || {};
-    const adapter = this.adapterFactory.createAdapter(
-      resolved.provider.apiFormat,
-      providerConfig,
-    );
-
-    // 上游实际模型名
-    const upstreamModelId = resolved.upstreamModel.upstreamModelId;
-    // 上游 maxTokens 限制（可选覆盖平台值）
-    const maxTokens =
-      dto.maxTokens ||
-      resolved.upstreamModel.maxTokens ||
-      platformModel.maxTokens ||
-      undefined;
 
     // ---- 10. 设置 SSE 响应头 ----
     res.setHeader('Content-Type', 'text/event-stream');
@@ -438,9 +416,7 @@ export class ChatService {
         const usage = streamUsage as TokenUsage;
 
         // 计算实际成本
-        const actualCost =
-          (usage.inputTokens / 1000) * inputPrice +
-          (usage.outputTokens / 1000) * outputPrice;
+        const actualCost = calculateTokenCost(usage.inputTokens, usage.outputTokens, inputPrice, outputPrice);
 
         // 结算钱包
         await this.walletService.settle(

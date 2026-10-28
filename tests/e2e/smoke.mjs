@@ -592,7 +592,7 @@ async function main() {
       name: `e2e-chat-${Date.now()}`,
       displayName: 'E2E Chat',
       type: 'CHAT',
-      pricing: { input: 0.001, output: 0.001 },
+      pricing: { input: 1, output: 1 },
       maxTokens: 100,
     },
   });

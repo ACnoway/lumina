@@ -113,6 +113,7 @@ export class WalletService {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('预扣金额必须大于0');
     }
+    amount = new Decimal(amount).toDecimalPlaces(6, Decimal.ROUND_CEIL).toNumber();
 
     const redisKey = `${this.PREDEDUCT_KEY_PREFIX}${userId}:${idempotencyKey}`;
 
@@ -133,16 +134,16 @@ export class WalletService {
 
       // 余额和该用户所有尚未结算的预扣一起检查。索引中的过期项会在这里清理。
       const wallet = await this.getWallet(userId);
-      const balance = parseFloat(wallet.balance.toString());
+      const balance = new Decimal(wallet.balance.toString());
       const reservedAmount = await this.getReservedAmount(userId);
-      const availableBalance = balance - reservedAmount;
+      const availableBalance = balance.minus(reservedAmount);
 
-      if (availableBalance < amount) {
+      if (availableBalance.lessThan(amount)) {
         this.logger.warn(
           `余额不足: userId=${userId}, balance=${balance}, reserved=${reservedAmount}, required=${amount}`,
         );
         throw new BadRequestException(
-          `余额不足，当前可用余额: ${Math.max(availableBalance, 0).toFixed(2)} 光子`,
+          `余额不足，当前可用余额: ${Decimal.max(availableBalance, 0).toFixed(2)} 光子`,
         );
       }
 
@@ -189,9 +190,10 @@ export class WalletService {
     reason: string,
     metadata?: any,
   ): Promise<SettleResult> {
-    if (!Number.isFinite(actualAmount) || actualAmount <= 0) {
-      throw new BadRequestException('结算金额必须大于0');
+    if (!Number.isFinite(actualAmount) || actualAmount < 0) {
+      throw new BadRequestException('结算金额不能小于0');
     }
+    actualAmount = new Decimal(actualAmount).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber();
 
     const redisKey = `${this.PREDEDUCT_KEY_PREFIX}${userId}:${idempotencyKey}`;
 
@@ -224,12 +226,9 @@ export class WalletService {
         throw new BadRequestException('预扣记录不存在或已过期，请重新预扣');
       }
 
-      const preDeduct = JSON.parse(preDeductData) as PreDeductData;
-      if (actualAmount > preDeduct.amount) {
-        throw new BadRequestException(
-          `实际消费金额(${actualAmount})不能超过预扣金额(${preDeduct.amount})`,
-        );
-      }
+      // 允许使用本次预留以外的可用余额，但不能占用其他请求的预留。
+      const otherReservations = await this.getReservedAmount(userId, idempotencyKey);
+      const requiredBalance = otherReservations.plus(actualAmount);
 
       // 使用数据库条件更新作为最后一道资金安全边界。即使锁过期或有其他进程直接写库，
       // 也不会允许余额被扣成负数或发生丢失更新。
@@ -245,7 +244,7 @@ export class WalletService {
         const updated = await tx.wallet.updateMany({
           where: {
             id: wallet.id,
-            balance: { gte: new Decimal(actualAmount) },
+            balance: { gte: requiredBalance },
           },
           data: {
             balance: { decrement: new Decimal(actualAmount) },
@@ -804,11 +803,11 @@ export class WalletService {
     return `${this.RESERVATION_INDEX_PREFIX}${userId}`;
   }
 
-  private async getReservedAmount(userId: string): Promise<number> {
+  private async getReservedAmount(userId: string, excludeKey?: string): Promise<Decimal> {
     const indexKey = this.reservationIndexKey(userId);
     const reservations = (await this.redis.hGetAll(indexKey)) || {};
     const now = Date.now();
-    let total = 0;
+    let total = new Decimal(0);
 
     for (const [idempotencyKey, serializedData] of Object.entries(
       reservations,
@@ -842,7 +841,7 @@ export class WalletService {
         continue;
       }
 
-      total += data.amount;
+      if (idempotencyKey !== excludeKey) total = total.plus(data.amount);
     }
 
     return total;

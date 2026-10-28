@@ -1,3 +1,4 @@
+import { calculateTokenCost } from '../wallet/token-cost';
 import {
   Injectable,
   Logger,
@@ -110,10 +111,9 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     const outputPrice = Number(pricing.output) || 0;
 
     // 预估成本（系统指令 + 用户输入 ≈ 300 token，输出 ≈ 150 token）
-    const estimatedInputTokens = 350;
-    const estimatedOutputTokens = 200;
-    const estimatedCost =
-      (estimatedInputTokens / 1000) * inputPrice + (estimatedOutputTokens / 1000) * outputPrice;
+    const estimatedInputTokens = Math.max(350, Math.ceil(originalPrompt.length / 2) + 300);
+    const estimatedOutputTokens = 300;
+    const estimatedCost = calculateTokenCost(estimatedInputTokens, estimatedOutputTokens, inputPrice, outputPrice);
 
     const idempotencyKey = `prompt-opt:${userId}:${Date.now()}`;
 
@@ -147,8 +147,7 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       });
 
       // 计算实际成本
-      const actualCost =
-        (response.inputTokens / 1000) * inputPrice + (response.outputTokens / 1000) * outputPrice;
+      const actualCost = calculateTokenCost(response.inputTokens, response.outputTokens, inputPrice, outputPrice);
 
       // 结算
       await this.walletService.settle(

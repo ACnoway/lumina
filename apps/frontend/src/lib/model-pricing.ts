@@ -32,7 +32,7 @@ export function formatPhotonTruncated(value: number, fractionDigits = 4): string
 }
 
 export function formatChatModelPricing(pricing: ChatModelPricing): string {
-  return `输入 ${formatPhoton(pricing.input)} / 千 token · 输出 ${formatPhoton(pricing.output)} / 千 token`;
+  return `输入 ${formatPhoton(pricing.input)} / 百万 token · 输出 ${formatPhoton(pricing.output)} / 百万 token`;
 }
 
 export function formatImageModelPricing(

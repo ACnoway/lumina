@@ -184,7 +184,7 @@ Set-Location ..\frontend
 ## 本次模块：平台模型结构化计费表单 ✓
 
 管理后台的平台模型新建表单已移除计费 JSON 文本框，改为按模型类型显示价格输入：
-`CHAT` 使用每千 token 的 `input/output`，`IMAGE` 使用每张图片的 `perImage`。
+`CHAT` 使用每百万 token 的 `input/output`，`IMAGE` 使用每张图片的 `perImage`。旧的每千 token 价格由数据库迁移乘以 1000，实际单价不变。
 前端提交前校验非负有限数字；后端 DTO 校验字段集合和类型，service 在创建及更新（含模型类型切换）时再次校验。
 共享类型同步收窄为按类型的计费结构，并新增 9 项校验测试。
 
