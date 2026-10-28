@@ -7,7 +7,9 @@ RUN npm install -g pnpm@8
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile
+# The frontend needs only its own dependencies and workspace packages. Installing
+# the backend too triggers Prisma engine downloads in this unrelated image.
+RUN pnpm install --frozen-lockfile --filter frontend...
 
 # Build shared package first (frontend depends on it)
 RUN pnpm --filter @lumina/shared build
