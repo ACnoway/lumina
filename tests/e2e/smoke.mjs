@@ -861,6 +861,25 @@ async function main() {
   const storedChatImage = await fetch(userMessageWithImage.attachments[0].url);
   assert(storedChatImage.ok, `stored chat image was not accessible: ${storedChatImage.status}`);
 
+  const rateLimitedChat = await requestAuth(
+    userToken,
+    '/chat/messages',
+    {
+      method: 'POST',
+      body: {
+        sessionId: session.data.id,
+        content: '请再次回复 E2E',
+        model: chatModel.data.name,
+        maxTokens: 40,
+      },
+    },
+    [503],
+  );
+  assert(
+    rateLimitedChat.data.message === '所有上游均不可用',
+    'provider sliding-window rate limit did not reject the second request',
+  );
+
   const contextSession = await requestAuth(userToken, '/chat/sessions', {
     method: 'POST',
     body: { title: 'E2E context chat' },
@@ -901,25 +920,6 @@ async function main() {
   assert(
     compactLedger.data.items.some((item) => item.reason === '聊天上下文压缩: E2E Context'),
     'context compaction charge did not use the user-facing model name',
-  );
-
-  const rateLimitedChat = await requestAuth(
-    userToken,
-    '/chat/messages',
-    {
-      method: 'POST',
-      body: {
-        sessionId: session.data.id,
-        content: '请再次回复 E2E',
-        model: chatModel.data.name,
-        maxTokens: 40,
-      },
-    },
-    [503],
-  );
-  assert(
-    rateLimitedChat.data.message === '所有上游均不可用',
-    'provider sliding-window rate limit did not reject the second request',
   );
 
   function referenceForm(bytes = validPng, mimeType = 'image/png') {
