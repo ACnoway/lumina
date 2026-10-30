@@ -110,6 +110,7 @@ model ChatSession {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   title  String @default("新对话")
+  contextSummary String? @db.Text
   
   messages ChatMessage[]
   
@@ -131,6 +132,7 @@ model ChatMessage {
   // 计费信息
   tokens    Int?        // 消耗的 token 数
   cost      Decimal?    @db.Decimal(18, 6) // 本条消息的成本（光子）
+  contextCompacted Boolean @default(false) // 已纳入会话摘要，不再作为原始消息重复发送给模型
 
   attachments ChatAttachment[]
   
@@ -450,7 +452,8 @@ model PlatformModel {
   type        ModelType                       // CHAT 或 IMAGE
   isActive    Boolean  @default(true)
   pricing     Json                            // 计费标准 { input: number, output: number } 或 { perImage: number }
-  maxTokens   Int?                            // 平台限制的最大 token
+  maxTokens   Int?                            // 最大输出 token
+  contextWindowTokens Int @default(8192)      // 模型上下文窗口总 token 数（输入 + 输出）
   supportsVision Boolean @default(false)      // 是否支持图片输入
   supportsReferenceImage Boolean @default(false) // 生图模型是否支持参考图/图片编辑
 

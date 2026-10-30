@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { chatApi } from "@/lib/chat-api";
-import type { ChatSession, ChatMessage, ChatModel } from "@/lib/chat-types";
+import type { ChatSession, ChatMessage, ChatModel, ChatContextUsage } from "@/lib/chat-types";
 import { getStoredUser } from "@/lib/auth";
 import AppHeader from "@/components/AppHeader";
 import Sidebar from "./components/Sidebar";
@@ -30,6 +30,10 @@ function ChatPageContent() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelError, setModelError] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ChatContextUsage | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextError, setContextError] = useState(false);
+  const [compacting, setCompacting] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const closeSessions = useCallback(() => setSessionsOpen(false), []);
 
@@ -91,6 +95,33 @@ function ChatPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedModel) {
+      setContextUsage(null);
+      setContextLoading(false);
+      setContextError(false);
+      return () => { active = false; };
+    }
+
+    setContextLoading(true);
+    setContextError(false);
+    chatApi.getContextUsage(currentSessionId, selectedModel)
+      .then((usage) => {
+        if (active) setContextUsage(usage);
+      })
+      .catch(() => {
+        if (active) {
+          setContextUsage(null);
+          setContextError(true);
+        }
+      })
+      .finally(() => {
+        if (active) setContextLoading(false);
+      });
+    return () => { active = false; };
+  }, [currentSessionId, selectedModel, messages.length, sending]);
 
   // 组件卸载时取消进行中的请求
   useEffect(() => {
@@ -160,6 +191,7 @@ function ChatPageContent() {
 
   // 创建新会话
   async function handleNewSession() {
+    if (compacting) return;
     setSessionsOpen(false);
     // 中止当前流式请求
     abortRef.current?.abort();
@@ -174,6 +206,7 @@ function ChatPageContent() {
 
   // 切换会话
   function handleSelectSession(sessionId: string) {
+    if (compacting) return;
     setSessionsOpen(false);
     if (sessionId === currentSessionId) return;
     abortRef.current?.abort();
@@ -183,6 +216,7 @@ function ChatPageContent() {
 
   // 删除会话
   async function handleDeleteSession(sessionId: string) {
+    if (compacting) return;
     try {
       await chatApi.deleteSession(sessionId);
       sessionListRequestRef.current += 1;
@@ -201,8 +235,26 @@ function ChatPageContent() {
 
   // 切换模型
   function handleModelChange(modelName: string) {
+    if (compacting) return;
     setSelectedModel(modelName);
+    setContextUsage(null);
+    setContextError(false);
     localStorage.setItem(MODEL_STORAGE_KEY, modelName);
+  }
+
+  async function handleCompactContext() {
+    if (!currentSessionId || !selectedModel || compacting) return;
+    setCompacting(true);
+    setError("");
+    try {
+      const result = await chatApi.compactContext(currentSessionId, selectedModel);
+      setContextUsage(result.contextUsage);
+      setContextError(false);
+    } catch (compactError) {
+      setError(compactError instanceof Error ? compactError.message : "压缩上下文失败");
+    } finally {
+      setCompacting(false);
+    }
   }
 
   // 发送消息
@@ -390,6 +442,13 @@ function ChatPageContent() {
             modelError={modelError}
             onRetryModels={loadModels}
             onOpenSessions={() => setSessionsOpen(true)}
+            contextUsage={contextUsage}
+            contextLoading={contextLoading}
+            contextError={contextError}
+            compacting={compacting}
+            canCompact={contextUsage?.canCompact ?? false}
+            hasSession={Boolean(currentSessionId)}
+            onCompact={() => void handleCompactContext()}
           />
 
           {error && (
@@ -402,11 +461,13 @@ function ChatPageContent() {
 
           <MessageInput
             onSend={handleSend}
-            disabled={sending || !selectedModel}
-            sending={sending}
+            disabled={sending || compacting || !selectedModel}
+            sending={sending || compacting}
             allowImages={models.find((model) => model.name === selectedModel)?.supportsVision ?? false}
             placeholder={
-              !selectedModel
+              compacting
+                ? "正在压缩上下文…"
+                : !selectedModel
                 ? "请先选择模型"
                 : "输入消息，聊聊你的想法…"
             }

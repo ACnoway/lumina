@@ -336,6 +336,8 @@ export class ProvidersController {
     name: string;
     type: ModelType;
     isActive: boolean;
+    maxTokens?: number | null;
+    contextWindowTokens?: number;
     supportsReferenceImage?: boolean;
   }): Record<string, unknown> {
     return {
@@ -343,6 +345,8 @@ export class ProvidersController {
       name: model.name,
       type: model.type,
       isActive: model.isActive,
+      maxTokens: model.maxTokens,
+      contextWindowTokens: model.contextWindowTokens,
       supportsReferenceImage: model.supportsReferenceImage ?? false,
     };
   }

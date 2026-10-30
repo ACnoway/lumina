@@ -96,11 +96,16 @@ export class ProvidersService {
     type: ModelType;
     pricing: Record<string, any>;
     maxTokens?: number;
+    contextWindowTokens?: number;
     supportsVision?: boolean;
     supportsReferenceImage?: boolean;
     isActive?: boolean;
   }): Promise<PlatformModel> {
     assertValidPlatformModelPricing(data.type, data.pricing);
+    const contextWindowTokens = data.contextWindowTokens ?? 8192;
+    if (data.type === ModelType.CHAT && data.maxTokens && data.maxTokens >= contextWindowTokens) {
+      throw new BadRequestException('最大输出 token 必须小于上下文窗口');
+    }
 
     const exists = await this.prisma.platformModel.findUnique({
       where: { name: data.name },
@@ -117,6 +122,7 @@ export class ProvidersService {
         type: data.type,
         pricing: data.pricing,
         maxTokens: data.maxTokens,
+        contextWindowTokens,
         supportsVision: data.type === ModelType.CHAT && (data.supportsVision ?? false),
         supportsReferenceImage: data.type === ModelType.IMAGE && (data.supportsReferenceImage ?? false),
         isActive: data.isActive ?? true,
@@ -135,6 +141,7 @@ export class ProvidersService {
       type: ModelType;
       pricing: Record<string, any>;
       maxTokens: number;
+      contextWindowTokens: number;
       supportsVision: boolean;
       supportsReferenceImage: boolean;
       isActive: boolean;
@@ -147,7 +154,12 @@ export class ProvidersService {
 
     const nextType = data.type ?? model.type;
     const nextPricing = data.pricing ?? model.pricing;
+    const nextContextWindowTokens = data.contextWindowTokens ?? model.contextWindowTokens;
+    const nextMaxTokens = data.maxTokens ?? model.maxTokens;
     assertValidPlatformModelPricing(nextType, nextPricing);
+    if (nextType === ModelType.CHAT && nextMaxTokens && nextMaxTokens >= nextContextWindowTokens) {
+      throw new BadRequestException('最大输出 token 必须小于上下文窗口');
+    }
 
     if (data.name && data.name !== model.name) {
       const exists = await this.prisma.platformModel.findUnique({
@@ -166,6 +178,7 @@ export class ProvidersService {
         ...(data.type !== undefined && { type: data.type }),
         ...(data.pricing !== undefined && { pricing: data.pricing }),
         ...(data.maxTokens !== undefined && { maxTokens: data.maxTokens }),
+        ...(data.contextWindowTokens !== undefined && { contextWindowTokens: data.contextWindowTokens }),
         ...((data.supportsVision !== undefined || nextType !== model.type) && {
           supportsVision: nextType === ModelType.CHAT && (data.supportsVision ?? model.supportsVision),
         }),

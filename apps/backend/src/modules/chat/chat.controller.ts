@@ -33,6 +33,7 @@ import {
   GetSessionsQueryDto,
   GetMessagesQueryDto,
   SendMessageDto,
+  CompactChatContextDto,
 } from './dto/chat.dto';
 import {
   MAX_CHAT_IMAGE_SIZE_BYTES,
@@ -85,6 +86,39 @@ export class ChatController {
   ) {
     this.logger.log(`获取会话: userId=${user.id}, sessionId=${id}`);
     return this.chatService.getSession(user.id, id);
+  }
+
+  @Get('sessions/:id/context')
+  @ApiOperation({ summary: '获取会话上下文用量' })
+  @ApiQuery({ name: 'model', required: true, type: String })
+  async getContextUsage(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Query('model') model: string,
+  ) {
+    return this.chatService.getContextUsage(user.id, id, model);
+  }
+
+  @Get('context')
+  @ApiOperation({ summary: '获取当前模型及可选会话的上下文用量' })
+  @ApiQuery({ name: 'model', required: true, type: String })
+  @ApiQuery({ name: 'sessionId', required: false, type: String })
+  async getModelContextUsage(
+    @CurrentUser() user: User,
+    @Query('model') model: string,
+    @Query('sessionId') sessionId?: string,
+  ) {
+    return this.chatService.getContextUsage(user.id, sessionId || null, model);
+  }
+
+  @Post('sessions/:id/context/compact')
+  @ApiOperation({ summary: '压缩会话较早的聊天上下文' })
+  async compactContext(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: CompactChatContextDto,
+  ) {
+    return this.chatService.compactContext(user.id, id, dto.model);
   }
 
   @Patch('sessions/:id')

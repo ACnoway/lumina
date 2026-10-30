@@ -304,6 +304,20 @@ export interface ChatMessageDto {
   attachments?: ChatAttachmentDto[];
 }
 
+export interface ChatContextUsageDto {
+  model: string;
+  contextWindowTokens: number;
+  inputBudgetTokens: number;
+  reservedOutputTokens: number;
+  estimatedInputTokens: number;
+  utilizationPercent: number;
+  omittedMessageCount: number;
+  compactedMessageCount: number;
+  canCompact: boolean;
+  hasSummary: boolean;
+  fits: boolean;
+}
+
 export interface ChatAttachmentDto {
   id: string;
   mimeType: string;
@@ -580,6 +594,7 @@ interface PlatformModelDtoBase {
   displayName: string;
   isActive: boolean;
   maxTokens?: number | null;
+  contextWindowTokens: number;
   supportsVision: boolean;
   supportsReferenceImage: boolean;
   createdAt: string;
@@ -635,6 +650,7 @@ export interface CreatePlatformModelDto {
   type: ModelType;
   pricing: Record<string, any>;
   maxTokens?: number;
+  contextWindowTokens?: number;
   supportsVision?: boolean;
   supportsReferenceImage?: boolean;
   isActive?: boolean;

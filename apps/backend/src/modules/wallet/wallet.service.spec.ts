@@ -279,7 +279,7 @@ describe('WalletService reservations', () => {
       type: 'CONSUME',
       amount: new Decimal('0.5'),
       balance: new Decimal('9.5'),
-      reason: '聊天: internal-chat-model',
+      reason: '聊天上下文压缩: internal-chat-model',
       metadata: {
         model: 'internal-chat-model',
         sessionId: 'session-1',
@@ -311,7 +311,7 @@ describe('WalletService reservations', () => {
 
     expect(result.transactions[0]).toEqual({
       ...transaction,
-      reason: '聊天: 用户聊天模型',
+      reason: '聊天上下文压缩: 用户聊天模型',
       metadata: {
         model: '用户聊天模型',
         sessionId: 'session-1',

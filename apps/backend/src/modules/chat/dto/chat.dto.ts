@@ -85,3 +85,9 @@ export class SendMessageDto {
   @Min(1, { message: 'maxTokens 必须大于0' })
   maxTokens?: number;
 }
+
+export class CompactChatContextDto {
+  @ApiProperty({ description: '要使用的聊天平台模型名', example: 'gpt-4o' })
+  @IsString({ message: '模型名必须是字符串' })
+  model!: string;
+}

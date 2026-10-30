@@ -641,7 +641,7 @@ export class WalletService {
   private getReasonModelName(
     reason: string,
   ): { prefix: string; modelName: string } | null {
-    const match = /^(聊天|生图|提示词优化)\s*[:：]\s*(.+)$/.exec(reason.trim());
+    const match = /^(聊天上下文压缩|聊天|生图|提示词优化)\s*[:：]\s*(.+)$/.exec(reason.trim());
     if (!match) return null;
 
     return {

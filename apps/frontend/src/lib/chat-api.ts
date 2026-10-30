@@ -9,6 +9,7 @@ import type {
   ChatModel,
   BalanceInfo,
   SSEEvent,
+  ChatContextUsage,
 } from './chat-types';
 
 interface SessionsResponse {
@@ -76,6 +77,21 @@ export const chatApi = {
   /** 获取可用聊天模型列表 */
   getChatModels(): Promise<ChatModel[]> {
     return apiClient.get('/providers/models?type=CHAT');
+  },
+
+  /** 获取会话当前模型上下文用量 */
+  getContextUsage(sessionId: string | null, model: string): Promise<ChatContextUsage> {
+    const params = new URLSearchParams({ model });
+    if (sessionId) params.set('sessionId', sessionId);
+    return apiClient.get(`/chat/context?${params.toString()}`);
+  },
+
+  /** 将较早的对话压缩为摘要，完整聊天记录仍保留 */
+  compactContext(sessionId: string, model: string): Promise<{
+    compactedMessages: number;
+    contextUsage: ChatContextUsage;
+  }> {
+    return apiClient.post(`/chat/sessions/${sessionId}/context/compact`, { model });
   },
 
   /** 获取余额 */

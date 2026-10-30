@@ -358,6 +358,7 @@ export default function AdminPage() {
       perImage: "0.50",
     },
     maxTokens: "",
+    contextWindowTokens: "8192",
     supportsVision: false,
     supportsReferenceImage: false,
     isActive: true,
@@ -705,6 +706,7 @@ export default function AdminPage() {
       type: "CHAT",
       pricing: { input: "1", output: "2", perImage: "0.50" },
       maxTokens: "",
+      contextWindowTokens: "8192",
       supportsVision: false,
       supportsReferenceImage: false,
       isActive: true,
@@ -725,6 +727,7 @@ export default function AdminPage() {
           model.type === "IMAGE" ? String(model.pricing.perImage) : "0.50",
       },
       maxTokens: model.maxTokens ? String(model.maxTokens) : "",
+      contextWindowTokens: String(model.contextWindowTokens ?? 8192),
       supportsVision: model.type === "CHAT" && model.supportsVision,
       supportsReferenceImage: model.type === "IMAGE" && model.supportsReferenceImage,
       isActive: model.isActive,
@@ -832,6 +835,9 @@ export default function AdminPage() {
         modelForm.type === "CHAT" && modelForm.maxTokens
           ? Number(modelForm.maxTokens)
           : undefined;
+      const contextWindowTokens = modelForm.type === "CHAT"
+        ? Number(modelForm.contextWindowTokens)
+        : undefined;
       if (!modelForm.name.trim() || !modelForm.displayName.trim()) {
         throw new Error("请填写模型名称和展示名称");
       }
@@ -839,7 +845,16 @@ export default function AdminPage() {
         maxTokens !== undefined &&
         (!Number.isInteger(maxTokens) || maxTokens < 1)
       ) {
-        throw new Error("最大 Token 必须是大于 0 的整数");
+        throw new Error("最大输出 Token 必须是大于 0 的整数");
+      }
+      if (
+        contextWindowTokens !== undefined &&
+        (!Number.isInteger(contextWindowTokens) || contextWindowTokens < 1024)
+      ) {
+        throw new Error("上下文窗口必须是至少 1024 的整数 Token");
+      }
+      if (maxTokens !== undefined && contextWindowTokens !== undefined && maxTokens >= contextWindowTokens) {
+        throw new Error("最大输出 Token 必须小于上下文窗口");
       }
       const pricing =
         modelForm.type === "CHAT"
@@ -862,6 +877,7 @@ export default function AdminPage() {
         type: modelForm.type,
         pricing,
         maxTokens,
+        contextWindowTokens,
         supportsVision: modelForm.type === "CHAT" && modelForm.supportsVision,
         supportsReferenceImage: modelForm.type === "IMAGE" && modelForm.supportsReferenceImage,
         isActive: modelForm.isActive,
@@ -1038,7 +1054,7 @@ export default function AdminPage() {
         maxTokens !== undefined &&
         (!Number.isInteger(maxTokens) || maxTokens < 1)
       ) {
-        throw new Error("最大 Token 必须是大于 0 的整数");
+        throw new Error("上游最大输出 Token 必须是大于 0 的整数");
       }
       const payload = {
         providerId: upstreamForm.providerId,
@@ -2018,9 +2034,28 @@ export default function AdminPage() {
                           type="number"
                           min="1"
                           step="1"
-                          placeholder="最大 Token（可选）"
+                          placeholder="最大输出 Token（可选）"
                           className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
                         />
+                      )}
+                      {modelForm.type === "CHAT" && (
+                        <label className="space-y-1 text-xs text-gray-500">
+                          <span className="block font-medium text-gray-700">上下文窗口（输入 + 输出 Token）</span>
+                          <input
+                            value={modelForm.contextWindowTokens}
+                            onChange={(event) => setModelForm((current) => ({
+                              ...current,
+                              contextWindowTokens: event.target.value,
+                            }))}
+                            type="number"
+                            min="1024"
+                            step="1"
+                            required
+                            placeholder="例如 128000"
+                            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          />
+                          <span className="block text-gray-400">旧模型默认 8192；请按上游模型规格核对并填写。</span>
+                        </label>
                       )}
                     </div>
                     {modelForm.type === "CHAT" && (
@@ -2172,6 +2207,11 @@ export default function AdminPage() {
                             <p className="mt-2 text-xs text-gray-500">
                               {formatModelPricing(model)}
                             </p>
+                            {model.type === "CHAT" && (
+                              <p className="mt-1 text-xs text-gray-400">
+                                上下文 {model.contextWindowTokens.toLocaleString()} Token · 输出上限 {model.maxTokens?.toLocaleString() ?? "默认"}
+                              </p>
+                            )}
                           </div>
                           <Toggle
                             checked={model.isActive}
@@ -2621,7 +2661,7 @@ export default function AdminPage() {
                         }
                         type="number"
                         min="1"
-                        placeholder="最大 Token（可选）"
+                        placeholder="上游最大输出 Token（可选）"
                         className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
                       />
                       <label className="flex items-center gap-2 text-sm text-gray-600">

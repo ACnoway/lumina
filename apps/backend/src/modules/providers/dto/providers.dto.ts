@@ -154,11 +154,17 @@ export class CreatePlatformModelDto {
   @Validate(PlatformModelPricingConstraint)
   pricing!: Record<string, any>;
 
-  @ApiProperty({ description: '平台限制的最大 token', required: false })
+  @ApiProperty({ description: '最大输出 token', required: false })
   @IsOptional()
   @IsInt({ message: 'maxTokens 必须是整数' })
   @Min(1, { message: 'maxTokens 必须大于0' })
   maxTokens?: number;
+
+  @ApiProperty({ description: '聊天模型上下文窗口总 token 数（包含输入和输出）', required: false, default: 8192 })
+  @IsOptional()
+  @IsInt({ message: 'contextWindowTokens 必须是整数' })
+  @Min(1024, { message: 'contextWindowTokens 必须至少为 1024' })
+  contextWindowTokens?: number;
 
   @ApiProperty({ description: '聊天模型是否支持图片输入', default: false, required: false })
   @IsOptional()
@@ -214,7 +220,7 @@ export class CreateUpstreamModelDto {
   @IsObject({ message: 'upstreamPricing 必须是对象' })
   upstreamPricing?: Record<string, any>;
 
-  @ApiProperty({ description: '上游限制（可选覆盖平台值）', required: false })
+  @ApiProperty({ description: '上游最大输出 token（可选覆盖平台值）', required: false })
   @IsOptional()
   @IsInt({ message: 'maxTokens 必须是整数' })
   @Min(1, { message: 'maxTokens 必须大于0' })

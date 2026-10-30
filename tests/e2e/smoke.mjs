@@ -585,6 +585,20 @@ async function main() {
     },
   });
   const imageProviderId = imageProvider.data.id;
+  const contextProvider = await requestAuth(adminToken, '/providers', {
+    method: 'POST',
+    body: {
+      name: `mock-context-provider-${Date.now()}`,
+      apiFormat: 'openai_compatible',
+      supportsStreaming: true,
+      config: {
+        apiKey: 'e2e-context-key',
+        baseUrl: 'http://mock-provider:8080/v1',
+        timeout: 5000,
+        rateLimit: 100,
+      },
+    },
+  });
 
   const chatModel = await requestAuth(adminToken, '/providers/models', {
     method: 'POST',
@@ -594,6 +608,18 @@ async function main() {
       type: 'CHAT',
       pricing: { input: 1, output: 1 },
       maxTokens: 100,
+      contextWindowTokens: 8192,
+    },
+  });
+  const contextModel = await requestAuth(adminToken, '/providers/models', {
+    method: 'POST',
+    body: {
+      name: `e2e-context-${Date.now()}`,
+      displayName: 'E2E Context',
+      type: 'CHAT',
+      pricing: { input: 1, output: 1 },
+      maxTokens: 128,
+      contextWindowTokens: 4096,
     },
   });
   const imageModel = await requestAuth(adminToken, '/providers/models', {
@@ -611,6 +637,15 @@ async function main() {
     body: {
       providerId,
       upstreamModelId: 'mock-chat-model',
+      priority: 1,
+      weight: 1,
+    },
+  });
+  await requestAuth(adminToken, `/providers/models/${contextModel.data.id}/upstreams`, {
+    method: 'POST',
+    body: {
+      providerId: contextProvider.data.id,
+      upstreamModelId: 'mock-context-model',
       priority: 1,
       weight: 1,
     },
@@ -721,6 +756,10 @@ async function main() {
     visibleModels.data.some((model) => model.displayName === chatModel.data.displayName),
     'chat model display name is not visible to regular user',
   );
+  assert(
+    visibleModels.data.find((model) => model.id === contextModel.data.id)?.contextWindowTokens === 4096,
+    'chat model context window was not returned to regular users',
+  );
 
   const providerList = await requestAuth(adminToken, '/providers');
   const visibleProvider = providerList.data.find((item) => item.id === providerId);
@@ -821,6 +860,48 @@ async function main() {
   assert(userMessageWithImage?.attachments?.length === 1, 'chat history did not preserve the uploaded image');
   const storedChatImage = await fetch(userMessageWithImage.attachments[0].url);
   assert(storedChatImage.ok, `stored chat image was not accessible: ${storedChatImage.status}`);
+
+  const contextSession = await requestAuth(userToken, '/chat/sessions', {
+    method: 'POST',
+    body: { title: 'E2E context chat' },
+  });
+  const initialContext = await requestAuth(
+    userToken,
+    `/chat/context?model=${encodeURIComponent(contextModel.data.name)}&sessionId=${encodeURIComponent(contextSession.data.id)}`,
+  );
+  assert(initialContext.data.contextWindowTokens === 4096, 'context usage returned the wrong window size');
+  assert(initialContext.data.reservedOutputTokens === 128, 'context usage did not reserve output tokens');
+  assert(initialContext.data.inputBudgetTokens === 3968, 'context usage returned the wrong input budget');
+  assert(initialContext.data.estimatedInputTokens === 0, 'new session context usage was not empty');
+
+  for (const content of ['第一轮上下文消息', '第二轮上下文消息', '第三轮上下文消息']) {
+    const form = new FormData();
+    form.append('sessionId', contextSession.data.id);
+    form.append('content', content);
+    form.append('model', contextModel.data.name);
+    const response = await fetch(`${baseUrl}/chat/messages`, {
+      method: 'POST',
+      headers: authHeaders(userToken),
+      body: form,
+    });
+    const body = await response.text();
+    assert(response.ok && body.includes('"type":"done"'), `context chat stream failed: ${response.status} ${body}`);
+  }
+  const compactedContext = await requestAuth(
+    userToken,
+    `/chat/sessions/${contextSession.data.id}/context/compact`,
+    { method: 'POST', body: { model: contextModel.data.name } },
+  );
+  assert(compactedContext.data.compactedMessages === 2, 'context compaction did not summarize the oldest complete turn');
+  assert(compactedContext.data.contextUsage.hasSummary, 'context compaction did not persist a summary');
+  assert(compactedContext.data.contextUsage.compactedMessageCount === 2, 'context compaction count was not returned');
+  const contextHistory = await requestAuth(userToken, `/chat/sessions/${contextSession.data.id}/messages`);
+  assert(contextHistory.data.total === 6, 'context compaction removed original chat history');
+  const compactLedger = await requestAuth(userToken, '/wallet/transactions?limit=100');
+  assert(
+    compactLedger.data.items.some((item) => item.reason === '聊天上下文压缩: E2E Context'),
+    'context compaction charge did not use the user-facing model name',
+  );
 
   const rateLimitedChat = await requestAuth(
     userToken,
@@ -1054,7 +1135,7 @@ async function main() {
   );
 
   console.log(
-    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, customer support, chat SSE, image queue, S3 object storage, history, audit',
+    'Lumina E2E smoke passed: registration, password/code auth, RBAC, admin users/status, wallet adjustment, admin config, customer support, chat SSE/context compaction, image queue, S3 object storage, history, audit',
   );
 }
 

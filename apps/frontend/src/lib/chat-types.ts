@@ -7,6 +7,7 @@ import type {
   ChatMessageDto,
   ChatAttachmentDto,
   ChatModelPricing,
+  ChatContextUsageDto,
   MessageRole,
 } from '@lumina/shared';
 
@@ -21,7 +22,11 @@ export interface ChatModel {
   displayName: string;
   pricing: ChatModelPricing;
   supportsVision: boolean;
+  maxTokens?: number | null;
+  contextWindowTokens: number;
 }
+
+export type ChatContextUsage = ChatContextUsageDto;
 
 export interface BalanceInfo {
   balance: number;

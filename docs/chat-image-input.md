@@ -30,6 +30,8 @@
 | `temperature` | 否 | 模型温度 |
 | `maxTokens` | 否 | 最大输出 token |
 
+聊天模型的完整上下文窗口由后台 `contextWindowTokens` 配置，输入预算会扣除最大输出 Token。用量估算、较早消息压缩和对应 API 见 [AI 聊天上下文管理](chat-context-management.md)。
+
 首次 SSE 事件 `accepted` 会带回本条消息图片的 `id`、`mimeType`、`size` 和预签名 `url`；后续 `content`、`done`、`error` 事件保持原有格式。历史消息的 `attachments` 包含相同图片元数据和访问 URL。旧版 JSON 文本请求仍兼容。
 
 图片请求经 Nginx 时允许最大 22 MiB 请求体，为 20 MiB 图片和 multipart 字段留出空间。单张限制由服务端上传拦截器和消息校验共同执行。

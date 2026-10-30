@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChatModel } from '@/lib/chat-types';
+import type { ChatContextUsage } from '@/lib/chat-types';
 import { formatChatModelPricing, formatPhoton } from '@/lib/model-pricing';
 import UiIcon from '@/components/UiIcon';
 
@@ -14,6 +15,13 @@ interface TopBarProps {
   modelError: boolean;
   onRetryModels: () => void;
   onOpenSessions: () => void;
+  contextUsage: ChatContextUsage | null;
+  contextLoading: boolean;
+  contextError: boolean;
+  compacting: boolean;
+  canCompact: boolean;
+  hasSession: boolean;
+  onCompact: () => void;
 }
 
 export default function TopBar({
@@ -26,8 +34,28 @@ export default function TopBar({
   modelError,
   onRetryModels,
   onOpenSessions,
+  contextUsage,
+  contextLoading,
+  contextError,
+  compacting,
+  canCompact,
+  hasSession,
+  onCompact,
 }: TopBarProps) {
   const selectedModelInfo = models.find((model) => model.name === selectedModel);
+  const contextWindowTokens = contextUsage?.contextWindowTokens ?? selectedModelInfo?.contextWindowTokens ?? 8192;
+  const reservedOutputTokens = contextUsage?.reservedOutputTokens ?? Math.min(
+    selectedModelInfo?.maxTokens ?? 1000,
+    Math.max(1, contextWindowTokens - 1),
+  );
+  const inputBudgetTokens = contextUsage?.inputBudgetTokens ?? Math.max(1, contextWindowTokens - reservedOutputTokens);
+  const estimatedInputTokens = contextUsage?.estimatedInputTokens ?? 0;
+  const utilizationPercent = contextUsage?.utilizationPercent ?? 0;
+  const progressColor = utilizationPercent >= 90
+    ? 'bg-red-500'
+    : utilizationPercent >= 70
+      ? 'bg-amber-500'
+      : 'bg-blue-500';
 
   return (
     <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 rounded-t-2xl border-b border-gray-100 bg-white p-4 sm:px-5">
@@ -36,7 +64,7 @@ export default function TopBar({
           <label htmlFor="chat-model" className="text-xs font-medium text-gray-600">
             对话模型
           </label>
-          <button type="button" onClick={onOpenSessions} className="ui-button-secondary px-3 lg:hidden">
+          <button type="button" onClick={onOpenSessions} disabled={compacting} className="ui-button-secondary px-3 lg:hidden disabled:cursor-not-allowed disabled:opacity-50">
             <UiIcon name="sessions" className="h-4 w-4" />
             对话记录
           </button>
@@ -47,7 +75,7 @@ export default function TopBar({
               id="chat-model"
               value={selectedModel}
               onChange={(e) => onModelChange(e.target.value)}
-              disabled={loadingModels || models.length === 0}
+              disabled={loadingModels || models.length === 0 || compacting}
               aria-describedby={selectedModelInfo ? 'chat-model-pricing' : undefined}
               className="min-h-11 w-full min-w-0 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-500 sm:w-auto sm:max-w-xs"
             >
@@ -79,6 +107,60 @@ export default function TopBar({
             <p id="chat-model-pricing" className="ui-caption max-w-md">
               {formatChatModelPricing(selectedModelInfo.pricing)}
             </p>
+          )}
+          {selectedModelInfo && (
+            <div className="mt-2 max-w-xl rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-gray-600">
+                    <span className="font-medium">上下文估算</span>
+                    <span className="tabular-nums">
+                      {contextLoading
+                        ? '正在计算…'
+                        : contextError
+                          ? '暂时无法读取用量'
+                          : `${estimatedInputTokens.toLocaleString()} / ${inputBudgetTokens.toLocaleString()} 输入 Token`}
+                    </span>
+                  </div>
+                  <div
+                    className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-200"
+                    role="progressbar"
+                    aria-label="上下文用量估算"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={utilizationPercent}
+                    aria-valuetext={`${estimatedInputTokens} / ${inputBudgetTokens} 输入 Token；上下文窗口 ${contextWindowTokens} Token`}
+                  >
+                    <div className={`h-full rounded-full transition-[width] duration-300 ${progressColor}`} style={{ width: `${utilizationPercent}%` }} />
+                  </div>
+                  <p className="mt-1 text-[10px] leading-4 text-gray-400">
+                    模型窗口 {contextWindowTokens.toLocaleString()} Token · 已预留最多 {reservedOutputTokens.toLocaleString()} Token 输出
+                    {contextUsage?.omittedMessageCount
+                      ? ` · ${contextUsage.omittedMessageCount} 条较早消息本轮未带入`
+                      : ''}
+                    {contextUsage?.compactedMessageCount
+                      ? ` · 已压缩 ${contextUsage.compactedMessageCount} 条`
+                      : ''}
+                    {contextUsage?.hasSummary ? ' · 已包含压缩摘要' : ''}
+                  </p>
+                  {contextUsage && !contextUsage.fits && (
+                    <p className="mt-1 text-[10px] font-medium text-red-600" role="status">
+                      最新一轮超过输入预算，请缩短内容后重试。
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={onCompact}
+                  disabled={!hasSession || !canCompact || compacting || contextLoading}
+                  title={!hasSession ? '先发送消息后即可压缩上下文' : undefined}
+                  className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {compacting ? '压缩中…' : '压缩上下文'}
+                </button>
+              </div>
+              <p className="mt-1 text-[10px] text-gray-400">用量为估算；压缩会调用当前模型并按 Token 计费。</p>
+            </div>
           )}
         </div>
       </div>
