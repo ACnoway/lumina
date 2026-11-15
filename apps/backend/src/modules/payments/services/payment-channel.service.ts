@@ -253,7 +253,7 @@ export class PaymentChannelService {
       version: version.version,
       config: this.enrichAlipayIdentity(
         channel.type,
-        this.decrypt(version.configEncrypted),
+        this.decryptConfig(version.configEncrypted),
         currentConfig,
       ),
     }));
@@ -264,7 +264,7 @@ export class PaymentChannelService {
       where: { channelId_version: { channelId: channel.id, version } },
     });
     if (!record) throw new NotFoundException('支付订单关联的渠道配置版本不存在');
-    const config = this.decrypt(record.configEncrypted);
+    const config = this.decryptConfig(record.configEncrypted);
     if (channel.type !== PaymentChannelType.ALIPAY) return config;
     return this.enrichAlipayIdentity(channel.type, config, this.decrypt(channel));
   }
@@ -297,8 +297,12 @@ export class PaymentChannelService {
   }
 
   private decrypt(channel: PaymentChannel): Record<string, unknown> {
+    return this.decryptConfig(channel.configEncrypted);
+  }
+
+  private decryptConfig(configEncrypted: string): Record<string, unknown> {
     try {
-      return this.crypto.decrypt(channel.configEncrypted);
+      return this.crypto.decrypt(configEncrypted);
     } catch (error) {
       throw new BadRequestException(`支付渠道配置无法解密: ${error instanceof Error ? error.message : '未知错误'}`);
     }

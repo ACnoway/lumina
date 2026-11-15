@@ -576,6 +576,8 @@ export class PaymentService {
         '支付订单状态或确认时间不允许入账',
       );
     }
+    const paidAt = order.paidAt;
+    if (!paidAt) throw new PaymentChannelError(PaymentErrorCode.PAYMENT_ALREADY_CLOSED, '支付订单缺少确认时间');
     const paidAmount = order.paidAmount ?? order.amount;
     await this.walletService.recharge(
       order.userId,
@@ -593,7 +595,7 @@ export class PaymentService {
         paymentMethod: order.paymentMethod,
         channelName: order.channel.name,
         status: PaymentOrderStatus.SUCCEEDED,
-        paidAt: order.paidAt.toISOString(),
+        paidAt: paidAt.toISOString(),
       },
     );
     await this.prisma.paymentOrder.updateMany({
@@ -607,7 +609,7 @@ export class PaymentService {
         providerTradeNo: order.providerTradeNo,
         paidAmount,
         payerAmount: order.payerAmount,
-        paidAt: order.paidAt,
+        paidAt,
         failureCode: null,
         failureMessage: null,
       },
