@@ -3,6 +3,15 @@ import axios from 'axios';
 import { PaymentMethod } from '@prisma/client';
 import { EpayPaymentAdapter } from './epay.adapter';
 
+function signEpayPayload(payload: Record<string, string>, key: string): string {
+  const content = Object.keys(payload)
+    .filter((name) => name !== 'sign' && name !== 'sign_type' && payload[name] !== '')
+    .sort()
+    .map((name) => `${name}=${payload[name]}`)
+    .join('&');
+  return createHash('md5').update(`${content}${key}`).digest('hex');
+}
+
 describe('EpayPaymentAdapter', () => {
   const adapter = new EpayPaymentAdapter();
   const config = {
@@ -111,11 +120,7 @@ describe('EpayPaymentAdapter', () => {
       trade_status: 'TRADE_SUCCESS',
       type: 'alipay',
     };
-    const content = Object.keys(payload)
-      .sort()
-      .map((key) => `${key}=${payload[key]}`)
-      .join('&');
-    payload.sign = createHash('md5').update(`${content}${config.key}`).digest('hex');
+    payload.sign = signEpayPayload(payload, config.key);
 
     await expect(
       adapter.parseNotification(
@@ -147,11 +152,7 @@ describe('EpayPaymentAdapter', () => {
       trade_status: 'TRADE_SUCCESS',
       type: 'alipay',
     };
-    const content = Object.keys(payload)
-      .sort()
-      .map((key) => `${key}=${payload[key]}`)
-      .join('&');
-    payload.sign = createHash('md5').update(`${content}${config.key}`).digest('hex');
+    payload.sign = signEpayPayload(payload, config.key);
 
     await expect(adapter.parseNotification({
       headers: {},
@@ -171,11 +172,7 @@ describe('EpayPaymentAdapter', () => {
       trade_status: 'TRADE_SUCCESS',
       type: 'alipay',
     };
-    const content = Object.keys(ambiguousPayload)
-      .sort()
-      .map((key) => `${key}=${ambiguousPayload[key]}`)
-      .join('&');
-    ambiguousPayload.sign = createHash('md5').update(`${content}${config.key}`).digest('hex');
+    ambiguousPayload.sign = signEpayPayload(ambiguousPayload, config.key);
     await expect(adapter.parseNotification({
       headers: {},
       rawBody: Buffer.from(new URLSearchParams(ambiguousPayload).toString()),
