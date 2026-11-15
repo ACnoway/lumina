@@ -51,6 +51,7 @@ export class OpenAIAdapter implements IChatAdapter {
             'Content-Type': 'application/json',
           },
           timeout: this.timeout,
+          signal: request.signal,
         },
       );
 
@@ -102,6 +103,7 @@ export class OpenAIAdapter implements IChatAdapter {
             'Content-Type': 'application/json',
           },
           timeout: this.timeout,
+          signal: request.signal,
           responseType: 'stream',
         },
       );
@@ -195,7 +197,7 @@ export class OpenAIAdapter implements IChatAdapter {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
 
-      if (axiosError.code === 'ECONNABORTED' || axiosError.code === 'ETIMEDOUT') {
+      if (axiosError.code === 'ECONNABORTED' || axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ERR_CANCELED') {
         this.logger.error(`OpenAI 请求超时: ${axiosError.message}`);
         return new ServiceUnavailableException('上游请求超时，请稍后重试');
       }

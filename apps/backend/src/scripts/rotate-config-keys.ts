@@ -82,8 +82,9 @@ async function main(): Promise<void> {
 
   const prisma = new PrismaClient();
   try {
-    const [paymentChannels, smsChannels, systemConfig] = await Promise.all([
+    const [paymentChannels, paymentChannelConfigs, smsChannels, systemConfig] = await Promise.all([
       prisma.paymentChannel.findMany({ select: { id: true, configEncrypted: true } }),
+      prisma.paymentChannelConfig.findMany({ select: { channelId: true, version: true, configEncrypted: true } }),
       prisma.smsChannel.findMany({ select: { id: true, configEncrypted: true } }),
       prisma.systemConfig.findUnique({
         where: { id: 1 },
@@ -94,6 +95,11 @@ async function main(): Promise<void> {
     const paymentUpdates = paymentChannels.map((channel) => ({
       id: channel.id,
       configEncrypted: encrypt(decrypt(channel.configEncrypted, keyValues[0].oldValue), keyValues[0].newValue),
+    }));
+    const paymentVersionUpdates = paymentChannelConfigs.map((config) => ({
+      channelId: config.channelId,
+      version: config.version,
+      configEncrypted: encrypt(decrypt(config.configEncrypted, keyValues[0].oldValue), keyValues[0].newValue),
     }));
     const smsUpdates = smsChannels.map((channel) => ({
       id: channel.id,
@@ -113,6 +119,12 @@ async function main(): Promise<void> {
           data: { configEncrypted: channel.configEncrypted },
         });
       }
+      for (const config of paymentVersionUpdates) {
+        await transaction.paymentChannelConfig.update({
+          where: { channelId_version: { channelId: config.channelId, version: config.version } },
+          data: { configEncrypted: config.configEncrypted },
+        });
+      }
       for (const channel of smsUpdates) {
         await transaction.smsChannel.update({
           where: { id: channel.id },
@@ -129,6 +141,7 @@ async function main(): Promise<void> {
 
     console.log(
       `Rotated encrypted configuration for ${paymentUpdates.length} payment channels, `
+      + `${paymentVersionUpdates.length} retained payment channel version(s), `
       + `${smsUpdates.length} SMS channels, and ${objectStorageUpdate ? 1 : 0} object-storage record(s).`,
     );
   } finally {

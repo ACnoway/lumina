@@ -258,4 +258,25 @@ describe('EpayPaymentAdapter', () => {
     });
     jest.restoreAllMocks();
   });
+
+  it('interprets timezone-less ISO payment times as China Standard Time', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        code: 1,
+        type: 'alipay',
+        pid: config.pid,
+        out_trade_no: 'LM202609190000001238',
+        status: 1,
+        trade_no: 'T202609190005',
+        money: '10.00',
+        pay_time: '2026-11-15T12:00:00',
+      },
+    } as never);
+
+    await expect(adapter.queryPayment({ orderNo: 'LM202609190000001238' }, config)).resolves.toMatchObject({
+      status: 'SUCCESS',
+      paidAt: new Date('2026-11-15T04:00:00.000Z'),
+    });
+    jest.restoreAllMocks();
+  });
 });

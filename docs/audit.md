@@ -14,6 +14,16 @@
 - 聊天上下文用量查询改为读取模型元数据，不再调用会占用共享上游限额的路由选择。
 - 远端验证：提交 `2b135f3` 上 6 个定向测试套件共 66 项全部通过；CLI 执行方式更新后的提交 `ddeee3d` 全量 `tsc --noEmit` 通过。Nest webpack 构建未取得退出结果，远端负载升至较高水平后 SSH 超时；Compose 配置解析也因远端 SSH 超时未完成。恢复部署前应重新构建镜像并确认 Compose 配置。
 
+## 第二阶段：支付与账务正确性（代码已改，远程验证待完成）
+
+- 微信支付金额校验使用订单总额 `amount.total`，另存优惠券后用户实付 `payer_total`；微信 API 响应保留原始正文验签后才解析 JSON。
+- 支付宝回调验签后核对 `app_id` 与配置的 `seller_id`。管理员支付渠道表单支持编辑完整配置；支付宝配置需补填 `sellerId`。
+- 支付订单记录创建时的渠道配置版本。修改渠道配置会保留新旧密文快照，回调按签名和订单版本选择配置，主动查单及恢复支付也使用原版本。配置密钥轮换覆盖历史版本。
+- 支付成功查单/回调要求订单号、订单总额和币种严格匹配；优惠后实付金额单独落库。渠道确认在订单期限内支付的迟到成功结果可以补记，过期后才付款或缺少可核验付款时间的订单仍拒绝自动入账并记录人工核对原因。
+- 钱包充值、消费结算和管理员调账使用数据库原子增减及余额条件更新；结算流水写入后 Redis 清理失败不再把已扣款结果伪装成失败。
+- 提示词优化每次调用使用 UUID 幂等键。聊天流、上下文压缩与提示词优化设置短于预扣 TTL 的上游总时限；已交付聊天内容按缺失用量估算结算，估算标记写入账本。结算后的消息保存或供应商状态记录故障不触发误导性退款/失败响应。
+- 新增微信、支付宝适配器、支付渠道版本、迟到回调、钱包和 AI 计费回归用例。按部署流程，先提交推送，再在 `lch:/root/lumina` 执行测试和构建，完成后补记结果。
+
 ## 严重
 
 ### 生产部署接受公开的默认凭据和配置加密密钥
@@ -39,6 +49,8 @@ Compose 将仅监听 HTTP 的 Nginx 发布到宿主机。客户端可直接访�
 普通登录用户查询上下文用量时，无需余额即可占用真实生成请求共用的配额。配额耗尽后，其他用户的聊天请求可能失败。查询应只读取模型元数据，在实际发起上游请求前再占用配额。[上下文查询](../apps/backend/src/modules/chat/chat.service.ts#L247) · [共享配额](../apps/backend/src/modules/providers/providers.service.ts#L492)
 
 ## 中危及其他风险
+
+> 本节下列支付与账务条目是第一阶段审查时的原始发现。微信优惠券金额及响应验签、支付宝收款身份、在途订单配置版本、钱包并发增减、提示词优化幂等键、预扣时限、结算后的错误处理、迟到支付和缺失用量估算现已按“第二阶段：支付与账务正确性”更新源码，远程测试/构建结果尚待补录。原描述用于保留审查基线，不代表这些项目仍按原状态运行。
 
 - **微信优惠券支付可能已扣款却无法入账。** 下单使用订单总额 `amount.total`，回调和主动查单却取扣除优惠券后的 `payer_total` 与本地总额比较；使用优惠券时合法成功支付会被拒绝。应以 `amount.total` 核对订单，另存 `payer_total` 用于对账。[下单金额](../apps/backend/src/modules/payments/channels/wechat/wechat.adapter.ts#L91) · [回调金额](../apps/backend/src/modules/payments/channels/wechat/wechat.adapter.ts#L179) · [查单金额](../apps/backend/src/modules/payments/channels/wechat/wechat.adapter.ts#L194) · [本地金额校验](../apps/backend/src/modules/payments/services/payment.service.ts#L537) · [微信支付字段说明](https://pay.wechatpay.cn/doc/v3/merchant/4013070368)
 - **微信 API 可能误拒有效的签名响应。** 适配器让 Axios 先解析 JSON，再用 `JSON.stringify(response.data)` 重建报文验签。微信支付要求使用原始响应正文；只要空白、转义或数字格式在重建时变化，正确签名也会验不过，下单和查单等调用可能失败。应保留原始响应字节验签，通过后再解析 JSON。[响应重建](../apps/backend/src/modules/payments/channels/wechat/wechat.adapter.ts#L254) · [微信支付验签规则](https://pay.wechatpay.cn/doc/v3/merchant/4013053420)

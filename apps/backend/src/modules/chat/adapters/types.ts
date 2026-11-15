@@ -42,6 +42,7 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;       // 是否流式
+  signal?: AbortSignal;
 }
 
 /** token 用量 */

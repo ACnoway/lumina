@@ -17,6 +17,7 @@ import { ObjectStorageService } from '../../object-storage/object-storage.servic
 import { randomUUID } from 'crypto';
 import { UploadedChatImage, validateChatImages } from './chat-image';
 import { calculateTokenCost } from '../wallet/token-cost';
+import { MAX_PAID_UPSTREAM_DURATION_MS } from '../wallet/billing-constants';
 import {
   estimateContextMessageTokens,
   estimateTextTokens,
@@ -358,6 +359,11 @@ export class ChatService {
     let actualInputTokens = 0;
     let actualOutputTokens = 0;
     let actualTotalTokens = 0;
+    const upstreamController = new AbortController();
+    const upstreamTimeout = setTimeout(
+      () => upstreamController.abort(),
+      MAX_PAID_UPSTREAM_DURATION_MS,
+    );
     try {
       for (const batch of batches) {
         const batchMessages = await this.hydrateContextMessages(batch, platformModel.supportsVision);
@@ -373,6 +379,7 @@ export class ChatService {
           model: resolved.upstreamModel.upstreamModelId,
           maxTokens: summaryOutputTokens,
           temperature: 0.2,
+          signal: upstreamController.signal,
         });
         if (!response.content.trim()) throw new Error('模型未返回有效摘要');
         rollingSummary = response.content.trim();
@@ -424,6 +431,8 @@ export class ChatService {
       await this.walletService.refund(userId, idempotencyKey, `上下文压缩失败: ${message}`).catch(() => undefined);
       await resolved.recordResult(false).catch(() => undefined);
       throw error;
+    } finally {
+      clearTimeout(upstreamTimeout);
     }
 
     const compactedIds = new Set(messagesToCompact.map((message) => message.id));
@@ -584,6 +593,14 @@ export class ChatService {
     const providerConfig = (resolved.provider.config as Record<string, any>) || {};
     const adapter = this.adapterFactory.createAdapter(resolved.provider.apiFormat, providerConfig);
     const upstreamModelId = resolved.upstreamModel.upstreamModelId;
+    const acceptedAttachments = userMessage.attachments.length > 0
+      ? await Promise.all(userMessage.attachments.map(async (attachment) => ({
+        id: attachment.id,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        url: await this.objectStorage.getPresignedUrl(attachment.objectKey),
+      })))
+      : [];
 
     // ---- 7. 预估成本并预扣 ----
     const pricing = (platformModel.pricing as any) || {};
@@ -624,15 +641,10 @@ export class ChatService {
       }
     };
 
-    if (userMessage.attachments.length > 0) {
+    if (acceptedAttachments.length > 0) {
       writeSSE({
         type: 'accepted',
-        attachments: await Promise.all(userMessage.attachments.map(async (attachment) => ({
-          id: attachment.id,
-          mimeType: attachment.mimeType,
-          size: attachment.size,
-          url: await this.objectStorage.getPresignedUrl(attachment.objectKey),
-        }))),
+        attachments: acceptedAttachments,
       });
     }
 
@@ -659,6 +671,12 @@ export class ChatService {
     let fullContent = '';
     let streamUsage: TokenUsage | null = null;
     let streamError: Error | null = null;
+    let settlementCompleted = false;
+    const upstreamController = new AbortController();
+    const upstreamTimeout = setTimeout(
+      () => upstreamController.abort(),
+      MAX_PAID_UPSTREAM_DURATION_MS,
+    );
 
     try {
       await adapter.chatStream(
@@ -668,6 +686,7 @@ export class ChatService {
           temperature: dto.temperature,
           maxTokens,
           stream: true,
+          signal: upstreamController.signal,
         },
         {
           onContent: (chunk: string) => {
@@ -685,19 +704,66 @@ export class ChatService {
 
       // ---- 12. 流结束后处理结果 ----
       if (streamError) {
-        await this.handleStreamError(
-          streamError as Error,
-          userId,
-          idempotencyKey,
-          session.id,
-          resolved.recordResult,
+        if (!fullContent) {
+          await this.handleStreamError(
+            streamError as Error,
+            userId,
+            idempotencyKey,
+            session.id,
+            resolved.recordResult,
+          );
+          endResponse({ type: 'error', message: (streamError as Error).message });
+        } else {
+          const { usage, usageEstimated } = this.billableUsage(
+            streamUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            selection.estimatedTokens,
+            fullContent,
+          );
+          const actualCost = calculateTokenCost(usage.inputTokens, usage.outputTokens, inputPrice, outputPrice);
+          await this.walletService.settle(
+            userId,
+            actualCost,
+            idempotencyKey,
+            `聊天: ${dto.model}`,
+            {
+              sessionId: session.id,
+              messageId: userMessage.id,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              totalTokens: usage.totalTokens,
+              usageEstimated,
+              model: dto.model,
+            },
+          );
+          settlementCompleted = true;
+          await this.prisma.chatMessage.create({
+            data: {
+              sessionId: session.id,
+              role: 'ASSISTANT',
+              content: fullContent,
+              tokens: usage.totalTokens,
+              cost: actualCost,
+            },
+          }).catch((persistError: unknown) => {
+            this.logger.error(`部分聊天内容已结算，但保存消息失败: ${persistError instanceof Error ? persistError.message : 'unknown'}`);
+          });
+          await resolved.recordResult(false).catch((recordError: unknown) => {
+            this.logger.error(`部分聊天内容已结算，但记录上游失败状态失败: ${recordError instanceof Error ? recordError.message : 'unknown'}`);
+          });
+          endResponse({
+            type: 'error',
+            message: (streamError as Error).message,
+            usage,
+            usageEstimated,
+            cost: actualCost,
+          });
+        }
+      } else if (streamUsage || fullContent) {
+        const { usage, usageEstimated } = this.billableUsage(
+          streamUsage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          selection.estimatedTokens,
+          fullContent,
         );
-        endResponse({ type: 'error', message: (streamError as Error).message });
-      } else if (streamUsage) {
-        // TS 不追踪回调内的赋值，需要类型断言
-        const usage = streamUsage as TokenUsage;
-
-        // 计算实际成本
         const actualCost = calculateTokenCost(usage.inputTokens, usage.outputTokens, inputPrice, outputPrice);
 
         // 结算钱包
@@ -712,9 +778,11 @@ export class ChatService {
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             totalTokens: usage.totalTokens,
+            usageEstimated,
             model: dto.model,
           },
         );
+        settlementCompleted = true;
 
         // 保存 AI 回复
         await this.prisma.chatMessage.create({
@@ -725,10 +793,14 @@ export class ChatService {
             tokens: usage.totalTokens,
             cost: actualCost,
           },
+        }).catch((persistError: unknown) => {
+          this.logger.error(`聊天已结算，但保存消息失败: ${persistError instanceof Error ? persistError.message : 'unknown'}`);
         });
 
         // 记录上游成功
-        await resolved.recordResult(true);
+        await resolved.recordResult(true).catch((recordError: unknown) => {
+          this.logger.error(`聊天已结算，但记录上游成功状态失败: ${recordError instanceof Error ? recordError.message : 'unknown'}`);
+        });
 
         this.logger.log(
           `聊天完成: userId=${userId}, sessionId=${session.id}, ` +
@@ -738,12 +810,13 @@ export class ChatService {
         endResponse({
           type: 'done',
           usage,
+          usageEstimated,
           cost: actualCost,
         });
       } else {
         // 异常情况：既没有 usage 也没有 error
         await this.walletService.refund(userId, idempotencyKey, '流异常结束');
-        await resolved.recordResult(false);
+        await resolved.recordResult(false).catch(() => undefined);
         endResponse({ type: 'error', message: '流式响应异常结束' });
       }
     } catch (error) {
@@ -755,15 +828,41 @@ export class ChatService {
         streamError = err;
       }
 
-      await this.handleStreamError(
-        streamError,
-        userId,
-        idempotencyKey,
-        session.id,
-        resolved.recordResult,
-      );
+      if (settlementCompleted) {
+        this.logger.error(`聊天结算完成后的处理失败: ${streamError.message}`);
+        await resolved.recordResult(false).catch(() => undefined);
+      } else {
+        await this.handleStreamError(
+          streamError,
+          userId,
+          idempotencyKey,
+          session.id,
+          resolved.recordResult,
+        );
+      }
       endResponse({ type: 'error', message: streamError.message });
+    } finally {
+      clearTimeout(upstreamTimeout);
     }
+  }
+
+  private billableUsage(
+    reported: TokenUsage,
+    estimatedInputTokens: number,
+    content: string,
+  ): { usage: TokenUsage; usageEstimated: boolean } {
+    const inputReported = Number.isSafeInteger(reported.inputTokens) && reported.inputTokens > 0;
+    const outputReported = Number.isSafeInteger(reported.outputTokens) && reported.outputTokens > 0;
+    const inputTokens = inputReported ? reported.inputTokens : Math.max(1, estimatedInputTokens);
+    const outputTokens = outputReported ? reported.outputTokens : estimateTextTokens(content);
+    return {
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+      },
+      usageEstimated: !inputReported || (!outputReported && Boolean(content)),
+    };
   }
 
   /**

@@ -19,6 +19,8 @@ import { ImageQueueService } from './image-queue.service';
 import { SettingsService } from '../settings/settings.service';
 import { randomUUID } from 'crypto';
 import { UploadedChatImage, validateChatImages } from '../chat/chat-image';
+import { estimateTextTokens } from '../chat/chat-context';
+import { MAX_PAID_UPSTREAM_DURATION_MS } from '../wallet/billing-constants';
 
 // 比例 → 尺寸映射
 const ASPECT_RATIO_SIZES: Record<string, { width: number; height: number }> = {
@@ -115,25 +117,23 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
     const estimatedOutputTokens = 300;
     const estimatedCost = calculateTokenCost(estimatedInputTokens, estimatedOutputTokens, inputPrice, outputPrice);
 
-    const idempotencyKey = `prompt-opt:${userId}:${Date.now()}`;
+    const idempotencyKey = `prompt-opt:${userId}:${randomUUID()}`;
 
     // 预扣
     await this.walletService.preDeduct(userId, Math.max(estimatedCost, 0.01), idempotencyKey);
 
-    // 路由上游
-    let resolved;
+    const controller = new AbortController();
+    const upstreamTimeout = setTimeout(() => controller.abort(), MAX_PAID_UPSTREAM_DURATION_MS);
+    let resolved: Awaited<ReturnType<ProvidersService['resolveUpstream']>> | undefined;
+    let settlementCompleted = false;
     try {
+      // 路由上游
       resolved = await this.providersService.resolveUpstream(optimizerModelName);
-    } catch (error) {
-      await this.walletService.refund(userId, idempotencyKey, '优化路由失败');
-      throw error;
-    }
 
-    // 创建适配器
-    const providerConfig = (resolved.provider.config as Record<string, any>) || {};
-    const adapter = this.adapterFactory.createAdapter(resolved.provider.apiFormat, providerConfig);
+      // 创建适配器
+      const providerConfig = (resolved.provider.config as Record<string, any>) || {};
+      const adapter = this.adapterFactory.createAdapter(resolved.provider.apiFormat, providerConfig);
 
-    try {
       // 调用聊天模型
       const response = await adapter.chat({
         messages: [
@@ -144,10 +144,21 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         temperature: 0.7,
         maxTokens: 300,
         stream: false,
+        signal: controller.signal,
       });
 
-      // 计算实际成本
-      const actualCost = calculateTokenCost(response.inputTokens, response.outputTokens, inputPrice, outputPrice);
+      // Missing upstream usage is estimated from the exact text we sent and
+      // returned. Persist the estimate marker with the ledger entry.
+      const inputReported = Number.isSafeInteger(response.inputTokens) && response.inputTokens > 0;
+      const outputReported = Number.isSafeInteger(response.outputTokens) && response.outputTokens > 0;
+      const usageEstimated = !inputReported || (!outputReported && Boolean(response.content));
+      const inputTokens = inputReported
+        ? response.inputTokens
+        : Math.max(1, estimateTextTokens(`${PROMPT_OPTIMIZER_SYSTEM}\n${originalPrompt}`) + 16);
+      const outputTokens = outputReported
+        ? response.outputTokens
+        : estimateTextTokens(response.content);
+      const actualCost = calculateTokenCost(inputTokens, outputTokens, inputPrice, outputPrice);
 
       // 结算
       await this.walletService.settle(
@@ -156,18 +167,22 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
         idempotencyKey,
         `提示词优化: ${optimizerModelName}`,
         {
-          inputTokens: response.inputTokens,
-          outputTokens: response.outputTokens,
+          inputTokens,
+          outputTokens,
           model: optimizerModelName,
+          usageEstimated,
         },
       );
+      settlementCompleted = true;
 
       // 记录上游成功
-      await resolved.recordResult(true);
+      await resolved.recordResult(true).catch((recordError: unknown) => {
+        this.logger.error(`提示词优化已结算，但记录上游成功状态失败: ${recordError instanceof Error ? recordError.message : 'unknown'}`);
+      });
 
       this.logger.log(
         `提示词优化完成: userId=${userId}, cost=${actualCost}, ` +
-          `outputTokens=${response.outputTokens}`,
+          `outputTokens=${outputTokens}, usageEstimated=${usageEstimated}`,
       );
 
       return {
@@ -176,12 +191,20 @@ export class ImageService implements OnApplicationBootstrap, OnModuleDestroy {
       };
     } catch (error) {
       // 失败：退回预扣 + 记录上游失败
-      await this.walletService.refund(userId, idempotencyKey, '优化失败');
-      await resolved.recordResult(false);
+      if (!settlementCompleted) {
+        await this.walletService.refund(userId, idempotencyKey, '优化失败').catch((refundError: unknown) => {
+          this.logger.error(`提示词优化失败后退回预扣失败: ${refundError instanceof Error ? refundError.message : 'unknown'}`);
+        });
+      }
+      await resolved?.recordResult(false).catch((recordError: unknown) => {
+        this.logger.error(`提示词优化失败后记录上游状态失败: ${recordError instanceof Error ? recordError.message : 'unknown'}`);
+      });
 
       const msg = error instanceof Error ? error.message : '优化失败';
       this.logger.error(`提示词优化失败: ${msg}`);
       throw error instanceof Error ? error : new ServiceUnavailableException('提示词优化失败');
+    } finally {
+      clearTimeout(upstreamTimeout);
     }
   }
 

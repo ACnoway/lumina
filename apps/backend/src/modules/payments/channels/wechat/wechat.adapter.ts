@@ -170,16 +170,18 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     if (!envelope.resource) throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '微信回调 resource 缺失');
     const resource = this.decryptResource(envelope.resource, config.apiV3Key);
     const tradeState = String(resource.trade_state ?? '').toUpperCase();
+    const amount = resource.amount && typeof resource.amount === 'object'
+      ? resource.amount as { total?: unknown; payer_total?: unknown; currency?: unknown }
+      : undefined;
     return {
       eventId: String(resource.transaction_id ?? resource.out_trade_no ?? `${tradeState}:${timestamp}`),
       orderNo: String(resource.out_trade_no ?? ''),
       providerTradeNo: this.optionalString(resource.transaction_id),
       status: tradeState === 'SUCCESS' ? 'SUCCESS' : tradeState === 'CLOSED' ? 'CLOSED' : tradeState === 'PAYERROR' ? 'FAILED' : 'PENDING',
-      amount: resource.amount && typeof resource.amount === 'object'
-        ? this.fenToYuan((resource.amount as { payer_total?: unknown }).payer_total)
-        : undefined,
-      currency: 'CNY',
-      paidAt: tradeState === 'SUCCESS' ? new Date(String(resource.success_time ?? Date.now())) : undefined,
+      amount: this.fenToYuan(amount?.total),
+      payerAmount: this.fenToYuan(amount?.payer_total),
+      currency: this.optionalString(amount?.currency),
+      paidAt: tradeState === 'SUCCESS' ? this.parsePaymentDate(resource.success_time) : undefined,
     };
   }
 
@@ -191,13 +193,17 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     await this.validateConfig(config);
     const response = await this.request('GET', `/v3/pay/transactions/out-trade-no/${encodeURIComponent(request.orderNo)}?mchid=${encodeURIComponent(config.mchId)}`, undefined, config);
     const tradeState = String(response.trade_state ?? '').toUpperCase();
-    const amount = response.amount && typeof response.amount === 'object' ? this.optionalString((response.amount as { payer_total?: unknown }).payer_total) : undefined;
+    const amount = response.amount && typeof response.amount === 'object'
+      ? response.amount as { total?: unknown; payer_total?: unknown; currency?: unknown }
+      : undefined;
     return {
       status: tradeState === 'SUCCESS' ? 'SUCCESS' : tradeState === 'CLOSED' ? 'CLOSED' : tradeState === 'PAYERROR' ? 'FAILED' : 'PENDING',
       providerTradeNo: this.optionalString(response.transaction_id),
-      amount: amount ? (Number(amount) / 100).toFixed(2) : undefined,
-      currency: 'CNY',
-      paidAt: tradeState === 'SUCCESS' ? new Date(String(response.success_time ?? Date.now())) : undefined,
+      orderNo: this.optionalString(response.out_trade_no),
+      amount: this.fenToYuan(amount?.total),
+      payerAmount: this.fenToYuan(amount?.payer_total),
+      currency: this.optionalString(amount?.currency),
+      paidAt: tradeState === 'SUCCESS' ? this.parsePaymentDate(response.success_time) : undefined,
     };
   }
 
@@ -228,11 +234,18 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
+      responseType: 'text',
+      transformResponse: [(data: unknown) => data],
     };
     try {
-      const response: AxiosResponse<Record<string, unknown>> = await axios.request(options);
-      this.verifyResponse(response, config);
-      return response.data;
+      const response: AxiosResponse<string> = await axios.request<string>(options);
+      this.verifyResponse(response, config, response.data);
+      if (!response.data.trim()) return {};
+      const parsed: unknown = JSON.parse(response.data);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new PaymentChannelError(PaymentErrorCode.CHANNEL_REQUEST_FAILED, '微信支付响应格式不合法');
+      }
+      return parsed as Record<string, unknown>;
     } catch (error) {
       if (error instanceof PaymentChannelError) throw error;
       throw new PaymentChannelError(
@@ -244,15 +257,14 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
     }
   }
 
-  private verifyResponse(response: AxiosResponse<Record<string, unknown>>, config: WechatPayConfig): void {
+  private verifyResponse(response: AxiosResponse<string>, config: WechatPayConfig, rawBody: string): void {
     const timestamp = this.header(response.headers as Record<string, unknown>, 'wechatpay-timestamp');
     const nonce = this.header(response.headers as Record<string, unknown>, 'wechatpay-nonce');
     const signature = this.header(response.headers as Record<string, unknown>, 'wechatpay-signature');
     if (!timestamp || !nonce || !signature || !config.wechatPayPublicKey) {
       throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '微信响应签名材料不完整');
     }
-    const body = JSON.stringify(response.data);
-    const valid = createVerify('RSA-SHA256').update(`${timestamp}\n${nonce}\n${body}\n`, 'utf8').verify(config.wechatPayPublicKey, signature, 'base64');
+    const valid = createVerify('RSA-SHA256').update(`${timestamp}\n${nonce}\n${rawBody}\n`, 'utf8').verify(config.wechatPayPublicKey, signature, 'base64');
     if (!valid) throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '微信响应签名无效');
   }
 
@@ -284,7 +296,15 @@ export class WechatPaymentAdapter implements PaymentChannelAdapter<WechatPayConf
 
   private fenToYuan(value: unknown): string | undefined {
     if (value === undefined || value === null || value === '') return undefined;
-    return (Number(value) / 100).toFixed(2);
+    const fen = Number(value);
+    if (!Number.isSafeInteger(fen) || fen < 0) return undefined;
+    return (fen / 100).toFixed(2);
+  }
+
+  private parsePaymentDate(value: unknown): Date | undefined {
+    if (typeof value !== 'string' || !value.trim()) return undefined;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }
 
   private isSecureEndpoint(value: string): boolean {

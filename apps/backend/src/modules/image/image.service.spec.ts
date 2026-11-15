@@ -305,8 +305,41 @@ describe('ImageService durable queue integration', () => {
       0.0005,
       idempotencyKey,
       '提示词优化: chat-model',
-      { inputTokens: 10, outputTokens: 20, model: 'chat-model' },
+      { inputTokens: 10, outputTokens: 20, model: 'chat-model', usageEstimated: false },
     );
+    expect(recordResult).toHaveBeenCalledWith(true);
+  });
+
+  it('estimates missing prompt optimizer usage and keeps a settled result successful if provider status recording fails', async () => {
+    const { service, wallet, providers, adapter, settings } = createService();
+    const recordResult = jest.fn().mockRejectedValue(new Error('redis unavailable'));
+    settings.getPromptOptimizerModel.mockResolvedValue(promptOptimizerModel);
+    providers.resolveUpstream.mockResolvedValue({
+      provider: { name: 'chat-provider', config: {}, apiFormat: 'openai_compatible' },
+      upstreamModel: { upstreamModelId: 'upstream-chat-model' },
+      recordResult,
+    });
+    adapter.chat.mockResolvedValue({ content: 'expanded prompt', inputTokens: 0, outputTokens: 0 });
+
+    await expect(service.optimizePrompt('user-1', '一只猫')).resolves.toMatchObject({
+      optimizedPrompt: 'expanded prompt',
+      cost: expect.any(Number),
+    });
+
+    expect(wallet.settle).toHaveBeenCalledWith(
+      'user-1',
+      expect.any(Number),
+      expect.stringMatching(/^prompt-opt:user-1:/),
+      '提示词优化: chat-model',
+      expect.objectContaining({
+        model: 'chat-model',
+        usageEstimated: true,
+        inputTokens: expect.any(Number),
+        outputTokens: expect.any(Number),
+      }),
+    );
+    expect(wallet.refund).not.toHaveBeenCalled();
+    expect(recordResult).toHaveBeenCalledTimes(1);
     expect(recordResult).toHaveBeenCalledWith(true);
   });
 

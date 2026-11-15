@@ -12,6 +12,7 @@ import { AuditService } from '../audit/audit.service';
 import { Decimal } from '@prisma/client/runtime/library';
 import { TransactionType, Wallet, WalletTransaction } from '@prisma/client';
 import type { GetTransactionDetailResponse } from '@lumina/shared';
+import { WALLET_PREDEDUCT_TTL_SECONDS } from './billing-constants';
 
 interface PreDeductResult {
   success: boolean;
@@ -70,7 +71,7 @@ interface ImageDetailFields {
 @Injectable()
 export class WalletService {
   private readonly logger = new Logger(WalletService.name);
-  private readonly PREDEDUCT_TTL = 600; // 10分钟
+  private readonly PREDEDUCT_TTL = WALLET_PREDEDUCT_TTL_SECONDS;
   private readonly PREDEDUCT_KEY_PREFIX = 'wallet:pending:';
   private readonly RESERVATION_INDEX_PREFIX = 'wallet:reservations:';
   private readonly WALLET_LOCK_PREFIX = 'wallet:lock:';
@@ -278,7 +279,16 @@ export class WalletService {
         return { transaction, newBalance: updatedWallet.balance };
       });
 
-      await this.removePreDeduct(userId, idempotencyKey);
+      try {
+        await this.removePreDeduct(userId, idempotencyKey);
+      } catch (error) {
+        // The database transaction and idempotent ledger row are authoritative.
+        // A transient Redis cleanup failure must not turn a completed charge
+        // into a failed API response or invite a misleading refund attempt.
+        this.logger.error(
+          `结算后清理预扣记录失败: userId=${userId}, idempotencyKey=${idempotencyKey}, error=${error instanceof Error ? error.message : 'unknown'}`,
+        );
+      }
 
       this.logger.log(
         `结算成功: userId=${userId}, idempotencyKey=${idempotencyKey}, actualAmount=${actualAmount}, newBalance=${result.newBalance}`,
@@ -664,7 +674,8 @@ export class WalletService {
       throw new BadRequestException('充值光子数量必须大于0');
     }
 
-    const key = idempotencyKey || `recharge:${userId}:${Date.now()}`;
+    const key = idempotencyKey || `recharge:${userId}:${randomUUID()}`;
+    const amountDecimal = new Decimal(amount).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
 
     return this.withWalletLock(userId, async () => {
       const existing = await this.prisma.walletTransaction.findUnique({
@@ -689,20 +700,17 @@ export class WalletService {
           throw new NotFoundException('钱包不存在');
         }
 
-        const currentBalance = parseFloat(wallet.balance.toString());
-        const newBalance = new Decimal(currentBalance + amount);
-
-        await tx.wallet.update({
+        const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
-          data: { balance: newBalance },
+          data: { balance: { increment: amountDecimal } },
         });
 
         const transaction = await tx.walletTransaction.create({
           data: {
             walletId: wallet.id,
             type: 'RECHARGE',
-            amount: new Decimal(amount),
-            balance: newBalance,
+            amount: amountDecimal,
+            balance: updatedWallet.balance,
             reason,
             metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
             idempotencyKey: key,
@@ -733,6 +741,9 @@ export class WalletService {
       throw new BadRequestException('调整光子数量不能为0');
     }
 
+    const adjustment = new Decimal(amount).toDecimalPlaces(6, Decimal.ROUND_HALF_UP);
+    const idempotencyKey = `admin_adjust:${userId}:${randomUUID()}`;
+
     return this.withWalletLock(userId, async () => {
       const result = await this.prisma.$transaction(async (tx) => {
         const wallet = await tx.wallet.findUnique({
@@ -743,26 +754,30 @@ export class WalletService {
           throw new NotFoundException('钱包不存在');
         }
 
-        const currentBalance = parseFloat(wallet.balance.toString());
-        const newBalance = new Decimal(currentBalance + amount);
-
-        if (newBalance.lessThan(0)) {
-          throw new BadRequestException('调整后余额不能为负数');
-        }
-
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: newBalance },
+        const updated = await tx.wallet.updateMany({
+          where: {
+            id: wallet.id,
+            ...(adjustment.isNegative() ? { balance: { gte: adjustment.abs() } } : {}),
+          },
+          data: adjustment.isNegative()
+            ? { balance: { decrement: adjustment.abs() } }
+            : { balance: { increment: adjustment } },
         });
+        if (updated.count !== 1) throw new BadRequestException('调整后余额不能为负数');
+
+        const updatedWallet = await tx.wallet.findUnique({ where: { id: wallet.id } });
+        if (!updatedWallet) throw new NotFoundException('钱包不存在');
+        const beforeBalance = new Decimal(updatedWallet.balance.toString()).minus(adjustment);
+        const newBalance = new Decimal(updatedWallet.balance.toString());
 
         const transaction = await tx.walletTransaction.create({
           data: {
             walletId: wallet.id,
             type: 'ADMIN_ADJUST',
-            amount: new Decimal(amount),
+            amount: adjustment,
             balance: newBalance,
             reason,
-            idempotencyKey: `admin_adjust:${userId}:${Date.now()}`,
+            idempotencyKey,
           },
         });
 
@@ -778,7 +793,7 @@ export class WalletService {
                 transactionId: transaction.id,
                 amount,
                 reason,
-                before: { balance: currentBalance },
+                before: { balance: Number(beforeBalance.toString()) },
                 after: { balance: Number(newBalance.toString()) },
               },
               ipAddress: auditContext.ipAddress,

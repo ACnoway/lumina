@@ -403,6 +403,7 @@ export default function AdminPage() {
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannelDto[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentChannelForm, setShowPaymentChannelForm] = useState(false);
+  const [editingPaymentChannelId, setEditingPaymentChannelId] = useState<string | null>(null);
   const [paymentChannelForm, setPaymentChannelForm] = useState({
     name: "",
     type: "EPAY" as PaymentChannelDto["type"],
@@ -1162,19 +1163,48 @@ export default function AdminPage() {
     event.preventDefault();
     try {
       const config = parseObject(paymentChannelForm.config, "支付渠道配置");
-      const channel = await adminApi.createPaymentChannel({
-        name: paymentChannelForm.name.trim(),
-        type: paymentChannelForm.type,
-        config,
-        isActive: paymentChannelForm.isActive,
-      });
-      setNotice(`已创建支付渠道“${channel.name}”`);
+      const channel = editingPaymentChannelId
+        ? await adminApi.updatePaymentChannel(editingPaymentChannelId, {
+          name: paymentChannelForm.name.trim(),
+          config,
+          isActive: paymentChannelForm.isActive,
+        })
+        : await adminApi.createPaymentChannel({
+          name: paymentChannelForm.name.trim(),
+          type: paymentChannelForm.type,
+          config,
+          isActive: paymentChannelForm.isActive,
+        });
+      setNotice(`${editingPaymentChannelId ? "已更新" : "已创建"}支付渠道“${channel.name}”`);
       setShowPaymentChannelForm(false);
-      setPaymentChannelForm((current) => ({ ...current, name: "" }));
+      resetPaymentChannelForm();
       await loadPayments();
     } catch (submitError) {
       setError(getErrorMessage(submitError, "创建支付渠道失败"));
     }
+  }
+
+  function resetPaymentChannelForm() {
+    setEditingPaymentChannelId(null);
+    setPaymentChannelForm({
+      name: "",
+      type: "EPAY",
+      config: '{\n  "baseUrl": "https://pay.example.com",\n  "pid": "",\n  "key": "",\n  "createEndpoint": "mapi.php",\n  "queryMethod": "POST"\n}',
+      isActive: true,
+    });
+  }
+
+  function editPaymentChannel(channel: PaymentChannelDto) {
+    setEditingPaymentChannelId(channel.id);
+    setPaymentChannelForm({
+      name: channel.name,
+      type: channel.type,
+      // Secrets are never returned by the API. Require the administrator to
+      // enter the full replacement config instead of showing partial secrets.
+      config: "",
+      isActive: channel.isActive,
+    });
+    setShowPaymentChannelForm(true);
   }
 
   async function togglePaymentChannel(channel: PaymentChannelDto) {
@@ -2801,7 +2831,10 @@ export default function AdminPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowPaymentChannelForm((current) => !current)}
+                  onClick={() => {
+                    if (showPaymentChannelForm || editingPaymentChannelId) resetPaymentChannelForm();
+                    setShowPaymentChannelForm((current) => !current);
+                  }}
                   className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   {showPaymentChannelForm ? "取消" : "新增渠道"}
@@ -2811,7 +2844,7 @@ export default function AdminPage() {
 
             {showPaymentChannelForm && (
               <form className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-5" onSubmit={submitPaymentChannel}>
-                <h3 className="font-semibold text-gray-800">新增支付渠道实例</h3>
+                <h3 className="font-semibold text-gray-800">{editingPaymentChannelId ? "更新支付渠道实例" : "新增支付渠道实例"}</h3>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs text-gray-500">
                     <span className="block font-medium text-gray-700">渠道名称</span>
@@ -2823,7 +2856,7 @@ export default function AdminPage() {
                       className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
                     />
                   </label>
-                  <label className="space-y-1 text-xs text-gray-500">
+                  {!editingPaymentChannelId && <label className="space-y-1 text-xs text-gray-500">
                     <span className="block font-medium text-gray-700">Adapter 类型</span>
                     <select
                       value={paymentChannelForm.type}
@@ -2834,7 +2867,7 @@ export default function AdminPage() {
                         <option key={adapter.type} value={adapter.type}>{adapter.name}（{adapter.type}）</option>
                       ))}
                     </select>
-                  </label>
+                  </label>}
                 </div>
                 <label className="block space-y-1 text-xs text-gray-500">
                   <span className="block font-medium text-gray-700">渠道配置 JSON</span>
@@ -2844,10 +2877,10 @@ export default function AdminPage() {
                     rows={8}
                     className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-xs"
                   />
-                  <span className="block text-gray-400">提交后密钥会在服务端加密保存，列表只展示脱敏摘要。</span>
+                  <span className="block text-gray-400">密钥会在服务端加密保存，列表只展示脱敏摘要。编辑时请填写完整配置；支付宝必须包含 appId、sellerId、privateKey 和 alipayPublicKey。</span>
                 </label>
                 <button type="submit" disabled={loadingPayments} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                  保存支付渠道
+                  {editingPaymentChannelId ? "更新支付渠道" : "保存支付渠道"}
                 </button>
               </form>
             )}
@@ -2880,6 +2913,9 @@ export default function AdminPage() {
                         <p className="mt-1 break-all text-xs text-gray-400">{channel.publicConfig ? JSON.stringify(channel.publicConfig) : "无公开配置摘要"}</p>
                       </div>
                       <div className="flex shrink-0 gap-3 text-sm">
+                        <button type="button" disabled={mutatingResource !== ""} onClick={() => editPaymentChannel(channel)} className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                          编辑配置
+                        </button>
                         <button type="button" disabled={mutatingResource !== ""} onClick={() => void testPaymentChannel(channel)} className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
                           {mutatingResource === `test-payment:${channel.id}` ? "验证中…" : "验证配置"}
                         </button>

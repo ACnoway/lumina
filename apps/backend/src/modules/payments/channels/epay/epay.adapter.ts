@@ -44,6 +44,10 @@ const NOTIFICATION_FIELDS = new Set([
   'money',
   'param',
   'buyer',
+  'pay_time',
+  'paid_at',
+  'gmt_payment',
+  'endtime',
   'sign',
   'sign_type',
 ]);
@@ -207,7 +211,9 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
             : 'PENDING',
       amount: this.optionalString(payload.money),
       currency: 'CNY',
-      paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? new Date() : undefined,
+      paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED'
+        ? this.parsePaymentDate(this.firstString(payload, ['pay_time', 'paid_at', 'gmt_payment', 'endtime']))
+        : undefined,
       signatureValid: true,
     };
   }
@@ -275,6 +281,9 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
         paymentMethod,
         amount: this.firstString(data, ['money', 'amount']),
         currency: 'CNY',
+        paidAt: isSuccess
+          ? this.parsePaymentDate(this.firstString(data, ['pay_time', 'paid_at', 'gmt_payment', 'endtime']))
+          : undefined,
       };
     } catch (error) {
       throw new PaymentChannelError(
@@ -405,6 +414,18 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
 
   private optionalString(value: unknown): string | undefined {
     return value === undefined || value === null || value === '' ? undefined : String(value);
+  }
+
+  private parsePaymentDate(value: string | undefined): Date | undefined {
+    if (!value) return undefined;
+    const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+    const normalized = /^\d{10}$/.test(value)
+      ? Number(value) * 1000
+      : /^\d{13}$/.test(value)
+        ? Number(value)
+        : `${value.replace(' ', 'T')}${hasTimeZone ? '' : '+08:00'}`;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }
 
   private isSecureEndpoint(value: unknown): value is string {

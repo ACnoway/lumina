@@ -71,57 +71,56 @@ function createTestStore() {
     idempotencyKey: string | null;
   }> = [];
   let transactionId = 0;
+  const updateBalance = (data: { balance: any }) => {
+    if (data.balance && typeof data.balance === 'object' && 'increment' in data.balance) {
+      wallet.balance = wallet.balance.plus(new Decimal(data.balance.increment));
+    } else if (data.balance && typeof data.balance === 'object' && 'decrement' in data.balance) {
+      wallet.balance = wallet.balance.minus(new Decimal(data.balance.decrement));
+    } else {
+      wallet.balance = new Decimal(data.balance);
+    }
+    return wallet;
+  };
+  const updateWalletMany = ({ where, data }: { where: { balance?: { gte?: Decimal } }; data: { balance: any } }) => {
+    if (where.balance?.gte && wallet.balance.lessThan(where.balance.gte)) return { count: 0 };
+    updateBalance(data);
+    return { count: 1 };
+  };
+  const createTransaction = (data: { walletId: string; balance: Decimal; idempotencyKey: string }) => {
+    const transaction = {
+      id: `transaction-${++transactionId}`,
+      walletId: data.walletId,
+      balance: data.balance,
+      idempotencyKey: data.idempotencyKey,
+    };
+    transactions.push(transaction);
+    return transaction;
+  };
 
   const prisma = {
     wallet: {
       findUnique: jest.fn(async () => wallet),
-      update: jest.fn(async () => wallet),
-      updateMany: jest.fn(async () => ({ count: 0 })),
+      update: jest.fn(async ({ data }: { data: { balance: any } }) => updateBalance(data)),
+      updateMany: jest.fn(async (args: { where: { balance?: { gte?: Decimal } }; data: { balance: any } }) => updateWalletMany(args)),
     },
     walletTransaction: {
       findUnique: jest.fn(async ({ where }: { where: { idempotencyKey: string } }) =>
         transactions.find((item) => item.idempotencyKey === where.idempotencyKey) || null,
       ),
       create: jest.fn(async ({ data }: { data: { walletId: string; balance: Decimal; idempotencyKey: string } }) => {
-        const transaction = {
-          id: `transaction-${++transactionId}`,
-          walletId: data.walletId,
-          balance: data.balance,
-          idempotencyKey: data.idempotencyKey,
-        };
-        transactions.push(transaction);
-        return transaction;
+        return createTransaction(data);
       }),
     },
     $transaction: jest.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback({
         wallet: {
           findUnique: jest.fn(async () => wallet),
-          update: jest.fn(async ({ data }: { data: { balance: Decimal } }) => {
-            wallet.balance = data.balance;
-            return wallet;
-          }),
-          updateMany: jest.fn(async ({ where, data }: {
-            where: { balance: { gte: Decimal } };
-            data: { balance: { decrement: Decimal } };
-          }) => {
-            if (wallet.balance.lessThan(where.balance.gte)) {
-              return { count: 0 };
-            }
-            wallet.balance = wallet.balance.minus(data.balance.decrement);
-            return { count: 1 };
-          }),
+          update: jest.fn(async ({ data }: { data: { balance: any } }) => updateBalance(data)),
+          updateMany: jest.fn(async (args: { where: { balance?: { gte?: Decimal } }; data: { balance: any } }) => updateWalletMany(args)),
         },
         walletTransaction: {
           create: jest.fn(async ({ data }: { data: { walletId: string; balance: Decimal; idempotencyKey: string } }) => {
-            const transaction = {
-              id: `transaction-${++transactionId}`,
-              walletId: data.walletId,
-              balance: data.balance,
-              idempotencyKey: data.idempotencyKey,
-            };
-            transactions.push(transaction);
-            return transaction;
+            return createTransaction(data);
           }),
         },
       }),
@@ -270,6 +269,17 @@ describe('WalletService reservations', () => {
       }),
       expect.anything(),
     );
+  });
+
+  it('rejects an atomic administrator debit that would make the wallet negative', async () => {
+    const store = createTestStore();
+    store.wallet.balance = new Decimal(2);
+    const service = createWalletService(store);
+
+    await expect(service.adminAdjust('user-1', -3, '冲正')).rejects.toThrow('调整后余额不能为负数');
+
+    expect(store.wallet.balance.toNumber()).toBe(2);
+    expect(store.transactions).toHaveLength(0);
   });
 
   it('converts model names in user-visible transactions without changing admin data', async () => {

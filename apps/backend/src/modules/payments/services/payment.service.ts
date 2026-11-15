@@ -105,6 +105,7 @@ export class PaymentService {
         orderNo,
         userId: user.id,
         channelId: usable!.channel.id,
+        channelConfigVersion: usable!.channel.configVersion,
         channelType: usable!.channel.type,
         paymentMethod,
         // Kept only for backwards-compatible database/API snapshots. The
@@ -255,6 +256,7 @@ export class PaymentService {
       usable = await this.channels.getUsableChannel(
         order.channelId,
         order.paymentMethod,
+        order.channelConfigVersion,
       );
     } catch (error) {
       this.rethrowChannelError(error);
@@ -324,7 +326,6 @@ export class PaymentService {
   async syncOrder(userId: string, orderNo: string): Promise<PaymentOrderDto> {
     let order = await this.findUserOrder(userId, orderNo);
     order = await this.expireOrderIfNeeded(order);
-    if (order.status === PaymentOrderStatus.EXPIRED) return this.serializeOrder(order);
     // A prior verified callback may have claimed payment immediately before a
     // process crash or a transient wallet failure. Finish that idempotently
     // rather than querying the provider or reopening the payment flow.
@@ -332,7 +333,7 @@ export class PaymentService {
       await this.creditClaimedPayment(order);
       return this.getOrder(userId, orderNo);
     }
-    const { adapter, config } = await this.channels.getById(order.channelId);
+    const { adapter, config } = await this.channels.getById(order.channelId, order.channelConfigVersion);
     if (!adapter.queryPayment) throw new BadRequestException('当前渠道不支持主动查询');
     let result: PaymentQueryResult;
     try {
@@ -345,14 +346,44 @@ export class PaymentService {
   }
 
   async processNotification(channelId: string, request: PaymentNotificationRequest): Promise<PaymentNotifyResponse> {
-    const { adapter, config } = await this.channels.getById(channelId);
-    let notification: PaymentNotification;
-    try {
-      notification = await adapter.parseNotification(request, config);
-    } catch (error) {
-      this.logger.warn(`payment.notify.signature_invalid channelId=${channelId}`);
-      return adapter.buildNotificationResponse(false);
+    const candidates = await this.channels.getNotificationCandidates(channelId);
+    const fallbackAdapter = candidates[0].adapter;
+    let matched: (typeof candidates)[number] | undefined;
+    let notification: PaymentNotification | undefined;
+    let order: (PaymentOrder & { channel: PaymentChannel }) | null = null;
+
+    // Verify against the immutable configurations retained for this channel.
+    // The order number is not trusted until its notification signature passes.
+    for (const candidate of candidates) {
+      try {
+        const parsed = await candidate.adapter.parseNotification(request, candidate.config);
+        if (!parsed.orderNo) continue;
+        const candidateOrder = await this.prisma.paymentOrder.findUnique({
+          where: { orderNo: parsed.orderNo },
+          include: { channel: true },
+        });
+        if (
+          !candidateOrder ||
+          candidateOrder.channelId !== channelId ||
+          candidateOrder.channelConfigVersion !== candidate.version
+        ) {
+          continue;
+        }
+        matched = candidate;
+        notification = parsed;
+        order = candidateOrder;
+        break;
+      } catch {
+        // A different retained version may own this order's signature.
+      }
     }
+
+    if (!matched || !notification || !order) {
+      this.logger.warn(`payment.notify.signature_or_config_invalid channelId=${channelId}`);
+      return fallbackAdapter.buildNotificationResponse(false);
+    }
+
+    const { adapter, config } = matched;
     const payloadHash = createHash('sha256').update(request.rawBody).digest('hex');
     // A provider can send PENDING and SUCCESS notifications for the same
     // provider trade number. Deduplicate repeats of the *same state*, but do
@@ -374,14 +405,6 @@ export class PaymentService {
       });
     }
 
-    const order = await this.prisma.paymentOrder.findUnique({
-      where: { orderNo: notification.orderNo },
-      include: { channel: true },
-    });
-    if (!order || order.channelId !== channelId) {
-      await this.markEventFailed(channelId, eventKey, '本地订单不存在或渠道不匹配');
-      return adapter.buildNotificationResponse(false);
-    }
     try {
       if (notification.paymentMethod && notification.paymentMethod !== order.paymentMethod) {
         throw new PaymentChannelError(
@@ -405,15 +428,16 @@ export class PaymentService {
           orderNo: order.orderNo,
           providerTradeNo: notification.providerTradeNo,
         }, config);
-        if (
+        const epayUnconfirmed = (
           queryResult.status !== 'SUCCESS'
           || queryResult.orderNo !== order.orderNo
           || queryResult.merchantId !== String(config.pid ?? '').trim()
           || queryResult.paymentMethod !== order.paymentMethod
-        ) {
+        );
+        if (epayUnconfirmed) {
           throw new PaymentChannelError(
             PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH,
-            '易支付服务端查单未确认当前商户、订单和支付状态',
+            '服务端查单未确认当前商户、订单和支付状态',
           );
         }
         this.assertConfirmedPayment(order, queryResult);
@@ -439,7 +463,9 @@ export class PaymentService {
     order = await this.expireOrderIfNeeded(order);
     if (result.status === 'SUCCESS') {
       if (order.status === PaymentOrderStatus.SUCCEEDED) return;
-      this.assertPayableOrder(order, '支付订单已关闭或过期，不能再次入账');
+      if (!this.isPayableOrder(order) && order.status !== PaymentOrderStatus.EXPIRED) {
+        throw new PaymentChannelError(PaymentErrorCode.PAYMENT_ALREADY_CLOSED, '支付订单已关闭，不能再次入账');
+      }
       this.assertConfirmedPayment(order, result);
       await this.processPaymentSuccess(order, result);
       return;
@@ -463,25 +489,41 @@ export class PaymentService {
     result: PaymentNotification | PaymentQueryResult,
   ): Promise<void> {
     const paidAmount = new Decimal(result.amount!);
-    const paidAt = result.paidAt ?? new Date();
+    const now = new Date();
+    const reportedPaidAt = result.paidAt;
+    const paidAt = reportedPaidAt ?? (
+      !order.expireAt || order.expireAt.getTime() > now.getTime() ? now : undefined
+    );
+    if (!paidAt || Number.isNaN(paidAt.getTime())) {
+      throw new PaymentChannelError(
+        PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
+        '订单已过期且渠道结果未提供可核验的支付时间',
+      );
+    }
+    if (order.expireAt && paidAt.getTime() > order.expireAt.getTime()) {
+      throw new PaymentChannelError(
+        PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
+        '渠道确认的支付时间晚于订单有效期，需人工核对或退款',
+      );
+    }
 
-    // This update is the payment-success claim. It makes expiry and wallet
-    // credit mutually exclusive without adding a schema column: expiry only
-    // touches unpaid (`paidAt: null`) rows, while a successful claim can only
-    // be made before `expireAt`.
+    // A delayed callback/query can still claim an EXPIRED order when the
+    // provider confirms that payment completed before the original deadline.
+    // The paidAt guard keeps expiry and wallet credit mutually exclusive.
     const claim = await this.prisma.paymentOrder.updateMany({
       where: {
         id: order.id,
-        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING, PaymentOrderStatus.EXPIRED] },
         paidAt: null,
         OR: [
           { expireAt: null },
-          { expireAt: { gt: new Date() } },
+          { expireAt: { gte: paidAt } },
         ],
       },
       data: {
         providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
         paidAmount,
+        payerAmount: result.payerAmount ? new Decimal(result.payerAmount) : undefined,
         paidAt,
         failureCode: null,
         failureMessage: null,
@@ -493,6 +535,7 @@ export class PaymentService {
         ...order,
         providerTradeNo: result.providerTradeNo ?? order.providerTradeNo,
         paidAmount,
+        payerAmount: result.payerAmount ? new Decimal(result.payerAmount) : order.payerAmount,
         paidAt,
       });
       return;
@@ -500,8 +543,7 @@ export class PaymentService {
 
     // A duplicate callback/query may race after another handler has already
     // claimed the order. Reload it and re-drive the wallet operation using the
-    // stable idempotency key. If the claim was not won, an expired unpaid order
-    // is explicitly expired and cannot be revived by this late success.
+    // stable idempotency key.
     const current = await this.prisma.paymentOrder.findUnique({
       where: { id: order.id },
       include: { channel: true },
@@ -509,7 +551,7 @@ export class PaymentService {
     if (!current) throw new NotFoundException('支付订单不存在');
     const currentOrder = await this.expireOrderIfNeeded(current);
     if (currentOrder.status === PaymentOrderStatus.SUCCEEDED) return;
-    if (this.isClaimedPayableOrder(currentOrder)) {
+    if (this.isClaimedPayment(currentOrder)) {
       await this.creditClaimedPayment(currentOrder);
       return;
     }
@@ -528,11 +570,10 @@ export class PaymentService {
   private async creditClaimedPayment(
     order: PaymentOrder & { channel: PaymentChannel },
   ): Promise<void> {
-    this.assertPayableOrder(order, '支付订单已关闭或过期，不能再次入账');
-    if (!order.paidAt) {
+    if (!this.isClaimedPayment(order)) {
       throw new PaymentChannelError(
         PaymentErrorCode.PAYMENT_ALREADY_CLOSED,
-        '支付订单尚未确认支付，不能入账',
+        '支付订单状态或确认时间不允许入账',
       );
     }
     const paidAmount = order.paidAmount ?? order.amount;
@@ -546,6 +587,7 @@ export class PaymentService {
         providerTradeNo: order.providerTradeNo,
         orderAmountCny: order.amount.toString(),
         paidAmountCny: paidAmount.toString(),
+        payerAmountCny: order.payerAmount?.toString() ?? null,
         exchangeRate: order.photonPerCny.toString(),
         photonAmount: order.photonAmount.toString(),
         paymentMethod: order.paymentMethod,
@@ -557,13 +599,14 @@ export class PaymentService {
     await this.prisma.paymentOrder.updateMany({
       where: {
         id: order.id,
-        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING, PaymentOrderStatus.EXPIRED] },
         paidAt: { not: null },
       },
       data: {
         status: PaymentOrderStatus.SUCCEEDED,
         providerTradeNo: order.providerTradeNo,
         paidAmount,
+        payerAmount: order.payerAmount,
         paidAt: order.paidAt,
         failureCode: null,
         failureMessage: null,
@@ -572,6 +615,9 @@ export class PaymentService {
   }
 
   private assertConfirmedPayment(order: PaymentOrder, result: PaymentNotification | PaymentQueryResult): void {
+    if (!result.orderNo || result.orderNo !== order.orderNo) {
+      throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付结果订单号与本地订单不一致');
+    }
     if (typeof result.amount !== 'string' || !result.amount.trim()) {
       throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付成功结果缺少支付金额');
     }
@@ -584,6 +630,18 @@ export class PaymentService {
     }
     if (!paidAmount.eq(order.amount)) {
       throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '支付金额与本地订单不一致');
+    }
+
+    if (result.payerAmount !== undefined) {
+      let payerAmount: Decimal;
+      try {
+        payerAmount = new Decimal(result.payerAmount);
+      } catch {
+        throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '用户实付金额格式不合法');
+      }
+      if (!payerAmount.isFinite() || payerAmount.isNegative() || payerAmount.greaterThan(paidAmount)) {
+        throw new PaymentChannelError(PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH, '用户实付金额超出订单总额');
+      }
     }
 
     if (typeof result.currency !== 'string' || result.currency.toUpperCase() !== order.currency.toUpperCase()) {
@@ -722,7 +780,15 @@ export class PaymentService {
   }
 
   private isClaimedPayableOrder(order: PaymentOrder): boolean {
-    return this.isPayableOrder(order) && order.paidAt !== null;
+    return this.isClaimedPayment(order);
+  }
+
+  private isClaimedPayment(order: PaymentOrder): boolean {
+    return (
+      (this.isPayableOrder(order) || order.status === PaymentOrderStatus.EXPIRED) &&
+      order.paidAt !== null &&
+      (!order.expireAt || order.paidAt.getTime() <= order.expireAt.getTime())
+    );
   }
 
   private assertResumableOrder(order: PaymentOrder): void {

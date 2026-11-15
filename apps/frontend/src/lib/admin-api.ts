@@ -133,6 +133,14 @@ export const adminApi = {
     return apiClient.post('/admin/payment-channels', data);
   },
 
+  updatePaymentChannel(id: string, data: {
+    name?: string;
+    config?: Record<string, unknown>;
+    isActive?: boolean;
+  }): Promise<PaymentChannelDto> {
+    return apiClient.patch(`/admin/payment-channels/${encodeURIComponent(id)}`, data);
+  },
+
   setPaymentChannelActive(id: string, isActive: boolean): Promise<PaymentChannelDto> {
     return apiClient.post(`/admin/payment-channels/${encodeURIComponent(id)}/${isActive ? 'enable' : 'disable'}`);
   },

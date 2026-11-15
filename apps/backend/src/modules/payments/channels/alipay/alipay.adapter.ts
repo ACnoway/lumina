@@ -19,6 +19,7 @@ import { PaymentChannelError, PaymentErrorCode } from '../../core/payment.errors
 
 export interface AlipayConfig {
   appId: string;
+  sellerId: string;
   privateKey: string;
   alipayPublicKey: string;
   /** The official Alipay product used by this channel instance. */
@@ -43,8 +44,8 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
   }
 
   async validateConfig(config: AlipayConfig): Promise<void> {
-    if (!config?.appId?.trim() || !config.privateKey?.trim() || !config.alipayPublicKey?.trim()) {
-      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 appId、私钥和支付宝公钥不能为空');
+    if (!config?.appId?.trim() || !config.sellerId?.trim() || !config.privateKey?.trim() || !config.alipayPublicKey?.trim()) {
+      throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 appId、sellerId、私钥和支付宝公钥不能为空');
     }
     if (config.product && !['PAGE', 'WAP', 'PRECREATE'].includes(config.product)) {
       throw new PaymentChannelError(PaymentErrorCode.INVALID_CHANNEL_CONFIG, '支付宝 product 必须为 PAGE、WAP 或 PRECREATE');
@@ -65,6 +66,7 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
   getPublicConfig(config: AlipayConfig): Record<string, unknown> {
     return {
       appId: this.mask(config.appId),
+      sellerId: this.mask(config.sellerId),
       gateway: config.gateway || (config.sandbox ? 'https://openapi-sandbox.dl.alipaydev.com/gateway.do' : 'https://openapi.alipay.com/gateway.do'),
       product: config.product ?? 'PAGE',
       sandbox: Boolean(config.sandbox),
@@ -131,15 +133,27 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     const content = this.signatureContent(payload);
     const valid = Boolean(signature) && createVerify('RSA-SHA256').update(content, 'utf8').verify(config.alipayPublicKey, signature, 'base64');
     if (!valid) throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '支付宝回调签名无效');
+    const applicationId = this.optionalString(payload.app_id);
+    const merchantId = this.optionalString(payload.seller_id);
+    if (applicationId !== config.appId.trim()) {
+      throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '支付宝回调 app_id 与渠道配置不一致');
+    }
+    if (merchantId !== config.sellerId.trim()) {
+      throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '支付宝回调 seller_id 与渠道配置不一致');
+    }
     const tradeStatus = String(payload.trade_status ?? '').toUpperCase();
     return {
       eventId: String(payload.trade_no ?? `${payload.out_trade_no}:${tradeStatus}`),
       orderNo: String(payload.out_trade_no ?? ''),
       providerTradeNo: this.optionalString(payload.trade_no),
+      applicationId,
+      merchantId,
       status: tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED' ? 'SUCCESS' : tradeStatus === 'TRADE_CLOSED' ? 'CLOSED' : 'PENDING',
       amount: this.optionalString(payload.total_amount),
       currency: 'CNY',
-      paidAt: tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED' ? new Date() : undefined,
+      paidAt: tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED'
+        ? this.parsePaymentDate(payload.gmt_payment)
+        : undefined,
     };
   }
 
@@ -155,9 +169,12 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
     return {
       status: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? 'SUCCESS' : status === 'TRADE_CLOSED' ? 'CLOSED' : 'PENDING',
       providerTradeNo: this.optionalString(trade.trade_no),
+      orderNo: this.optionalString(trade.out_trade_no),
       amount: this.optionalString(trade.total_amount),
       currency: 'CNY',
-      paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' ? new Date() : undefined,
+      paidAt: status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED'
+        ? this.parsePaymentDate(trade.gmt_payment)
+        : undefined,
     };
   }
 
@@ -269,6 +286,15 @@ export class AlipayPaymentAdapter implements PaymentChannelAdapter<AlipayConfig>
 
   private optionalString(value: unknown): string | undefined {
     return value === undefined || value === null || value === '' ? undefined : String(value);
+  }
+
+  private parsePaymentDate(value: unknown): Date | undefined {
+    if (typeof value !== 'string' || !value.trim()) return undefined;
+    const trimmed = value.trim();
+    const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
+    const normalized = `${trimmed.replace(' ', 'T')}${hasTimeZone ? '' : '+08:00'}`;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }
 
   private escape(value: string): string {

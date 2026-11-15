@@ -19,6 +19,7 @@ function makeOrder(status: PaymentOrderStatus = PaymentOrderStatus.PENDING): Pay
     orderNo: 'LM202609190000001234',
     userId: 'user-1',
     channelId: channel.id,
+    channelConfigVersion: 1,
     channelType: channel.type,
     paymentMethod: 'ALIPAY',
     scene: 'QR',
@@ -30,6 +31,7 @@ function makeOrder(status: PaymentOrderStatus = PaymentOrderStatus.PENDING): Pay
     status,
     providerTradeNo: null,
     paidAmount: null,
+    payerAmount: null,
     paidAt: null,
     expireAt: new Date(Date.now() + 30 * 60 * 1000),
     clientIp: null,
@@ -73,6 +75,7 @@ function createService() {
     getById: jest.fn().mockResolvedValue({ adapter, config: {} }),
     getUsableChannel: jest.fn().mockResolvedValue({ channel, adapter, config: {} }),
     getUsableChannelForMethod: jest.fn().mockResolvedValue({ channel, adapter, config: {} }),
+    getNotificationCandidates: jest.fn().mockResolvedValue([{ channel, adapter, version: 1, config: {} }]),
   };
   const settingsService = {
     getCurrencySettings: jest.fn().mockResolvedValue({ photonPerCny: 10 }),
@@ -189,6 +192,7 @@ describe('PaymentService', () => {
     prisma.paymentOrder.findFirst.mockResolvedValueOnce(order);
     adapter.queryPayment.mockResolvedValue({
       status: 'SUCCESS',
+      orderNo: order.orderNo,
       providerTradeNo: 'T-wrong-currency',
       amount: '10.00',
       currency: 'USD',
@@ -200,12 +204,32 @@ describe('PaymentService', () => {
     expect(walletService.recharge).not.toHaveBeenCalled();
   });
 
+  it.each(['10.01', 'NaN'])('rejects an invalid coupon payer amount (%s)', async (payerAmount) => {
+    const { service, prisma, walletService, adapter } = createService();
+    const order = makeOrder();
+    prisma.paymentOrder.findFirst.mockResolvedValueOnce(order);
+    adapter.queryPayment.mockResolvedValue({
+      status: 'SUCCESS',
+      orderNo: order.orderNo,
+      amount: '10.00',
+      payerAmount,
+      currency: 'CNY',
+      paidAt: new Date(),
+    });
+
+    await expect(service.syncOrder(order.userId, order.orderNo)).rejects.toMatchObject({
+      code: PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH,
+    });
+    expect(walletService.recharge).not.toHaveBeenCalled();
+  });
+
   it('does not revive a closed order from a later successful query', async () => {
     const { service, prisma, walletService, adapter } = createService();
     const order = makeOrder(PaymentOrderStatus.CLOSED);
     prisma.paymentOrder.findFirst.mockResolvedValueOnce(order);
     adapter.queryPayment.mockResolvedValue({
       status: 'SUCCESS',
+      orderNo: order.orderNo,
       providerTradeNo: 'T-late-paid',
       amount: '10.00',
       currency: 'CNY',
@@ -217,7 +241,7 @@ describe('PaymentService', () => {
     expect(walletService.recharge).not.toHaveBeenCalled();
   });
 
-  it('expires stale orders before returning or syncing them', async () => {
+  it('expires stale orders before returning them', async () => {
     const { service, prisma, adapter, walletService } = createService();
     const order = {
       ...makeOrder(),
@@ -229,15 +253,12 @@ describe('PaymentService', () => {
     await expect(service.getOrder(order.userId, order.orderNo)).resolves.toMatchObject({
       status: PaymentOrderStatus.EXPIRED,
     });
-    await expect(service.syncOrder(order.userId, order.orderNo)).resolves.toMatchObject({
-      status: PaymentOrderStatus.EXPIRED,
-    });
-
     expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: order.id,
-        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING, PaymentOrderStatus.EXPIRED] },
         paidAt: null,
+        OR: [{ expireAt: null }, { expireAt: { gte: expect.any(Date) } }],
       }),
       data: { status: PaymentOrderStatus.EXPIRED },
     }));
@@ -281,7 +302,7 @@ describe('PaymentService', () => {
     }));
   });
 
-  it('does not credit the wallet for a late successful callback on an expired order', async () => {
+  it('rejects an expired callback without a provider-confirmed payment timestamp', async () => {
     const { service, prisma, walletService, adapter } = createService();
     const order = {
       ...makeOrder(),
@@ -308,7 +329,47 @@ describe('PaymentService', () => {
 
     expect(walletService.recharge).not.toHaveBeenCalled();
     expect(prisma.paymentCallbackEvent.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ errorMessage: expect.stringContaining('不能再次入账') }),
+      data: expect.objectContaining({ errorMessage: expect.stringContaining('未提供可核验的支付时间') }),
+    }));
+  });
+
+  it('credits a delayed callback when the provider confirms payment before expiry', async () => {
+    const { service, prisma, walletService, adapter } = createService();
+    const order = {
+      ...makeOrder(),
+      expireAt: new Date(Date.now() - 1_000),
+    };
+    const paidAt = new Date(order.expireAt.getTime() - 500);
+    adapter.parseNotification.mockResolvedValue({
+      eventId: 'late-but-on-time-event',
+      orderNo: order.orderNo,
+      providerTradeNo: 'T-late-on-time',
+      status: 'SUCCESS',
+      amount: '10.00',
+      currency: 'CNY',
+      paidAt,
+    });
+    prisma.paymentCallbackEvent.findUnique.mockResolvedValue(null);
+    prisma.paymentOrder.findUnique
+      .mockResolvedValueOnce({ ...order, status: PaymentOrderStatus.EXPIRED })
+      .mockResolvedValueOnce({ ...order, status: PaymentOrderStatus.SUCCEEDED, paidAt });
+    prisma.paymentOrder.updateMany.mockResolvedValue({ count: 1 });
+    prisma.paymentOrder.findFirst.mockResolvedValue({ ...order, status: PaymentOrderStatus.SUCCEEDED, paidAt });
+    walletService.recharge.mockResolvedValue({});
+
+    await expect(service.processNotification(order.channelId, {
+      headers: {},
+      rawBody: Buffer.from('late-but-on-time'),
+      body: {},
+      method: 'POST',
+    })).resolves.toEqual({ body: 'success' });
+
+    expect(walletService.recharge).toHaveBeenCalledTimes(1);
+    expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING, PaymentOrderStatus.EXPIRED] },
+        OR: [{ expireAt: null }, { expireAt: { gte: paidAt } }],
+      }),
     }));
   });
 
@@ -330,7 +391,7 @@ describe('PaymentService', () => {
 
     expect(adapter.createPayment).not.toHaveBeenCalled();
     expect(prisma.paymentOrder.create).not.toHaveBeenCalled();
-    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod);
+    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod, order.channelConfigVersion);
   });
 
   it('regenerates a missing action with the same original order snapshot', async () => {
@@ -389,7 +450,7 @@ describe('PaymentService', () => {
 
     await expect(service.resumePayment(order.userId, order.orderNo)).resolves.toMatchObject({ action });
 
-    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod);
+    expect(channels.getUsableChannel).toHaveBeenCalledWith(order.channelId, order.paymentMethod, order.channelConfigVersion);
     expect(adapter.createPayment).toHaveBeenCalledWith(
       expect.objectContaining({ orderNo: order.orderNo }),
       expect.objectContaining({ amount: order.amount }),
@@ -457,6 +518,7 @@ describe('PaymentService', () => {
       .mockResolvedValueOnce({ count: 1 });
     adapter.queryPayment.mockResolvedValue({
       status: 'SUCCESS',
+      orderNo: order.orderNo,
       providerTradeNo: 'T-duplicate',
       amount: '10.00',
       currency: 'CNY',
@@ -488,8 +550,10 @@ describe('PaymentService', () => {
       .mockResolvedValueOnce({ ...order, status: PaymentOrderStatus.SUCCEEDED });
     adapter.queryPayment.mockResolvedValue({
       status: 'SUCCESS',
+      orderNo: order.orderNo,
       providerTradeNo: 'T-paid',
       amount: '10.00',
+      payerAmount: '8.00',
       currency: 'CNY',
       paidAt: new Date(),
     });
@@ -511,6 +575,7 @@ describe('PaymentService', () => {
         providerTradeNo: 'T-paid',
         orderAmountCny: '10',
         paidAmountCny: '10',
+        payerAmountCny: '8',
         exchangeRate: '10',
         photonAmount: '100',
         paymentMethod: 'ALIPAY',
@@ -522,7 +587,7 @@ describe('PaymentService', () => {
     expect(prisma.paymentOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: order.id,
-        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING] },
+        status: { in: [PaymentOrderStatus.CREATED, PaymentOrderStatus.PENDING, PaymentOrderStatus.EXPIRED] },
         paidAt: null,
       }),
     }));
@@ -590,13 +655,39 @@ describe('PaymentService', () => {
     expect(walletService.recharge).toHaveBeenCalledTimes(1);
   });
 
+  it('matches a notification to the retained configuration version stored on its order', async () => {
+    const { service, prisma, channels, adapter } = createService();
+    const order = makeOrder();
+    channels.getNotificationCandidates.mockResolvedValue([
+      { channel: order.channel, adapter, version: 2, config: { version: 'new' } },
+      { channel: order.channel, adapter, version: 1, config: { version: 'old' } },
+    ]);
+    adapter.parseNotification.mockResolvedValue({
+      eventId: 'old-version-event',
+      orderNo: order.orderNo,
+      status: 'PENDING',
+    });
+    prisma.paymentOrder.findUnique.mockResolvedValue(order);
+    prisma.paymentCallbackEvent.findUnique.mockResolvedValue(null);
+
+    await expect(service.processNotification(order.channelId, {
+      headers: {}, rawBody: Buffer.from('versioned-callback'), body: {}, method: 'POST',
+    })).resolves.toEqual({ body: 'success' });
+
+    expect(adapter.parseNotification).toHaveBeenNthCalledWith(1, expect.anything(), { version: 'new' });
+    expect(adapter.parseNotification).toHaveBeenNthCalledWith(2, expect.anything(), { version: 'old' });
+    expect(prisma.paymentOrder.findUnique).toHaveBeenCalledTimes(2);
+  });
+
   it('requires a matching server-side Epay query before crediting submit.php callbacks', async () => {
     const { service, prisma, walletService, adapter, channels } = createService();
     const order = makeOrder();
-    channels.getById.mockResolvedValue({
+    channels.getNotificationCandidates.mockResolvedValue([{
+      channel: order.channel,
       adapter,
+      version: order.channelConfigVersion,
       config: { createEndpoint: 'submit.php', pid: '10001' },
-    });
+    }]);
     adapter.parseNotification.mockResolvedValue({
       eventId: 'submit-callback-event',
       orderNo: order.orderNo,
@@ -637,10 +728,12 @@ describe('PaymentService', () => {
   it('does not credit a submit.php callback if server-side Epay query does not confirm payment', async () => {
     const { service, prisma, walletService, adapter, channels } = createService();
     const order = makeOrder();
-    channels.getById.mockResolvedValue({
+    channels.getNotificationCandidates.mockResolvedValue([{
+      channel: order.channel,
       adapter,
+      version: order.channelConfigVersion,
       config: { createEndpoint: 'submit.php', pid: '10001' },
-    });
+    }]);
     adapter.parseNotification.mockResolvedValue({
       eventId: 'submit-unconfirmed-event',
       orderNo: order.orderNo,

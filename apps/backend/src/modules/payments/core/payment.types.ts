@@ -57,8 +57,12 @@ export interface PaymentNotification {
   orderNo: string;
   providerTradeNo?: string;
   paymentMethod?: PaymentMethod;
+  applicationId?: string;
+  merchantId?: string;
   status: PaymentNotificationStatus;
   amount?: string;
+  /** Provider-reported cash amount paid by the user after coupons/discounts. */
+  payerAmount?: string;
   currency?: string;
   paidAt?: Date;
   /**
@@ -84,8 +88,11 @@ export interface PaymentQueryResult {
   providerTradeNo?: string;
   orderNo?: string;
   merchantId?: string;
+  applicationId?: string;
   paymentMethod?: PaymentMethod;
   amount?: string;
+  /** Provider-reported cash amount paid by the user after coupons/discounts. */
+  payerAmount?: string;
   currency?: string;
   paidAt?: Date;
 }
