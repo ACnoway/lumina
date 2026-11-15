@@ -17,6 +17,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SmsModule } from './modules/sms/sms.module';
 import { SupportModule } from './modules/support/support.module';
+import { validateEnvironment } from './config/environment';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SupportModule } from './modules/support/support.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
+      validate: validateEnvironment,
     }),
 
     // 全局限流模块

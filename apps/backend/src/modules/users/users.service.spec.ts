@@ -43,7 +43,7 @@ describe('UsersService administrator bootstrap', () => {
     await expect(bcrypt.compare('initial-secret', data.password)).resolves.toBe(true);
   });
 
-  it('repairs an existing configured user to ADMIN without overwriting the password', async () => {
+  it('does not promote an existing configured user automatically', async () => {
     const userUpdate = jest.fn().mockResolvedValue(undefined);
     const prisma = {
       user: {
@@ -64,10 +64,7 @@ describe('UsersService administrator bootstrap', () => {
     const service = new UsersService(prisma as unknown as PrismaService, config);
     await service.onModuleInit();
 
-    expect(userUpdate).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { role: 'ADMIN' },
-    });
+    expect(userUpdate).not.toHaveBeenCalled();
   });
 
   it('skips bootstrap when ADMIN_EMAIL is not configured', async () => {

@@ -7,6 +7,7 @@ import {
 import { createHash } from 'crypto';
 import {
   PaymentChannel,
+  PaymentChannelType,
   PaymentMethod,
   PaymentOrder,
   PaymentOrderStatus,
@@ -382,7 +383,43 @@ export class PaymentService {
       return adapter.buildNotificationResponse(false);
     }
     try {
-      await this.applyPaymentResult(order, notification);
+      if (notification.paymentMethod && notification.paymentMethod !== order.paymentMethod) {
+        throw new PaymentChannelError(
+          PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH,
+          '支付回调方式与本地订单不一致',
+        );
+      }
+      let confirmedResult: PaymentNotification | PaymentQueryResult = notification;
+      if (
+        notification.status === 'SUCCESS'
+        && order.channelType === PaymentChannelType.EPAY
+        && config.createEndpoint === 'submit.php'
+      ) {
+        if (!adapter.queryPayment) {
+          throw new PaymentChannelError(
+            PaymentErrorCode.CHANNEL_REQUEST_FAILED,
+            '易支付 submit.php 模式必须支持服务端查单核验',
+          );
+        }
+        const queryResult = await adapter.queryPayment({
+          orderNo: order.orderNo,
+          providerTradeNo: notification.providerTradeNo,
+        }, config);
+        if (
+          queryResult.status !== 'SUCCESS'
+          || queryResult.orderNo !== order.orderNo
+          || queryResult.merchantId !== String(config.pid ?? '').trim()
+          || queryResult.paymentMethod !== order.paymentMethod
+        ) {
+          throw new PaymentChannelError(
+            PaymentErrorCode.PAYMENT_AMOUNT_MISMATCH,
+            '易支付服务端查单未确认当前商户、订单和支付状态',
+          );
+        }
+        this.assertConfirmedPayment(order, queryResult);
+        confirmedResult = queryResult;
+      }
+      await this.applyPaymentResult(order, confirmedResult);
       await this.prisma.paymentCallbackEvent.update({
         where: { channelId_eventKey: { channelId, eventKey } },
         data: { processed: true, processedAt: new Date(), errorMessage: null },

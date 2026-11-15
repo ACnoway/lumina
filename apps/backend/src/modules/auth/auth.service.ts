@@ -236,29 +236,32 @@ export class AuthService {
     if (data.password !== data.confirmPassword) throw new BadRequestException('两次输入的密码不一致');
     const email = data.email?.trim() ? this.getEmailTarget(data.email) : undefined;
     const phone = data.phone?.trim() ? normalizePhone(data.phone) : undefined;
-    if (!email && !phone) throw new BadRequestException('邮箱和手机号至少填写一种');
-    if (phone && !isValidPhone(phone)) throw new BadRequestException('请输入有效的手机号');
     const method = data.verificationMethod ?? (email ? 'email' : 'sms');
+    let verifiedEmail: string | undefined;
+    let verifiedPhone: string | undefined;
     if (method === 'email') {
       if (!email) throw new BadRequestException('邮箱注册需要填写邮箱');
       await this.verifyCode(getEmailCodeKey(email, 'register'), data.code);
+      verifiedEmail = email;
     } else {
       if (!phone) throw new BadRequestException('短信注册需要填写手机号');
+      if (!isValidPhone(phone)) throw new BadRequestException('请输入有效的手机号');
       await this.verifySmsCode(phone, data.code, 'register');
+      verifiedPhone = phone;
     }
 
     const [existingEmail, existingPhone] = await Promise.all([
-      email ? this.usersService.findByEmail(email) : Promise.resolve(null),
-      phone ? this.usersService.findByPhone(phone) : Promise.resolve(null),
+      verifiedEmail ? this.usersService.findByEmail(verifiedEmail) : Promise.resolve(null),
+      verifiedPhone ? this.usersService.findByPhone(verifiedPhone) : Promise.resolve(null),
     ]);
     if (existingEmail || existingPhone) throw new ConflictException('邮箱或手机号已注册，请直接登录');
 
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
     try {
       const user = await this.usersService.create({
-        email,
-        phone,
-        phoneVerifiedAt: method === 'sms' ? new Date() : undefined,
+        email: verifiedEmail,
+        phone: verifiedPhone,
+        phoneVerifiedAt: verifiedPhone ? new Date() : undefined,
         nickname: data.nickname?.trim() || undefined,
         password: passwordHash,
       });

@@ -247,7 +247,11 @@ export class ChatService {
   async getContextUsage(userId: string, sessionId: string | null, modelName: string) {
     if (sessionId) await this.getSession(userId, sessionId);
     const platformModel = await this.getChatPlatformModel(modelName);
-    const resolved = await this.providersService.resolveUpstream(modelName);
+    // This endpoint only estimates the context window. Routing an upstream here
+    // consumes the same provider rate-limit budget as an actual generation.
+    const upstreamModel = platformModel.upstreamModels.find(
+      (candidate) => candidate.provider.isActive,
+    );
     let sessionState: { contextSummary: string | null } | null = null;
     let messages: Awaited<ReturnType<ChatService['getContextMessages']>> = [];
     let compactedMessageCount = 0;
@@ -263,7 +267,7 @@ export class ChatService {
     }
 
     const contextWindowTokens = this.getContextWindowTokens(platformModel);
-    const reservedOutputTokens = this.getOutputTokenLimit(platformModel, resolved.upstreamModel);
+    const reservedOutputTokens = this.getOutputTokenLimit(platformModel, upstreamModel ?? {});
     const inputBudgetTokens = Math.max(1, contextWindowTokens - reservedOutputTokens);
     const summary = this.renderContextSummary(sessionState?.contextSummary);
     const selection = selectContextMessages(summary, messages, inputBudgetTokens);

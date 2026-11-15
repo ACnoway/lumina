@@ -68,6 +68,19 @@ describe('EpayPaymentAdapter', () => {
     jest.restoreAllMocks();
   });
 
+  it('uses a fixed signed subject for legacy submit.php forms', async () => {
+    const result = await adapter.createPayment(
+      paymentContext,
+      paymentRequest(),
+      { ...config, createEndpoint: 'submit.php' },
+    );
+
+    expect(result.action).toMatchObject({ type: 'HTML_FORM' });
+    if (result.action.type !== 'HTML_FORM') throw new Error('expected a form action');
+    expect(result.action.html).toContain('value="Lumina 光子充值"');
+    expect(result.action.html).not.toContain('Test order');
+  });
+
   it('returns a QR action when the provider only returns QR content', async () => {
     jest.spyOn(axios, 'post').mockResolvedValue({
       data: {
@@ -90,10 +103,13 @@ describe('EpayPaymentAdapter', () => {
   it('verifies a V1 success notification', async () => {
     const payload: Record<string, string> = {
       money: '10.00',
+      name: 'Lumina 光子充值',
       out_trade_no: 'LM202609190000001234',
       pid: config.pid,
+      sign_type: 'MD5',
       trade_no: 'T202609190001',
       trade_status: 'TRADE_SUCCESS',
+      type: 'alipay',
     };
     const content = Object.keys(payload)
       .sort()
@@ -113,10 +129,64 @@ describe('EpayPaymentAdapter', () => {
     ).resolves.toMatchObject({
       orderNo: 'LM202609190000001234',
       providerTradeNo: 'T202609190001',
+      paymentMethod: PaymentMethod.ALIPAY,
       status: 'SUCCESS',
       amount: '10.00',
       signatureValid: true,
     });
+  });
+
+  it('rejects callback fields from another merchant even when their signature is valid', async () => {
+    const payload: Record<string, string> = {
+      money: '10.00',
+      name: 'Lumina 光子充值',
+      out_trade_no: 'LM202609190000001234',
+      pid: 'another-merchant',
+      sign_type: 'MD5',
+      trade_no: 'T202609190001',
+      trade_status: 'TRADE_SUCCESS',
+      type: 'alipay',
+    };
+    const content = Object.keys(payload)
+      .sort()
+      .map((key) => `${key}=${payload[key]}`)
+      .join('&');
+    payload.sign = createHash('md5').update(`${content}${config.key}`).digest('hex');
+
+    await expect(adapter.parseNotification({
+      headers: {},
+      rawBody: Buffer.from(new URLSearchParams(payload).toString()),
+      body: payload,
+    }, config)).rejects.toMatchObject({ code: 'SIGNATURE_INVALID' });
+  });
+
+  it('rejects ambiguous delimiter values and duplicate callback fields', async () => {
+    const ambiguousPayload: Record<string, string> = {
+      money: '10&money=0.01',
+      name: 'Lumina 光子充值',
+      out_trade_no: 'LM202609190000001234',
+      pid: config.pid,
+      sign_type: 'MD5',
+      trade_no: 'T202609190001',
+      trade_status: 'TRADE_SUCCESS',
+      type: 'alipay',
+    };
+    const content = Object.keys(ambiguousPayload)
+      .sort()
+      .map((key) => `${key}=${ambiguousPayload[key]}`)
+      .join('&');
+    ambiguousPayload.sign = createHash('md5').update(`${content}${config.key}`).digest('hex');
+    await expect(adapter.parseNotification({
+      headers: {},
+      rawBody: Buffer.from(new URLSearchParams(ambiguousPayload).toString()),
+      body: {},
+    }, config)).rejects.toMatchObject({ code: 'SIGNATURE_INVALID' });
+
+    await expect(adapter.parseNotification({
+      headers: {},
+      rawBody: Buffer.from('pid=10001&out_trade_no=LM202609190000001234&out_trade_no=LM202609190000009999&money=10.00&trade_status=TRADE_SUCCESS&sign=invalid'),
+      body: {},
+    }, config)).rejects.toMatchObject({ code: 'SIGNATURE_INVALID' });
   });
 
   it('rejects an invalid callback instead of silently trusting a follow-up query', async () => {
@@ -166,6 +236,28 @@ describe('EpayPaymentAdapter', () => {
 
     await expect(adapter.queryPayment({ orderNo: 'LM202609190000001236' }, config)).resolves.toMatchObject({
       status: 'PENDING',
+    });
+    jest.restoreAllMocks();
+  });
+
+  it('confirms Epay query success only for the requested merchant and order', async () => {
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        code: 1,
+        type: 'alipay',
+        pid: config.pid,
+        out_trade_no: 'LM202609190000001237',
+        status: 1,
+        trade_no: 'T202609190004',
+        money: '10.00',
+      },
+    } as never);
+
+    await expect(adapter.queryPayment({ orderNo: 'LM202609190000001237' }, config)).resolves.toMatchObject({
+      status: 'SUCCESS',
+      orderNo: 'LM202609190000001237',
+      merchantId: config.pid,
+      amount: '10.00',
     });
     jest.restoreAllMocks();
   });

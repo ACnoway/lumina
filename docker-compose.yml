@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lumina}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lumina_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-lumina}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -49,10 +49,10 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-lumina}:${POSTGRES_PASSWORD:-lumina_password}@postgres:5432/${POSTGRES_DB:-lumina}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lumina}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-lumina}?schema=public
       REDIS_URL: redis://redis:6379
       OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY: ${OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY:?OBJECT_STORAGE_CONFIG_ENCRYPTION_KEY must be set}
-      JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -61,7 +61,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-"Lumina <noreply@example.com>"}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change_this_password}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
       INITIAL_BALANCE: ${INITIAL_BALANCE:-10.00}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       PAYMENT_CONFIG_ENCRYPTION_KEY: ${PAYMENT_CONFIG_ENCRYPTION_KEY:?PAYMENT_CONFIG_ENCRYPTION_KEY must be set}

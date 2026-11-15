@@ -1,0 +1,11 @@
+# Optional TLS entry. Mount a certificate directory containing fullchain.pem
+# and privkey.pem, then start Compose with this file as an overlay.
+services:
+  nginx:
+    environment:
+      ENABLE_HTTPS: 'true'
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+    ports:
+      - '${HTTPS_PORT:-443}:443'
+    volumes:
+      - '${TLS_CERTIFICATE_DIR:?TLS_CERTIFICATE_DIR must point to the certificate directory}:/etc/nginx/certs:ro'

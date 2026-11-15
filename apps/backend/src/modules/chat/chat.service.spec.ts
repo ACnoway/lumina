@@ -39,6 +39,37 @@ function createService() {
 }
 
 describe('ChatService', () => {
+  it('estimates context usage from model metadata without routing an upstream', async () => {
+    const prisma = {
+      chatSession: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'session-1', userId: 'user-1', title: 'existing' }),
+      },
+      chatMessage: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    const providers = {
+      getPlatformModelByName: jest.fn().mockResolvedValue({
+        type: 'CHAT',
+        isActive: true,
+        contextWindowTokens: 4096,
+        maxTokens: 1500,
+        upstreamModels: [
+          { maxTokens: 2048, provider: { isActive: true } },
+        ],
+      }),
+      resolveUpstream: jest.fn(),
+    };
+    const service = new ChatService(prisma as any, {} as any, providers as any, {} as any, {} as any);
+
+    await expect(service.getContextUsage('user-1', 'session-1', 'chat')).resolves.toMatchObject({
+      contextWindowTokens: 4096,
+      reservedOutputTokens: 2048,
+    });
+    expect(providers.resolveUpstream).not.toHaveBeenCalled();
+  });
+
   it('reserves the upstream output limit and settles actual usage in per-million units', async () => {
     const userMessage = { id: 'message-1', role: 'USER', content: 'hi', attachments: [] };
     const prisma = {

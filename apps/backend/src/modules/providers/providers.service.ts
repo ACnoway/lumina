@@ -74,7 +74,7 @@ export class ProvidersService {
   /**
    * 按名称获取平台模型（含活跃的上游映射和供应商信息）
    */
-  async getPlatformModelByName(name: string): Promise<PlatformModel | null> {
+  async getPlatformModelByName(name: string) {
     return this.prisma.platformModel.findUnique({
       where: { name },
       include: {

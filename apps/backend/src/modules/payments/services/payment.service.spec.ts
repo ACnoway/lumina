@@ -589,4 +589,77 @@ describe('PaymentService', () => {
     }));
     expect(walletService.recharge).toHaveBeenCalledTimes(1);
   });
+
+  it('requires a matching server-side Epay query before crediting submit.php callbacks', async () => {
+    const { service, prisma, walletService, adapter, channels } = createService();
+    const order = makeOrder();
+    channels.getById.mockResolvedValue({
+      adapter,
+      config: { createEndpoint: 'submit.php', pid: '10001' },
+    });
+    adapter.parseNotification.mockResolvedValue({
+      eventId: 'submit-callback-event',
+      orderNo: order.orderNo,
+      providerTradeNo: 'T-submit',
+      paymentMethod: 'ALIPAY',
+      status: 'SUCCESS',
+      amount: '10.00',
+      currency: 'CNY',
+    });
+    adapter.queryPayment.mockResolvedValue({
+      status: 'SUCCESS',
+      orderNo: order.orderNo,
+      merchantId: '10001',
+      paymentMethod: 'ALIPAY',
+      providerTradeNo: 'T-submit',
+      amount: '10.00',
+      currency: 'CNY',
+    });
+    prisma.paymentCallbackEvent.findUnique.mockResolvedValue(null);
+    prisma.paymentOrder.findUnique.mockResolvedValue(order);
+    prisma.paymentOrder.updateMany.mockResolvedValue({ count: 1 });
+    walletService.recharge.mockResolvedValue({});
+
+    await expect(service.processNotification(order.channelId, {
+      headers: {},
+      rawBody: Buffer.from('submit-callback'),
+      body: {},
+      method: 'POST',
+    })).resolves.toEqual({ body: 'success' });
+
+    expect(adapter.queryPayment).toHaveBeenCalledWith({
+      orderNo: order.orderNo,
+      providerTradeNo: 'T-submit',
+    }, { createEndpoint: 'submit.php', pid: '10001' });
+    expect(walletService.recharge).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not credit a submit.php callback if server-side Epay query does not confirm payment', async () => {
+    const { service, prisma, walletService, adapter, channels } = createService();
+    const order = makeOrder();
+    channels.getById.mockResolvedValue({
+      adapter,
+      config: { createEndpoint: 'submit.php', pid: '10001' },
+    });
+    adapter.parseNotification.mockResolvedValue({
+      eventId: 'submit-unconfirmed-event',
+      orderNo: order.orderNo,
+      status: 'SUCCESS',
+      amount: '10.00',
+      currency: 'CNY',
+    });
+    adapter.queryPayment.mockResolvedValue({ status: 'PENDING', orderNo: order.orderNo, merchantId: '10001' });
+    prisma.paymentCallbackEvent.findUnique.mockResolvedValue(null);
+    prisma.paymentOrder.findUnique.mockResolvedValue(order);
+
+    await expect(service.processNotification(order.channelId, {
+      headers: {},
+      rawBody: Buffer.from('submit-unconfirmed'),
+      body: {},
+      method: 'POST',
+    })).resolves.toEqual({ body: 'fail' });
+
+    expect(walletService.recharge).not.toHaveBeenCalled();
+    expect(prisma.paymentOrder.updateMany).not.toHaveBeenCalled();
+  });
 });

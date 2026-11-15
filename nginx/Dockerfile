@@ -2,92 +2,10 @@
 
 FROM nginx:1.27-alpine
 
-# 配置直接编译进镜像，Compose 部署时无需挂载宿主机配置文件。
-COPY <<'EOF' /etc/nginx/conf.d/default.conf
-server {
-    listen 80;
-    server_name _;
-
-    # Swagger 的资源路径本身包含 /api/docs，不能走下面会去掉 /api/ 的通用规则。
-    location = /api/docs {
-        proxy_pass http://backend:3001/api/docs;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location ^~ /api/docs/ {
-        proxy_pass http://backend:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # SSE 必须直通后端，关闭缓存和缓冲，避免边缘代理把长连接误判为无响应。
-    location = /api/support/conversation/events {
-        proxy_pass http://backend:3001/support/conversation/events;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-
-    location = /api/support/admin/events {
-        proxy_pass http://backend:3001/support/admin/events;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-
-    location = /health {
-        proxy_pass http://backend:3001/health;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # /api/foo -> backend /foo，保持与 Nest 路由一致。
-    location /api/ {
-        client_max_body_size 22m;
-        proxy_pass http://backend:3001/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-
-    location / {
-        proxy_pass http://frontend:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
+RUN mkdir -p /etc/nginx/snippets
+COPY nginx/http.conf /etc/nginx/conf.d/default.conf
+COPY nginx/proxy-locations.conf /etc/nginx/snippets/lumina-proxy-locations.conf
+COPY nginx/https.conf /etc/nginx/https.conf
+COPY nginx/http-redirect.conf /etc/nginx/http-redirect.conf
+COPY nginx/10-enable-https.sh /docker-entrypoint.d/10-enable-https.sh
+RUN chmod +x /docker-entrypoint.d/10-enable-https.sh

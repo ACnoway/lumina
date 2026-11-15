@@ -24,7 +24,7 @@ export class UsersService implements OnModuleInit {
   ) {}
 
   /**
-   * 初始化配置中的管理员账户。
+   * 若配置邮箱尚无账号，则初始化管理员账户；已有普通账号不会自动提权。
    *
    * 管理端仍可使用邮箱验证码登录，ADMIN_PASSWORD 作为账户初始化时的
    * 密码哈希同时支持密码登录。
@@ -53,12 +53,10 @@ export class UsersService implements OnModuleInit {
       return;
     }
 
-    if (existing.role === UserRole.USER) {
-      await this.prisma.user.update({
-        where: { id: existing.id },
-        data: { role: UserRole.ADMIN },
-      });
-      this.logger.log(`管理员账户角色已修复: ${adminEmail}`);
+    if (existing.role !== UserRole.ADMIN) {
+      this.logger.warn(
+        `ADMIN_EMAIL 已被普通账号占用，未自动提升权限；请通过受控的 admin:promote 命令处理: ${adminEmail}`,
+      );
     }
   }
 

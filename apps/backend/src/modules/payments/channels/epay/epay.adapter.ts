@@ -31,6 +31,23 @@ export interface EpayConfig {
   timeout?: number;
 }
 
+const LUMINA_RECHARGE_NAME = 'Lumina 光子充值';
+const NOTIFICATION_FIELDS = new Set([
+  'pid',
+  'type',
+  'trade_no',
+  'out_trade_no',
+  'notify_type',
+  'trade_status',
+  'trade_status_desc',
+  'name',
+  'money',
+  'param',
+  'buyer',
+  'sign',
+  'sign_type',
+]);
+
 @Injectable()
 export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   readonly type = PaymentChannelType.EPAY;
@@ -87,7 +104,9 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       out_trade_no: context.orderNo,
       notify_url: context.notifyUrl,
       return_url: context.returnUrl,
-      name: request.subject,
+      // This value is signed and returned to the browser for submit.php forms.
+      // Never include a user-controlled subject in the signed payload.
+      name: LUMINA_RECHARGE_NAME,
       money: request.amount.toFixed(2),
       ...(context.clientIp ? { clientip: context.clientIp } : {}),
     };
@@ -161,6 +180,7 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   ): Promise<PaymentNotification> {
     await this.validateConfig(config);
     const payload = this.bodyAsRecord(request.body, request.rawBody);
+    this.validateNotificationPayload(payload, config);
     const signature = String(payload.sign ?? '');
     const values = { ...payload };
     delete values.sign;
@@ -170,10 +190,15 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调签名无效');
     }
     const status = String(payload.trade_status ?? '').toUpperCase();
+    const orderNo = String(payload.out_trade_no);
+    const providerTradeNo = this.optionalString(payload.trade_no);
     return {
-      eventId: String(payload.trade_no ?? `${payload.out_trade_no}:${status}`),
-      orderNo: String(payload.out_trade_no ?? ''),
-      providerTradeNo: this.optionalString(payload.trade_no),
+      eventId: String(providerTradeNo ?? `${orderNo}:${status}`),
+      orderNo,
+      providerTradeNo,
+      paymentMethod: String(payload.type).toLowerCase() === 'alipay'
+        ? PaymentMethod.ALIPAY
+        : PaymentMethod.WECHAT,
       status:
         status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED'
           ? 'SUCCESS'
@@ -220,7 +245,23 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
       // remain PENDING (fail closed).
       const rawStatus = data.trade_status ?? data.status;
       const status = String(rawStatus ?? '').toUpperCase();
-      const isSuccess = status === 'TRADE_SUCCESS' || status === 'TRADE_FINISHED' || status === 'SUCCESS';
+      const responseOrderNo = this.firstString(data, ['out_trade_no']);
+      const merchantId = this.firstString(data, ['pid']);
+      const rawPaymentMethod = this.firstString(data, ['type'])?.toLowerCase();
+      const paymentMethod = rawPaymentMethod === 'alipay'
+        ? PaymentMethod.ALIPAY
+        : rawPaymentMethod === 'wxpay'
+          ? PaymentMethod.WECHAT
+          : undefined;
+      const matchesRequestedMerchantOrder = responseOrderNo === request.orderNo
+        && merchantId === config.pid.trim()
+        && paymentMethod !== undefined;
+      const isSuccess = matchesRequestedMerchantOrder && (
+        status === 'TRADE_SUCCESS'
+        || status === 'TRADE_FINISHED'
+        || status === 'SUCCESS'
+        || status === '1'
+      );
       return {
         status:
           isSuccess
@@ -229,6 +270,9 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
               ? 'CLOSED'
               : 'PENDING',
         providerTradeNo: this.firstString(data, ['trade_no']),
+        orderNo: responseOrderNo,
+        merchantId,
+        paymentMethod,
         amount: this.firstString(data, ['money', 'amount']),
         currency: 'CNY',
       };
@@ -262,9 +306,55 @@ export class EpayPaymentAdapter implements PaymentChannelAdapter<EpayConfig> {
   }
 
   private bodyAsRecord(body: unknown, raw: Buffer): Record<string, unknown> {
+    if (raw.length > 0) {
+      const params = new URLSearchParams(raw.toString('utf8'));
+      const values: Record<string, string> = {};
+      for (const [name, value] of params.entries()) {
+        if (Object.prototype.hasOwnProperty.call(values, name)) {
+          throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调包含重复字段');
+        }
+        values[name] = value;
+      }
+      return values;
+    }
     if (body && typeof body === 'object' && !Array.isArray(body))
       return body as Record<string, unknown>;
-    return Object.fromEntries(new URLSearchParams(raw.toString('utf8')).entries());
+    return {};
+  }
+
+  private validateNotificationPayload(payload: Record<string, unknown>, config: EpayConfig): void {
+    for (const [name, rawValue] of Object.entries(payload)) {
+      if (!NOTIFICATION_FIELDS.has(name) || typeof rawValue !== 'string') {
+        throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调字段不合法');
+      }
+      if (/[&=\r\n]/.test(rawValue)) {
+        throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调字段包含非法分隔符');
+      }
+    }
+
+    const pid = this.optionalString(payload.pid)?.trim();
+    const orderNo = this.optionalString(payload.out_trade_no)?.trim();
+    const amount = this.optionalString(payload.money)?.trim();
+    const status = this.optionalString(payload.trade_status)?.trim().toUpperCase();
+    const signType = this.optionalString(payload.sign_type)?.trim().toUpperCase();
+    const tradeNo = this.optionalString(payload.trade_no)?.trim();
+    const paymentType = this.optionalString(payload.type)?.trim().toLowerCase();
+    const name = this.optionalString(payload.name)?.trim();
+    if (
+      pid !== config.pid.trim()
+      || !orderNo
+      || !/^[A-Za-z0-9_-]{1,128}$/.test(orderNo)
+      || !tradeNo
+      || !/^[A-Za-z0-9_-]{1,128}$/.test(tradeNo)
+      || !amount
+      || !/^\d+(?:\.\d{1,2})?$/.test(amount)
+      || !['TRADE_SUCCESS', 'TRADE_FINISHED', 'TRADE_CLOSED', 'WAIT_BUYER_PAY'].includes(status ?? '')
+      || signType !== (config.signType ?? 'MD5').toUpperCase()
+      || !['alipay', 'wxpay'].includes(paymentType ?? '')
+      || !name
+    ) {
+      throw new PaymentChannelError(PaymentErrorCode.SIGNATURE_INVALID, '易支付回调商户或订单字段无效');
+    }
   }
 
   private parseResponse(value: unknown): Record<string, unknown> {

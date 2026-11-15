@@ -111,6 +111,8 @@ function createService(existingUser: User | null = null) {
     create: jest.fn().mockImplementation(async (data: Partial<User>) =>
       createUser({
         email: data.email,
+        phone: data.phone,
+        phoneVerifiedAt: data.phoneVerifiedAt,
         nickname: data.nickname ?? null,
         password: data.password ?? null,
       }),
@@ -293,6 +295,48 @@ describe('AuthService login and registration', () => {
     const password = (store.users.create as jest.Mock).mock.calls[0][0].password;
     expect(password).not.toBe('Password1');
     await expect(bcrypt.compare('Password1', password)).resolves.toBe(true);
+  });
+
+  it('does not attach an unverified email during SMS registration', async () => {
+    const store = createService();
+    await store.redis.set('auth:sms:code:register:+8613800000000', '123456', 300);
+
+    await store.service.register({
+      email: 'victim@example.com',
+      phone: '13800000000',
+      verificationMethod: 'sms',
+      code: '123456',
+      password: 'Password1',
+      confirmPassword: 'Password1',
+    });
+
+    expect(store.users.create).toHaveBeenCalledWith(expect.objectContaining({
+      email: undefined,
+      phone: '+8613800000000',
+      phoneVerifiedAt: expect.any(Date),
+    }));
+    expect(store.users.findByEmail).not.toHaveBeenCalled();
+  });
+
+  it('does not attach an unverified phone during email registration', async () => {
+    const store = createService();
+    await store.redis.set('auth:code:register:user@example.com', '123456', 300);
+
+    await store.service.register({
+      email: 'user@example.com',
+      phone: '13800000000',
+      verificationMethod: 'email',
+      code: '123456',
+      password: 'Password1',
+      confirmPassword: 'Password1',
+    });
+
+    expect(store.users.create).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'user@example.com',
+      phone: undefined,
+      phoneVerifiedAt: undefined,
+    }));
+    expect(store.users.findByPhone).not.toHaveBeenCalled();
   });
 
   it('rejects registration when passwords do not match', async () => {

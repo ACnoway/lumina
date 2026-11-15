@@ -14,6 +14,7 @@ lumina/
 ├── nginx/
 │   └── Dockerfile        # 内嵌单域名入口路由的 Nginx 镜像
 ├── docker-compose.yml       # Docker 部署：全部容器化，仅暴露 Nginx 入口端口
+├── docker-compose.https.yml # 可选的内置 HTTPS 入口覆盖配置
 ├── docker-compose.dev.yml   # 本地开发：仅基础设施，暴露所有端口
 ├── turbo.json            # Turborepo 任务编排
 ├── pnpm-workspace.yaml   # pnpm workspace
@@ -24,7 +25,7 @@ lumina/
 
 - **后端**：NestJS + TypeScript + Prisma + PostgreSQL + Redis + S3 兼容对象存储
 - **前端**：Next.js (App Router) + TypeScript + Tailwind CSS
-- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包、模型/供应商、支付渠道、短信渠道和客服队列管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；服务启动时按 `ADMIN_EMAIL` 自动初始化管理员账户
+- **管理端**：`/admin` 已接入管理员 API、RBAC、审计日志、用户/钱包、模型/供应商、支付渠道、短信渠道和客服队列管理；可从已有 `CHAT` 平台模型中选择提示词优化模型；首次启动时仅在 `ADMIN_EMAIL` 尚无账号时创建管理员，不会自动提升已存在的普通账号
 - **平台货币**：钱包、账本、模型价格和所有消费统一使用光子（符号 `✦`）；后台汇率 `1 人民币 = N 光子` 只用于充值换算，消费不套用汇率
 - **包管理**：pnpm + Turborepo
 - **部署**：Docker Compose 全容器化
@@ -38,11 +39,12 @@ lumina/
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
-# 编辑 .env，修改密码、JWT_SECRET、SMTP、SMS_CONFIG_ENCRYPTION_KEY 等
+# 编辑 .env，设置独立随机的 JWT_SECRET、支付/短信/对象存储加密密钥，以及数据库和管理员密码。
+# 可用 openssl rand -hex 32 分别生成 JWT_SECRET 和三个配置加密密钥；生产环境不能保留空值或示例值。
 # 启用支付时必须配置 PAYMENT_CONFIG_ENCRYPTION_KEY 和公网 PAYMENT_NOTIFY_BASE_URL；使用短信时必须配置独立的 SMS_CONFIG_ENCRYPTION_KEY。
 # 若统一入口由 Nginx 代理 /api，回调基础地址应包含 /api，例如 https://example.com/api。
 
-# 2. 构建并启动所有服务
+# 2. 构建并启动所有服务（默认 HTTP 入口）
 pnpm docker:up
 # 或
 docker-compose up -d --build
@@ -60,6 +62,8 @@ docker exec -w /app/apps/backend lumina-backend pnpm exec prisma migrate status
 
 **端口暴露说明：**
 - 默认只暴露 Nginx 的 `3000` 端口
+- HTTP 可继续由你自己的反向代理终止 TLS；使用外部反代时，应限制源站入口只能由受信代理访问
+- 也可选用仓库内置 TLS：将 `fullchain.pem` 和 `privkey.pem` 放入 `.env` 的 `TLS_CERTIFICATE_DIR` 指向目录，再以 `docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build` 启动。HTTPS 默认映射宿主机 `443` 端口；启用后 HTTP 会重定向到 HTTPS。可用 `HTTPS_PORT` 修改宿主机端口
 - `/api/` 转发到后端，其他路径转发到前端；图片通过后台配置的 S3 兼容服务预签名访问
 - 后端 API、PostgreSQL、Redis、前端都不单独对外暴露
 - 登录 `/admin` 的“模型与供应商”配置页，在“对象存储（S3 兼容）”中填写 Endpoint、对外 Endpoint、Region、Bucket、Path-style 和密钥；保存前会验证已有 Bucket，不会自动创建
@@ -136,7 +140,9 @@ AI 聊天输入框支持 JPEG、PNG 和 WebP 图片，单张不超过 5 MiB，�
 
 浏览器和公网代理使用 `POST /api/auth/register/send-code`，JSON 请求体为 `{"phone":"13800138000"}`；直接访问后端时去掉 `/api`。浏览器地址栏发出的 GET 返回 404 属于预期。供应商发送失败返回 503（`SMS_CONFIG_INVALID` 或 `SMS_UNAVAILABLE`），手机号格式和限流校验仍返回 400。创蓝 `201124`、模板配置与隔离测试方法见 [短信排障文档](docs/sms-chuanglan-troubleshooting.md)。
 
-老用户迁移由 `20261009000000_add_phone_sms_auth` 完成：原有邮箱值保留，`email` 改为可空并新增可空唯一 `phone` 与 `phoneVerifiedAt`，管理员邮箱初始化逻辑不变。部署时先执行 `prisma migrate deploy`，再启动应用。
+老用户迁移由 `20261009000000_add_phone_sms_auth` 完成：原有邮箱值保留，`email` 改为可空并新增可空唯一 `phone` 与 `phoneVerifiedAt`。注册只绑定本次已验证的邮箱或手机号。首次启动时，如果 `ADMIN_EMAIL` 尚无账号且配置了 `ADMIN_PASSWORD`，服务会创建管理员；已有普通用户不会因邮箱匹配而自动提权。需提升已有账号时，在运行中的 backend 容器内执行 `docker exec -w /app/apps/backend lumina-backend pnpm admin:promote -- admin@example.com`，并先确认目标邮箱归属。部署时先执行 `prisma migrate deploy`，再启动应用。
+
+生产密钥要求、历史账号检查和加密配置轮换步骤见[安全配置与轮换](docs/security-operations.md)。
 
 ### 方式二：本地开发
 

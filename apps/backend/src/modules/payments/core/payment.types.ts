@@ -56,6 +56,7 @@ export interface PaymentNotification {
   eventId: string;
   orderNo: string;
   providerTradeNo?: string;
+  paymentMethod?: PaymentMethod;
   status: PaymentNotificationStatus;
   amount?: string;
   currency?: string;
@@ -81,6 +82,9 @@ export interface PaymentQueryRequest {
 export interface PaymentQueryResult {
   status: PaymentNotificationStatus;
   providerTradeNo?: string;
+  orderNo?: string;
+  merchantId?: string;
+  paymentMethod?: PaymentMethod;
   amount?: string;
   currency?: string;
   paidAt?: Date;
